@@ -1,0 +1,89 @@
+{
+  "name": "2026-08-03 X 转帖学习",
+  "notes": [
+    {
+      "id": "x-repost-2084040134266404999",
+      "title": "LoopX：长程 Agent 的外置状态内核",
+      "createdAt": "2026-08-03T06:14:22+08:00",
+      "tags": [
+        "长程 Agent",
+        "状态管理",
+        "LoopX",
+        "监督与规划"
+      ],
+      "source": "https://x.com/yifanxu_ephai/status/2084040134266404999",
+      "content": "来自 @yifanxu_ephai 对 @huangruiteng/loopx 的推荐转帖。\n\n核心观点：LLM 上下文有限，超长程 Agent（200+ 小时）需要外置状态控制面，而不是只堆 prompt。LoopX 把 Goal / Todo·Gate / Evidence / Authority / Handoff / Quota 等投影成可执行控制面，像「Agent 专属 Kanban」：无人干预时跑得稳、有产出；有人干预时吸收反馈后 resume。\n\n真实 trajectory 跨 220.7 / 272.9 小时，覆盖等待、人工决策、writeback 与恢复。场景包括 auto PR 修复、AutoML 实验、coredump 修复与能力自进化。\n\n今天的练习：为自己的一个长任务画出 Goal、Gate（必须人拍板的点）、Evidence、Handoff 四张卡片，标出「上下文之外」必须外置的状态。\n\n仓库：https://github.com/huangruiteng/loopx"
+    },
+    {
+      "id": "x-repost-2083917781167456274",
+      "title": "Maka：Harness 评测要看方法和口径",
+      "createdAt": "2026-08-02T22:08:11+08:00",
+      "tags": [
+        "Agent Harness",
+        "评测",
+        "Benchmark",
+        "DeepSeek",
+        "Maka"
+      ],
+      "source": "https://x.com/AstroHanRay/status/2083917781167456274",
+      "content": "来自 @AstroHanRay 的转帖：当前最能榨出 DeepSeek V4 Flash 潜力的 harness 可能是 Maka。\n\n头对头数字：整体 68.5%，领先 Opencode 13%；未超时任务 85.3%，高于官方 DeepSeek Harness 的 82.7%。重点不是单一总分，而是超时/未超时拆分、逐题结果、方法与评测口径公开。\n\n今天的练习：设计一个最小 harness benchmark——任务集、超时规则、成功标准、总分、失败样本字段各写一条，并说明为何不能只看总分。\n\n原帖：https://x.com/AstroHanRay/status/2083917781167456274"
+    },
+    {
+      "id": "x-repost-2083896092044001507",
+      "title": "用 GitHub Issues 驱动 Agent 并行开发",
+      "createdAt": "2026-08-02T20:41:59+08:00",
+      "tags": [
+        "Agent Harness",
+        "并行开发",
+        "Git Worktree",
+        "GitHub Issues"
+      ],
+      "source": "https://x.com/LinearUncle/status/2083896092044001507",
+      "content": "来自 @LinearUncle 的转帖：一种用 GitHub Issues 驱动的 AI 并行开发方式。\n\n1) 先写 Issue 描述功能（手写，或用类似 Matt Pocock 的 skills 批量生成）\n2) 在 harness 里用 GitHub CLI 拉 issue 列表，每个 issue 开一个 thread（会话 + worktree），自动在不同分支上同时开发\n\n亲测 Codex、Herdr（/herdr skill）可用；Herdr 更简单。\n\n今天的练习：为一个小功能写 3 个边界清晰、互不抢同一文件的 Issue，并验证并行 worktree 之间没有共享工作区冲突。"
+    },
+    {
+      "id": "x-repost-2083822324697235928",
+      "title": "reverse-skill：把逆向经验压成可加载 Skill",
+      "createdAt": "2026-08-02T15:48:52+08:00",
+      "tags": [
+        "Agent Skill",
+        "逆向工程",
+        "安全研究",
+        "经验压缩"
+      ],
+      "source": "https://x.com/Suu766/status/2083822324697235928",
+      "content": "来自 @Suu766 的转帖：逆向本需多年经验积累，现被做成 reverse-skill，可装进 Codex / Cursor / Claude Code。面对 APK、网页代码、固件时，AI 会判断先看哪里、用什么工具、下一步怎么分析——把安全圈吃经验的工作压缩成可加载技能包。\n\n今天的练习：选一个你熟悉的「经验密集型」流程（调试、评测、部署、论文精读），写出 Skill 的：触发条件、工具清单、决策树前 5 步、禁止事项。\n\n仓库：https://github.com/zhaoxuya520/reverse-skill"
+    },
+    {
+      "id": "x-repost-2083707136165687514",
+      "title": "video-shotcraft：Agent 做产品视频先选对镜头",
+      "createdAt": "2026-08-02T08:11:09+08:00",
+      "tags": [
+        "视频工作流",
+        "Remotion",
+        "镜头设计",
+        "逐帧验收"
+      ],
+      "source": "https://x.com/mnmn94253156337/status/2083707136165687514",
+      "content": "来自 @mnmn94253156337 的转帖：让 Agent 做产品视频，难点不只是写 Remotion，而是选对镜头。\n\nvideo-shotcraft 提供 104 张镜头配方、161 种动效与样片，串起真实页面采集、动画实现、声音设计和逐帧终检；成片即该方法的演示。\n\n今天的练习：为一个功能写 6 个镜头卡，每张写清目标、运动、声音、验收条件；先定镜头再写动画。\n\n仓库：https://github.com/Vincentwei1021/video-shotcraft"
+    },
+    {
+      "id": "x-repost-2083519855203078320",
+      "title": "DeepSeek Harness 内测：用代表作说话",
+      "createdAt": "2026-08-01T19:46:58+08:00",
+      "tags": [
+        "Agent Harness",
+        "DeepSeek",
+        "开源",
+        "开发者反馈"
+      ],
+      "source": "https://x.com/tianyi/status/2083519855203078320",
+      "content": "来自 @tianyi（DeepSeek Harness Team）的转帖：Agent Harness 相关开源开发者可回复/私信报名内测，需附 GitHub id 与开源代表作。\n\nHarness 价值最终要通过真实开发者和开源项目验证。报名材料应能说明：你做的是 runtime、编排、记忆、工具层还是垂直应用；代表任务、失败案例与资源消耗比 star 更有用。\n\n今天的练习：用 5 行写清自己的 harness 定位 + 一个可点击的代表作 + 一个失败案例字段模板。\n\n原帖：https://x.com/tianyi/status/2083519855203078320"
+    }
+  ],
+  "meta": {
+    "x_account": "MeowTsutaki1",
+    "scraped_at": "2026-08-03",
+    "note": "Visible reposts on profile timeline at scrape time; not full history."
+  }
+}
