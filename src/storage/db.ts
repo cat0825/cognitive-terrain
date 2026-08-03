@@ -12,11 +12,23 @@ interface CognitiveTerrainDB extends DBSchema {
 let databasePromise: Promise<IDBPDatabase<CognitiveTerrainDB>> | undefined
 
 export function getDatabase(): Promise<IDBPDatabase<CognitiveTerrainDB>> {
-  databasePromise ??= openDB<CognitiveTerrainDB>('cognitive-terrain', 1, {
-    upgrade(database) {
-      const store = database.createObjectStore('projects', { keyPath: 'id' })
-      store.createIndex('by-updated-at', 'updatedAt')
+  databasePromise ??= openDB<CognitiveTerrainDB>('cognitive-terrain', 2, {
+    upgrade(database, oldVersion) {
+      if (oldVersion < 1) {
+        const store = database.createObjectStore('projects', { keyPath: 'id' })
+        store.createIndex('by-updated-at', 'updatedAt')
+      }
     },
   })
   return databasePromise
+}
+
+export function migrateProject(project: TerrainProject): TerrainProject {
+  if (project.schemaVersion >= 2) return project
+  return {
+    ...project,
+    schemaVersion: 2,
+    embeddingMode: 'fallback',
+    noteNeighbors: [],
+  }
 }

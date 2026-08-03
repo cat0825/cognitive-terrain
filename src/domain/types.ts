@@ -38,18 +38,20 @@ export interface TerrainPeak {
 }
 
 export interface TerrainProject {
-  schemaVersion: 1
+  schemaVersion: 2
   id: string
   name: string
   createdAt: string
   updatedAt: string
   timeZone: string
   modelId: string
+  embeddingMode: 'semantic' | 'fallback' | 'demo'
   sourceDigest: string
   gridSize: number
   notes: TerrainNote[]
   snapshots: TerrainSnapshot[]
   peaks: TerrainPeak[]
+  noteNeighbors: string[][]
 }
 
 export interface AnalysisOptions {

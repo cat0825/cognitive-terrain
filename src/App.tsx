@@ -1,5 +1,5 @@
 import { AlertCircle, LoaderCircle, X } from 'lucide-react'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { visibleNotesFor } from './domain/project-view'
 import { downloadProjectBundle, exportTerrainPng } from './export/project-files'
@@ -25,6 +25,7 @@ function App() {
   const isAnalyzing = useAppStore((state) => state.isAnalyzing)
   const progress = useAppStore((state) => state.progress)
   const error = useAppStore((state) => state.error)
+  const lastAnalysis = useAppStore((state) => state.lastAnalysis)
   const initialize = useAppStore((state) => state.initialize)
   const selectNote = useAppStore((state) => state.selectNote)
   const setImportOpen = useAppStore((state) => state.setImportOpen)
@@ -47,6 +48,18 @@ function App() {
   )
   const selectedNote = project.notes.find((note) => note.id === selectedNoteId)
   const progressValue = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
+  const [analysisToast, setAnalysisToast] = useState<typeof lastAnalysis>(null)
+  const toastTimer = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!lastAnalysis) return
+    setAnalysisToast(lastAnalysis)
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setAnalysisToast(null), 6000)
+    return () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    }
+  }, [lastAnalysis])
 
   const exportImage = async () => {
     const root = document.getElementById('terrain-export-source')
@@ -98,6 +111,17 @@ function App() {
               </div>
             </div>
             <button type="button" onClick={cancelAnalysis}>取消</button>
+          </div>
+        )}
+        {analysisToast && (
+          <div className="analysis-toast" role="status">
+            <strong>本地分析完成</strong>
+            <span>
+              {analysisToast.embeddingMode === 'semantic' ? '语义模式' : '降级模式'}
+              {analysisToast.embeddingMode === 'fallback' && '（模型不可用，使用确定性向量）'}
+               · {analysisToast.device} · {analysisToast.elapsedMs / 1000}s
+            </span>
+            <span className="analysis-toast-model">{analysisToast.modelId}</span>
           </div>
         )}
         {error && (

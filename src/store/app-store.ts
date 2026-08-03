@@ -21,6 +21,7 @@ interface AppState {
   error: string | null
   cameraRevision: number
   cameraScale: number
+  lastAnalysis: { modelId: string; embeddingMode: 'semantic' | 'fallback'; device: string; elapsedMs: number } | null
   initialize: () => Promise<void>
   selectNote: (id: string | null) => void
   setSearch: (search: string) => void
@@ -67,6 +68,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   cameraRevision: 0,
   cameraScale: 192,
+  lastAnalysis: null,
   initialize: async () => {
     const lastProjectId = localStorage.getItem('cognitive-terrain:last-project')
     if (!lastProjectId) return
@@ -108,6 +110,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: '没有可分析的笔记' })
       return
     }
+    const startedAt = performance.now()
     activeAnalysis?.cancel()
     set({
       isAnalyzing: true,
@@ -118,6 +121,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     activeAnalysis = runAnalysis(name, notes, options, (progress) => set({ progress }))
     try {
       const project = await activeAnalysis.promise
+      const embeddingMode: 'semantic' | 'fallback' =
+        project.embeddingMode === 'semantic' ? 'semantic' : 'fallback'
+      set({
+        lastAnalysis: {
+          modelId: project.modelId,
+          embeddingMode,
+          device: options.embeddingStrategy === 'deterministic' ? 'local' : 'webgpu/wasm',
+          elapsedMs: Math.round(performance.now() - startedAt),
+        },
+      })
       await get().replaceProject(project)
       set({ isAnalyzing: false, progress: null })
     } catch (error) {
@@ -130,8 +143,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeAnalysis = null
     }
   },
-  loadStudyPack: () =>
-    get().startAnalysis(TODAY_STUDY_PACK_NAME, todayStudyPack, { embeddingStrategy: 'deterministic' }),
+  loadStudyPack: () => {
+    const forced = typeof localStorage !== 'undefined' ? localStorage.getItem('cognitive-terrain:embedding') : null
+    const options =
+      forced === 'deterministic' ? { embeddingStrategy: 'deterministic' as const } : {}
+    return get().startAnalysis(TODAY_STUDY_PACK_NAME, todayStudyPack, options)
+  },
   cancelAnalysis: () => {
     activeAnalysis?.cancel()
     activeAnalysis = null

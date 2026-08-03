@@ -1,5 +1,6 @@
 import type { TerrainNote, TerrainProject } from './types'
 import { buildTerrainData } from '../pipeline/terrain'
+import { computeNeighbors } from '../pipeline/neighbors'
 
 interface DemoTopic {
   key: string
@@ -308,13 +309,14 @@ export function createDemoProject(): TerrainProject {
   const terrain = buildTerrainData(notes, 128, 'Asia/Shanghai', 0.052)
   const timestamp = '2025-12-31T20:00:00+08:00'
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'demo-ai-infra-terrain',
     name: 'AI Infra 知识地形',
     createdAt: timestamp,
     updatedAt: timestamp,
     timeZone: 'Asia/Shanghai',
     modelId: 'demo-ai-infra-layout-v1',
+    embeddingMode: 'demo',
     sourceDigest: `ai-infra-demo-${notes.length}`,
     gridSize: 128,
     notes,
@@ -329,6 +331,7 @@ export function createDemoProject(): TerrainProject {
         .filter((_, noteIndex) => noteIndex % topics.length === topicIndex)
         .map((note) => note.id),
     })),
+    noteNeighbors: computeNeighbors(notes, 6),
   }
 }
 
@@ -336,18 +339,20 @@ export function createProjectFromNotes(name: string, notes: TerrainNote[], model
   const terrain = buildTerrainData(notes)
   const timestamp = new Date().toISOString()
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: `project-${hash(`${name}-${timestamp}`)}`,
     name,
     createdAt: timestamp,
     updatedAt: timestamp,
     timeZone: 'Asia/Shanghai',
     modelId,
+    embeddingMode: modelId === 'deterministic-local-fallback' ? 'fallback' : 'semantic',
     sourceDigest: hash(notes.map((note) => note.fingerprint).join('|')),
     gridSize: Math.sqrt(terrain.snapshots[0]?.values.length ?? 128 * 128),
     notes,
     snapshots: terrain.snapshots,
     peaks: terrain.peaks,
+    noteNeighbors: computeNeighbors(notes, 6),
   }
 }
 

@@ -23,6 +23,9 @@ test('app loads the demo terrain and renders a canvas', async ({ page }) => {
 })
 
 test('imports a JSON study pack and generates terrain', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('cognitive-terrain:embedding', 'deterministic')
+  })
   await page.goto('/')
   await page.getByRole('button', { name: '打开项目菜单' }).click()
   await page.getByRole('button', { name: '加载今日学习' }).click()

@@ -3,13 +3,14 @@ import type { TerrainProject } from '../domain/types'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
 
 const projectBundleSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
   id: z.string(),
   name: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
   timeZone: z.string(),
   modelId: z.string(),
+  embeddingMode: z.enum(['semantic', 'fallback', 'demo']).optional(),
   sourceDigest: z.string(),
   gridSize: z.number().int().positive(),
   notes: z.array(
@@ -44,6 +45,7 @@ const projectBundleSchema = z.object({
       noteIds: z.array(z.string()),
     }),
   ),
+  noteNeighbors: z.array(z.array(z.string())).optional(),
 })
 
 export function downloadProjectBundle(project: TerrainProject): void {
@@ -60,13 +62,17 @@ export function downloadProjectBundle(project: TerrainProject): void {
 export async function parseProjectBundle(file: File): Promise<TerrainProject> {
   const value: unknown = JSON.parse(await file.text())
   const parsed = projectBundleSchema.parse(value)
-  return {
+  const migrated: TerrainProject = {
     ...parsed,
+    schemaVersion: 2,
+    embeddingMode: parsed.embeddingMode ?? 'fallback',
+    noteNeighbors: parsed.noteNeighbors ?? [],
     snapshots: parsed.snapshots.map((snapshot) => ({
       ...snapshot,
       values: new Float32Array(snapshot.values),
     })),
   }
+  return migrated
 }
 
 export async function exportTerrainPng(root: HTMLElement, projectName: string): Promise<void> {

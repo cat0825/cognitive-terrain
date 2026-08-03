@@ -1,5 +1,6 @@
 import { BookOpen, CalendarDays, ExternalLink, X } from 'lucide-react'
 import type { TerrainNote, TerrainProject } from '../domain/types'
+import { findNeighbors } from '../pipeline/neighbors'
 import { useAppStore } from '../store/app-store'
 
 interface NoteDetailProps {
@@ -18,7 +19,12 @@ export function NoteDetail({ project, note, visibleCount }: NoteDetailProps) {
     <aside className="note-detail">
       <div className="detail-grip" aria-hidden="true" />
       <header>
-        <span className="panel-kicker">{note ? 'SELECTED NOTE' : 'PROJECT OVERVIEW'}</span>
+        <span className="panel-kicker">
+          {note ? 'SELECTED NOTE' : 'PROJECT OVERVIEW'}
+          <span className={`mode-badge mode-badge--${project.embeddingMode}`}>
+            {embeddingModeLabel(project.embeddingMode)}
+          </span>
+        </span>
         <button
           type="button"
           className="icon-button"
@@ -37,6 +43,9 @@ export function NoteDetail({ project, note, visibleCount }: NoteDetailProps) {
 }
 
 function NoteContent({ note }: { note: TerrainNote }) {
+  const project = useAppStore((state) => state.project)
+  const selectNote = useAppStore((state) => state.selectNote)
+  const neighbors = findNeighbors(project, note.id, 6)
   return (
     <div className="note-content">
       <div className="note-meta">
@@ -58,6 +67,24 @@ function NoteContent({ note }: { note: TerrainNote }) {
           <span key={tag}>#{tag}</span>
         ))}
       </div>
+      {neighbors.length > 0 && (
+        <section className="neighbor-section">
+          <span className="panel-kicker">相关笔记</span>
+          <ul className="neighbor-list">
+            {neighbors.map((neighbor) => (
+              <li key={neighbor.id}>
+                <button
+                  type="button"
+                  onClick={() => selectNote(neighbor.id)}
+                >
+                  <strong>{neighbor.title}</strong>
+                  <small>{neighbor.tags.slice(0, 3).map((tag) => `#${tag}`).join(' ')}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {note.source?.startsWith('http') && (
         <a href={note.source} target="_blank" rel="noreferrer">
           打开来源
@@ -112,4 +139,10 @@ function formatDate(value: string): string {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((candidate) => candidate.type === type)?.value ?? ''
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`
+}
+
+function embeddingModeLabel(mode: TerrainProject['embeddingMode']): string {
+  if (mode === 'semantic') return '语义模式'
+  if (mode === 'fallback') return '降级模式'
+  return '演示数据'
 }
