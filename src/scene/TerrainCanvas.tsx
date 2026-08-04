@@ -1,13 +1,10 @@
-import { Canvas } from '@react-three/fiber'
-import { memo } from 'react'
-import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
+import { lazy, memo, Suspense, useEffect, useState } from 'react'
 import type { QualityLevel, TerrainNote, TerrainProject, ViewMode } from '../domain/types'
 import { interpolateSnapshots, mixHeightValues } from '../pipeline/terrain'
 import { Terrain2D } from '../fallback/Terrain2D'
 import { useAppStore } from '../store/app-store'
-import { TERRAIN_CAMERA_POSITION } from './terrain-config'
-import { TERRAIN_PREPARE_EXPORT_EVENT } from './terrain-events'
-import { TerrainScene } from './TerrainScene'
+
+const Terrain3D = lazy(() => import('./Terrain3D'))
 
 interface TerrainCanvasProps {
   project: TerrainProject
@@ -31,7 +28,14 @@ export const TerrainCanvas = memo(function TerrainCanvas({
   onSelectNote,
 }: TerrainCanvasProps) {
   const use2d = viewMode === '2d' || !supportsWebgl()
-  if (use2d) {
+  const [webglReady, setWebglReady] = useState(false)
+  useEffect(() => {
+    if (use2d) return
+    const timer = window.setTimeout(() => setWebglReady(true), 60)
+    return () => window.clearTimeout(timer)
+  }, [use2d])
+
+  if (use2d || !webglReady) {
     return (
       <AnimatedTerrain2D
         project={project}
@@ -42,30 +46,8 @@ export const TerrainCanvas = memo(function TerrainCanvas({
     )
   }
 
-  const dpr: number | [number, number] = quality === 'high' ? [1, 1.5] : quality === 'medium' ? [1, 1.25] : 1
   return (
-    <Canvas
-      dpr={dpr}
-      camera={{ position: TERRAIN_CAMERA_POSITION, fov: 34, near: 0.1, far: 40 }}
-      gl={{ antialias: quality === 'high', alpha: false, powerPreference: 'high-performance' }}
-      raycaster={{
-        params: {
-          Mesh: {},
-          Line: { threshold: 1 },
-          LOD: {},
-          Points: { threshold: 0.045 },
-          Sprite: {},
-        },
-      }}
-      onCreated={({ camera, gl, scene }) => {
-        gl.outputColorSpace = SRGBColorSpace
-        gl.toneMapping = ACESFilmicToneMapping
-        gl.toneMappingExposure = 1.08
-        gl.domElement.addEventListener(TERRAIN_PREPARE_EXPORT_EVENT, () => {
-          gl.render(scene, camera)
-        })
-      }}
-      onPointerMissed={() => onSelectNote(null)}
+    <Suspense
       fallback={
         <AnimatedTerrain2D
           project={project}
@@ -75,18 +57,16 @@ export const TerrainCanvas = memo(function TerrainCanvas({
         />
       }
     >
-      <TerrainScene
-        snapshots={project.snapshots}
-        gridSize={project.gridSize}
+      <Terrain3D
+        project={project}
         notes={notes}
-        peaks={project.peaks}
         selectedNoteId={selectedNoteId}
         quality={quality}
         cameraRevision={cameraRevision}
         cameraScale={cameraScale}
         onSelectNote={onSelectNote}
       />
-    </Canvas>
+    </Suspense>
   )
 })
 

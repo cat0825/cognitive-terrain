@@ -5,6 +5,8 @@ import { parseProjectBundle } from '../export/project-files'
 import { parseImportFiles } from '../import/parse'
 import { useAppStore } from '../store/app-store'
 
+type EmbeddingChoice = 'auto' | 'deterministic'
+
 export function ImportPanel() {
   const open = useAppStore((state) => state.importOpen)
   const setOpen = useAppStore((state) => state.setImportOpen)
@@ -13,6 +15,7 @@ export function ImportPanel() {
   const reportError = useAppStore((state) => state.reportError)
   const [parsed, setParsed] = useState<ParsedImport | null>(null)
   const [busy, setBusy] = useState(false)
+  const [choice, setChoice] = useState<EmbeddingChoice>('auto')
   const inputRef = useRef<HTMLInputElement>(null)
 
   if (!open) return null
@@ -96,11 +99,24 @@ export function ImportPanel() {
               type="button"
               className="primary-button"
               disabled={!parsed.notes.length}
-              onClick={() => void startAnalysis(parsed.name, parsed.notes)}
+              onClick={() =>
+                void startAnalysis(
+                  parsed.name,
+                  parsed.notes,
+                  choice === 'deterministic' ? { embeddingStrategy: 'deterministic' } : undefined,
+                )
+              }
             >
               <FolderOpen size={16} />
               生成地形
             </button>
+            <label className="embedding-choice">
+              <span>向量模式</span>
+              <select value={choice} onChange={(event) => setChoice(event.target.value as EmbeddingChoice)}>
+                <option value="auto">本地模型（语义，需下载）</option>
+                <option value="deterministic">快速模式（离线）</option>
+              </select>
+            </label>
           </div>
         )}
       </section>

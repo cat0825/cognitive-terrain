@@ -69,6 +69,19 @@ async function embedWithTransformers(
   const extractor = await pipeline('feature-extraction', modelId, {
     device,
     dtype: 'q8',
+    progress_callback: (progress) => {
+      if (progress.status === 'initiate' || progress.status === 'download') {
+        report(onProgress, 'model', 0, 100, `下载模型 ${progress.file}`)
+      } else if (progress.status === 'progress') {
+        const loaded = progress.loaded ?? 0
+        const total = progress.total ?? 1
+        report(onProgress, 'model', loaded, total, `${progress.file} ${formatBytes(loaded)}/${formatBytes(total)}`)
+      } else if (progress.status === 'progress_total') {
+        report(onProgress, 'model', progress.loaded ?? 0, progress.total ?? 1, `模型 ${formatBytes(progress.loaded ?? 0)}/${formatBytes(progress.total ?? 1)}`)
+      } else if (progress.status === 'ready') {
+        report(onProgress, 'model', 1, 1, '模型已就绪')
+      }
+    },
   })
   report(onProgress, 'model', 1, 1, device === 'webgpu' ? 'WebGPU 模型已就绪' : 'WASM 模型已就绪')
 
@@ -143,6 +156,18 @@ function report(
   message: string,
 ): void {
   onProgress?.({ stage, completed, total, message })
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let index = 0
+  let size = value
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024
+    index += 1
+  }
+  return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
 function hash(value: string): string {
