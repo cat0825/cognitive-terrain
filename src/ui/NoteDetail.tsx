@@ -1,4 +1,5 @@
-import { BookOpen, CalendarDays, ExternalLink, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { BookOpen, CalendarDays, ExternalLink, Focus, GitCompare, Pencil, X } from 'lucide-react'
 import type { TerrainNote, TerrainProject } from '../domain/types'
 import { findNeighbors } from '../pipeline/neighbors'
 import { useAppStore } from '../store/app-store'
@@ -45,7 +46,53 @@ export function NoteDetail({ project, note, visibleCount }: NoteDetailProps) {
 function NoteContent({ note }: { note: TerrainNote }) {
   const project = useAppStore((state) => state.project)
   const selectNote = useAppStore((state) => state.selectNote)
+  const requestFocus = useAppStore((state) => state.requestFocus)
+  const updateNote = useAppStore((state) => state.updateNote)
   const neighbors = findNeighbors(project, note.id, 6)
+  const [editing, setEditing] = useState(false)
+  const [draftTitle, setDraftTitle] = useState(note.title)
+  const [draftContent, setDraftContent] = useState(note.content)
+  const [draftTags, setDraftTags] = useState(note.tags.join(', '))
+  const isAnalyzing = useAppStore((state) => state.isAnalyzing)
+  const dirty = useMemo(
+    () => draftTitle.trim() !== note.title || draftContent.trim() !== note.content || splitTags(draftTags).join(',') !== note.tags.join(','),
+    [draftTitle, draftContent, draftTags, note],
+  )
+  if (editing) {
+    return (
+      <div className="note-content">
+        <span className="panel-kicker">EDIT NOTE</span>
+        <label className="edit-field">
+          <span>标题</span>
+          <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
+        </label>
+        <label className="edit-field">
+          <span>正文</span>
+          <textarea value={draftContent} rows={7} onChange={(event) => setDraftContent(event.target.value)} />
+        </label>
+        <label className="edit-field">
+          <span>标签（逗号分隔）</span>
+          <input value={draftTags} onChange={(event) => setDraftTags(event.target.value)} />
+        </label>
+        <div className="edit-actions">
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!dirty || isAnalyzing}
+            onClick={async () => {
+              await updateNote(note.id, { title: draftTitle, content: draftContent, tags: splitTags(draftTags) })
+              setEditing(false)
+            }}
+          >
+            {isAnalyzing ? '重新分析中…' : '保存并重新分析'}
+          </button>
+          <button type="button" className="icon-button" disabled={isAnalyzing} onClick={() => setEditing(false)}>
+            取消
+          </button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="note-content">
       <div className="note-meta">
@@ -66,6 +113,16 @@ function NoteContent({ note }: { note: TerrainNote }) {
         {note.tags.map((tag) => (
           <span key={tag}>#{tag}</span>
         ))}
+      </div>
+      <div className="note-actions">
+        <button type="button" className="focus-button" onClick={() => requestFocus(note.id)}>
+          <Focus size={13} />
+          聚焦到笔记
+        </button>
+        <button type="button" className="focus-button" onClick={() => setEditing(true)}>
+          <Pencil size={13} />
+          编辑
+        </button>
       </div>
       {neighbors.length > 0 && (
         <section className="neighbor-section">
@@ -96,6 +153,20 @@ function NoteContent({ note }: { note: TerrainNote }) {
 }
 
 function ProjectOverview({ project, visibleCount }: { project: TerrainProject; visibleCount: number }) {
+  const timeline = useAppStore((state) => state.timeline)
+  const compareRef = useAppStore((state) => state.compareRef)
+  const setCompareRef = useAppStore((state) => state.setCompareRef)
+  const currentBucket = Math.min(project.snapshots.length - 1, Math.max(0, Math.ceil(timeline)))
+  const reference = compareRef !== null ? Math.min(project.snapshots.length - 1, Math.max(0, compareRef)) : null
+  const referenceCutoff = reference === null ? null : snapshotCutoff(project, reference)
+  const currentCutoff = snapshotCutoff(project, currentBucket)
+  const delta =
+    referenceCutoff === null
+      ? null
+      : {
+          added: project.notes.filter((note) => note.createdAtMs > referenceCutoff && note.createdAtMs <= currentCutoff).length,
+          removed: project.notes.filter((note) => note.createdAtMs <= referenceCutoff && note.createdAtMs > currentCutoff).length,
+        }
   return (
     <div className="project-overview">
       <h2>{project.name}</h2>
@@ -113,6 +184,36 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
           <span>时间层</span>
         </div>
       </div>
+      <div className="compare-strip">
+        <button
+          type="button"
+          className={compareRef === null ? 'compare-btn is-on' : 'compare-btn'}
+          aria-pressed={compareRef === null}
+          onClick={() => setCompareRef(null)}
+        >
+          <GitCompare size={13} />
+          关闭对比
+        </button>
+        {project.snapshots.slice(0, Math.max(1, currentBucket)).map((snapshot, index) => (
+          <button
+            type="button"
+            key={snapshot.bucket}
+            className={compareRef === index ? 'compare-btn is-active' : 'compare-btn'}
+            aria-pressed={compareRef === index}
+            onClick={() => setCompareRef(compareRef === index ? null : index)}
+            title={snapshot.label}
+          >
+            {snapshot.label}
+          </button>
+        ))}
+        {delta && (
+          <div className="compare-delta">
+            {delta.added > 0 && <span className="delta-added">+{delta.added} 新增</span>}
+            {delta.removed > 0 && <span className="delta-removed">−{delta.removed} 消失</span>}
+            {delta.added === 0 && delta.removed === 0 && <span className="delta-none">无变化</span>}
+          </div>
+        )}
+      </div>
       <div className="peak-index">
         {project.peaks.slice(0, 6).map((peak) => (
           <div key={peak.id}>
@@ -123,6 +224,20 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
       </div>
     </div>
   )
+}
+
+function snapshotCutoff(project: TerrainProject, index: number): number {
+  const bucket = project.snapshots[index]?.bucket
+  if (!bucket || bucket === 'empty') return Number.POSITIVE_INFINITY
+  const [year, month] = bucket.split('-').map(Number)
+  return Date.UTC(year, month, 1) - 1
+}
+
+function splitTags(value: string): string[] {
+  return value
+    .split(/[,\s|]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
 }
 
 function formatDate(value: string): string {

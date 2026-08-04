@@ -1,7 +1,7 @@
 {
   "name": "cognitive-terrain",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": ">=22.12"
@@ -17,6 +17,7 @@
     "test:visual": "playwright test -c playwright.visual.config.ts",
     "test:a11y": "playwright test -c playwright.a11y.config.ts",
     "test:perf": "node scripts/perf-check.mjs",
+    "size:check": "node scripts/size-budget.mjs",
     "test:perf:update": "UPDATE_BASELINES=1 playwright test -c playwright.visual.config.ts",
     "preview": "vite preview"
   },

@@ -134,6 +134,41 @@ async function loadSvgImage(svg: SVGSVGElement): Promise<HTMLImageElement> {
   }
 }
 
+export async function downloadProjectReport(project: TerrainProject): Promise<void> {
+  const markdown = await buildProjectReport(project)
+  downloadBlob(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), `${safeFileName(project.name)}-review.md`)
+}
+
+export async function buildProjectReport(project: TerrainProject): Promise<string> {
+  const lines: string[] = []
+  lines.push(`# ${project.name} 复盘报告`, '')
+  lines.push(`- 生成时间：${new Date().toLocaleString('zh-CN', { timeZone: project.timeZone })}`)
+  lines.push(`- 模型：${project.modelId}（${project.embeddingMode}）`)
+  lines.push(`- 笔记数：${project.notes.length}`)
+  lines.push(`- 主题峰值：${project.peaks.length}`)
+  lines.push(`- 时间层：${project.snapshots.length}`, '')
+  lines.push('## 主题峰值', '')
+  const sortedPeaks = [...project.peaks].sort((a, b) => b.height - a.height)
+  for (const peak of sortedPeaks) {
+    const peakNotes = peak.noteIds
+      .map((id) => project.notes.find((note) => note.id === id))
+      .filter((note): note is NonNullable<typeof note> => Boolean(note))
+    lines.push(`### ${peak.label}`)
+    lines.push(`- 高度：${peak.height.toFixed(2)}，覆盖 ${peakNotes.length} 条笔记`)
+    for (const note of peakNotes) {
+      lines.push(`- [${note.title}]（${note.tags.map((tag) => `#${tag}`).join(' ')}）`)
+    }
+    lines.push('')
+  }
+  lines.push('## 笔记清单', '')
+  const byTime = [...project.notes].sort((a, b) => a.createdAtMs - b.createdAtMs)
+  for (const note of byTime) {
+    lines.push(`- [${note.title}](${note.source ?? ''}) — ${note.tags.map((tag) => `#${tag}`).join(' ')}`)
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
 function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')

@@ -29,6 +29,9 @@ interface AppState {
   error: string | null
   cameraRevision: number
   cameraScale: number
+  focusRequest: { noteId: string; revision: number } | null
+  activePeakId: string | null
+  compareRef: number | null
   firstRun: boolean
   dismissFirstRun: () => void
   lastAnalysis: { modelId: string; embeddingMode: 'semantic' | 'fallback'; device: string; elapsedMs: number } | null
@@ -46,10 +49,15 @@ interface AppState {
   setLibraryOpen: (open: boolean) => void
   setCameraScale: (scale: number) => void
   resetCamera: () => void
+  requestFocus: (noteId: string) => void
+  setActivePeak: (peakId: string | null) => void
+  setCompareRef: (bucketIndex: number | null) => void
   reportError: (message: string) => void
   dismissError: () => void
   startAnalysis: (name: string, notes: NoteInput[], options?: AnalysisOptions) => Promise<void>
   loadStudyPack: () => Promise<void>
+  mergeNotes: (newNotes: NoteInput[], options?: AnalysisOptions) => Promise<void>
+  updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[] }) => Promise<void>
   cancelAnalysis: () => void
   replaceProject: (project: TerrainProject) => Promise<void>
   resetDemo: () => void
@@ -85,6 +93,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   cameraRevision: 0,
   cameraScale: 192,
+  focusRequest: null,
+  activePeakId: null,
+  compareRef: null,
   firstRun: localStorage.getItem('cognitive-terrain:first-run') === null,
   lastAnalysis: null,
   dismissFirstRun: () => {
@@ -128,6 +139,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
   setCameraScale: (cameraScale) => set({ cameraScale: Math.max(110, Math.min(260, cameraScale)) }),
   resetCamera: () => set((state) => ({ cameraRevision: state.cameraRevision + 1, cameraScale: 192 })),
+  requestFocus: (noteId) =>
+    set((state) => ({ focusRequest: { noteId, revision: (state.focusRequest?.revision ?? 0) + 1 } })),
+  setActivePeak: (activePeakId) => set({ activePeakId }),
+  setCompareRef: (compareRef) => set({ compareRef }),
   reportError: (error) => set({ error }),
   dismissError: () => set({ error: null }),
   startAnalysis: async (name, notes, options = {}) => {
@@ -173,6 +188,68 @@ export const useAppStore = create<AppState>((set, get) => ({
     const options =
       forced === 'deterministic' ? { embeddingStrategy: 'deterministic' as const } : {}
     return get().startAnalysis(TODAY_STUDY_PACK_NAME, todayStudyPack, options)
+  },
+  mergeNotes: async (newNotes, options = {}) => {
+    const current = get().project
+    const existing: NoteInput[] = current.notes.map((note) => ({
+      id: note.id,
+      title: note.title,
+      content: note.content,
+      createdAt: note.createdAt,
+      tags: note.tags,
+      source: note.source,
+      weight: note.weight,
+    }))
+    const existingIds = new Set(existing.map((note) => note.id))
+    const deduped = newNotes.filter((note) => !existingIds.has(note.id?.trim() ?? ''))
+    if (!deduped.length) {
+      set({ error: '没有新增笔记可合并' })
+      return
+    }
+    const merged: NoteInput[] = [...existing, ...deduped]
+    const effective = {
+      ...options,
+      embeddingStrategy: (options.embeddingStrategy ?? (current.embeddingMode === 'semantic' ? 'transformers' : 'deterministic')) as
+        | 'transformers'
+        | 'deterministic',
+    }
+    await get().startAnalysis(current.name, merged, effective)
+  },
+  updateNote: async (noteId, patch) => {
+    const current = get().project
+    const target = current.notes.find((note) => note.id === noteId)
+    if (!target) {
+      set({ error: '笔记不存在' })
+      return
+    }
+    const inputs: NoteInput[] = current.notes.map((note) => {
+      if (note.id !== noteId) {
+        return {
+          id: note.id,
+          title: note.title,
+          content: note.content,
+          createdAt: note.createdAt,
+          tags: note.tags,
+          source: note.source,
+          weight: note.weight,
+        }
+      }
+      return {
+        id: note.id,
+        title: patch.title ?? note.title,
+        content: patch.content ?? note.content,
+        createdAt: note.createdAt,
+        tags: patch.tags ?? note.tags,
+        source: note.source,
+        weight: note.weight,
+      }
+    })
+    const effective = {
+      embeddingStrategy: (current.embeddingMode === 'semantic' ? 'transformers' : 'deterministic') as
+        | 'transformers'
+        | 'deterministic',
+    }
+    await get().startAnalysis(current.name, inputs, effective)
   },
   cancelAnalysis: () => {
     activeAnalysis?.cancel()
@@ -249,6 +326,9 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
     activeTags: [],
     search: '',
     detailsOpen: true,
+    focusRequest: null,
+    activePeakId: null,
+    compareRef: null,
     cameraRevision: Date.now(),
     cameraScale: 192,
   })

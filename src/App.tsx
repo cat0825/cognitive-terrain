@@ -2,7 +2,7 @@ import { AlertCircle, LoaderCircle, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { visibleNotesFor } from './domain/project-view'
-import { downloadProjectBundle, exportTerrainPng } from './export/project-files'
+import { downloadProjectBundle, downloadProjectReport, exportTerrainPng } from './export/project-files'
 import { TerrainCanvas } from './scene/TerrainCanvas'
 import { useAppStore } from './store/app-store'
 import { CameraRail } from './ui/CameraRail'
@@ -83,6 +83,7 @@ function App() {
           onLoadStudyPack={() => void loadStudyPack()}
           onExportProject={() => downloadProjectBundle(project)}
           onExportImage={() => void exportImage()}
+          onExportReport={() => void downloadProjectReport(project)}
         />
         <main className="terrain-workspace">
           <section id="terrain-export-source" className="terrain-stage" aria-label="认知地形地图">
@@ -104,6 +105,16 @@ function App() {
         </main>
 
         <ImportPanel />
+        {project.notes.length > 0 && project.notes.length <= 5 && (
+          <div className="small-data-hint" role="status">
+            <span className="panel-kicker">SMALL SAMPLE</span>
+            <strong>仅 {project.notes.length} 条笔记</strong>
+            <p>笔记较少时地形较为平坦。导入更多笔记后，主题峰值会更清晰。</p>
+            <button type="button" className="primary-button" onClick={() => setImportOpen(true)}>
+              导入更多笔记
+            </button>
+          </div>
+        )}
         {firstRun && (
           <div className="first-run-banner" role="status">
             <div>

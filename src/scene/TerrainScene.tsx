@@ -2,6 +2,7 @@ import { Html, OrbitControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import { useEffect, useMemo, useRef } from 'react'
+import { useAppStore } from '../store/app-store'
 import {
   AdditiveBlending,
   BufferAttribute,
@@ -47,6 +48,8 @@ interface TerrainSceneProps {
   quality: QualityLevel
   cameraRevision: number
   cameraScale: number
+  focusRequest: { noteId: string; revision: number } | null
+  activePeakId: string | null
   onSelectNote: (id: string | null) => void
 }
 
@@ -100,11 +103,19 @@ const HEIGHT_ATLAS_SHADER = `
 `
 
 export function TerrainScene(props: TerrainSceneProps) {
-  const { cameraRevision, cameraScale, quality } = props
+  const { cameraRevision, cameraScale, quality, focusRequest, activePeakId } = props
   const controls = useRef<OrbitControlsImpl>(null)
   const previousScale = useRef(cameraScale)
   const previousRevision = useRef<number | null>(null)
   const previousViewportScale = useRef<number | null>(null)
+  const focusStart = useRef<number | null>(null)
+  const focusFlight = useRef<{
+    fromPosition: Vector3
+    toPosition: Vector3
+    fromTarget: Vector3
+    toTarget: Vector3
+  } | null>(null)
+  const handledFocusRevision = useRef<number | null>(null)
   const camera = useThree((state) => state.camera)
   const size = useThree((state) => state.size)
   const viewportScale = Math.min(1.45, Math.max(1, 828 / size.width))
@@ -127,6 +138,9 @@ export function TerrainScene(props: TerrainSceneProps) {
       previousRevision.current = cameraRevision
       previousViewportScale.current = viewportScale
       previousScale.current = cameraScale
+      focusStart.current = null
+      focusFlight.current = null
+      handledFocusRevision.current = null
       return
     }
     if (cameraScale === previousScale.current) return
@@ -142,12 +156,73 @@ export function TerrainScene(props: TerrainSceneProps) {
     previousScale.current = cameraScale
   }, [camera, cameraRevision, cameraScale, cameraTarget, homePosition, viewportScale])
 
+  useFrame((_, delta) => {
+    const controlsInstance = controls.current
+    const request = focusRequest
+    if (!request || !controlsInstance) {
+      focusStart.current = null
+      focusFlight.current = null
+      return
+    }
+    if (handledFocusRevision.current === request.revision) return
+
+    const note = props.notes.find((candidate) => candidate.id === request.noteId)
+    if (focusFlight.current === null) {
+      if (!note) {
+        handledFocusRevision.current = request.revision
+        return
+      }
+      const frame = resolveSnapshotFrame(props.snapshots, getLiveTimeline())
+      const height = MathUtils.lerp(
+        sampleHeight(frame.a.values, props.gridSize, note.x, note.y),
+        sampleHeight(frame.b.values, props.gridSize, note.x, note.y),
+        frame.mix,
+      )
+      const world = new Vector3(
+        note.x * (TERRAIN_WIDTH / 2),
+        height * TERRAIN_HEIGHT,
+        -note.y * (TERRAIN_DEPTH / 2),
+      )
+      const currentTarget = controlsInstance.target.clone()
+      const currentPosition = camera.position.clone()
+      const offset = currentPosition.clone().sub(currentTarget)
+      const distance = MathUtils.clamp(offset.length() * 0.42, 3.0, 9.5)
+      focusFlight.current = {
+        fromPosition: currentPosition,
+        toPosition: world.clone().add(offset.setLength(distance)),
+        fromTarget: currentTarget,
+        toTarget: world,
+      }
+      focusStart.current = 0
+      return
+    }
+
+    focusStart.current = (focusStart.current ?? 0) + Math.min(delta, 0.05)
+    const progress = Math.min(1, (focusStart.current ?? 0) / 0.85)
+    const eased = 1 - Math.pow(1 - progress, 3)
+    camera.position.lerpVectors(focusFlight.current.fromPosition, focusFlight.current.toPosition, eased)
+    controlsInstance.target.lerpVectors(focusFlight.current.fromTarget, focusFlight.current.toTarget, eased)
+    controlsInstance.update()
+    if (progress >= 1) {
+      handledFocusRevision.current = request.revision
+      focusFlight.current = null
+      focusStart.current = null
+    }
+  })
+
   return (
     <>
       <color attach="background" args={['#141414']} />
       <fog attach="fog" args={['#141414', 9.2, 15.5]} />
       <TerrainField />
       <TerrainSurface {...props} compactLabels={compactLabels} peakLabelLimit={peakLabelLimit} />
+      <PeakPath
+        snapshots={props.snapshots}
+        gridSize={props.gridSize}
+        notes={props.notes}
+        peaks={props.peaks}
+        activePeakId={activePeakId}
+      />
       <OrbitControls
         ref={controls}
         makeDefault
@@ -328,6 +403,86 @@ function NotePoints({
   )
 }
 
+function PeakPath({
+  snapshots,
+  gridSize,
+  notes,
+  peaks,
+  activePeakId,
+}: {
+  snapshots: TerrainSnapshot[]
+  gridSize: number
+  notes: TerrainNote[]
+  peaks: TerrainPeak[]
+  activePeakId: string | null
+}) {
+  const group = useRef<Group>(null)
+  const line = useRef<Group>(null)
+  const geometry = useMemo(() => new BufferGeometry(), [])
+  const positions = useMemo(() => new Float32Array(0), [])
+  const activePeak = peaks.find((peak) => peak.id === activePeakId)
+
+  const peakNotes = useMemo(() => {
+    if (!activePeak) return []
+    const byId = new Map(notes.map((note) => [note.id, note]))
+    return activePeak.noteIds.map((id) => byId.get(id)).filter((note): note is TerrainNote => Boolean(note))
+  }, [activePeak, notes])
+
+  const positionAttribute = useMemo(() => {
+    const attribute = new BufferAttribute(positions, 3)
+    attribute.setUsage(DynamicDrawUsage)
+    return attribute
+  }, [positions])
+  geometry.setAttribute('position', positionAttribute)
+
+  useFrame(() => {
+    const target = group.current
+    if (!target) return
+    target.visible = Boolean(activePeak) && peakNotes.length >= 2
+    if (!target.visible) return
+    const frame = resolveSnapshotFrame(snapshots, getLiveTimeline())
+    const pairCount = Math.max(0, peakNotes.length - 1)
+    const needed = pairCount * 6
+    if (geometry.getAttribute('position')?.count !== needed) {
+      geometry.setAttribute('position', new BufferAttribute(new Float32Array(needed), 3))
+    }
+    const array = (geometry.getAttribute('position') as BufferAttribute).array as Float32Array
+    for (let index = 0; index < pairCount; index += 1) {
+      const a = peakNotes[index]
+      const b = peakNotes[index + 1]
+      if (!a || !b) continue
+      const heightA = MathUtils.lerp(
+        sampleHeight(frame.a.values, gridSize, a.x, a.y),
+        sampleHeight(frame.b.values, gridSize, a.x, a.y),
+        frame.mix,
+      )
+      const heightB = MathUtils.lerp(
+        sampleHeight(frame.a.values, gridSize, b.x, b.y),
+        sampleHeight(frame.b.values, gridSize, b.x, b.y),
+        frame.mix,
+      )
+      const offset = index * 6
+      array[offset] = a.x * (TERRAIN_WIDTH / 2)
+      array[offset + 1] = heightA * TERRAIN_HEIGHT + 0.02
+      array[offset + 2] = -a.y * (TERRAIN_DEPTH / 2)
+      array[offset + 3] = b.x * (TERRAIN_WIDTH / 2)
+      array[offset + 4] = heightB * TERRAIN_HEIGHT + 0.02
+      array[offset + 5] = -b.y * (TERRAIN_DEPTH / 2)
+    }
+    ;(geometry.getAttribute('position') as BufferAttribute).needsUpdate = true
+  })
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  return (
+    <group ref={group}>
+      <lineSegments ref={line} geometry={geometry}>
+        <lineBasicMaterial color="#d7c27e" transparent opacity={0.5} />
+      </lineSegments>
+    </group>
+  )
+}
+
 function SelectedMarker({
   snapshots,
   gridSize,
@@ -388,6 +543,8 @@ function PeakField({
   const glowTexture = useMemo(() => makeGlowTexture(), [])
   const beaconGeometry = useMemo(() => new SphereGeometry(0.012, 12, 10), [])
   const beaconMaterial = useMemo(() => new MeshBasicMaterial({ color: '#f1ead2' }), [])
+  const setActivePeak = useAppStore((state) => state.setActivePeak)
+  const activePeakId = useAppStore((state) => state.activePeakId)
   const peakPositions = useMemo(() => new Float32Array(peaks.length * 3), [peaks])
   const lastTimeline = useRef(Number.NaN)
   const nextLabelUpdate = useRef(0)
@@ -519,9 +676,15 @@ function PeakField({
             >
               <button
                 type="button"
-                className={`peak-label${compact ? ' peak-label--compact' : ''}${peak.x < -edgeThreshold ? ' peak-label--left' : peak.x > edgeThreshold ? ' peak-label--right' : ''}`}
+                className={`peak-label${activePeakId === peak.id ? ' peak-label--active' : ''}${compact ? ' peak-label--compact' : ''}${peak.x < -edgeThreshold ? ' peak-label--left' : peak.x > edgeThreshold ? ' peak-label--right' : ''}`}
                 onClick={(event) => {
                   event.stopPropagation()
+                  if (activePeakId === peak.id) {
+                    setActivePeak(null)
+                    onSelectNote(null)
+                    return
+                  }
+                  setActivePeak(peak.id)
                   onSelectNote(peak.noteIds[0] ?? null)
                 }}
               >

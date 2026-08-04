@@ -12,6 +12,8 @@ interface Terrain3DProps {
   quality: QualityLevel
   cameraRevision: number
   cameraScale: number
+  focusRequest: { noteId: string; revision: number } | null
+  activePeakId: string | null
   onSelectNote: (id: string | null) => void
 }
 
@@ -22,6 +24,8 @@ export default function Terrain3D({
   quality,
   cameraRevision,
   cameraScale,
+  focusRequest,
+  activePeakId,
   onSelectNote,
 }: Terrain3DProps) {
   const dpr: number | [number, number] = quality === 'high' ? [1, 1.5] : quality === 'medium' ? [1, 1.25] : 1
@@ -58,6 +62,8 @@ export default function Terrain3D({
         quality={quality}
         cameraRevision={cameraRevision}
         cameraScale={cameraScale}
+        focusRequest={focusRequest}
+        activePeakId={activePeakId}
         onSelectNote={onSelectNote}
       />
     </Canvas>

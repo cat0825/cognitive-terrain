@@ -57,15 +57,24 @@
 - perf 脚本绑定 scripts/perf-check.mjs；unit 补强
 - 已知限制：暗色 UI 8px mono 小字 color-contrast 未达标（设计语言系统性问题），a11y 规则排除该项，发布前酌情复核
 
-## 阶段 7：交互纵深
+## 阶段 7：交互纵深 ✅ 已交付
 - 峰到路径 / 焦点模式 / 对比模式 / 小数据状态 / 移动端 / 首启 tour
+- 焦点飞行：0.85s 三次缓动用内 lerp 相机与 controls.target；峰标签点击高亮 + 金色连线（DynamicDrawUsage）
+- 对比基准层：选中快照后显示新增/消失笔记计数（delta strip），应用与场景联动
+- 小数据提示（≤5 条）+ 首启引导（已有 first-run banner 沿用）
+- 移动端：first-run banner / small-data hint / compare-strip 适配 700px 断点
 
-## 阶段 8：增量与工作流闭环
-- fingerprint diff 合并、归档复盘、笔记编辑、大样本 perf 门槛
+## 阶段 8：增量与工作流闭环 ✅ 完成
+- `mergeNotes`：新笔记与已有项目按稳定 ID 合并，复用项目 embedding 模式重跑分析
+- `updateNote`：标题/正文/标签编辑后重跑，保留 ID 与领域坐标
+- 复盘报告：`downloadProjectReport` 导出 Markdown（峰值 → 覆盖笔记 → 清单）
+- perf 门槛：`npm run size:check`（主包 320KiB / JS 总量 2100KiB / CSS 40KiB）挂入 CI quality job
+- 新增 report.test.ts（2 例），单元测试共 16
 
-## 阶段 9：发布 runbook
-- 版本号 + tag；README 上线信息 + npm audit 复核；Demo 上 perf-check + 双端截图
-- 双份发布文档落盘（RELEASE-PLAN.html + RELEASE-PLAN.md）
+## 阶段 9：发布 runbook ✅ 完成
+- 版本号 0.1.0 → 1.0.0
+- README 补齐阶段 7/8 功能清单；npm audit 复核（仍为 4 high 无 fix，见「依赖审计」）
+- 本文件即发布文档（+RELEASE-PLAN.html）；部署见下
 
 ---
 

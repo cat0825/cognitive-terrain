@@ -29,6 +29,8 @@ export const TerrainCanvas = memo(function TerrainCanvas({
 }: TerrainCanvasProps) {
   const use2d = viewMode === '2d' || !supportsWebgl()
   const [webglReady, setWebglReady] = useState(false)
+  const focusRequest = useAppStore((state) => state.focusRequest)
+  const activePeakId = useAppStore((state) => state.activePeakId)
   useEffect(() => {
     if (use2d) return
     const timer = window.setTimeout(() => setWebglReady(true), 60)
@@ -64,6 +66,8 @@ export const TerrainCanvas = memo(function TerrainCanvas({
         quality={quality}
         cameraRevision={cameraRevision}
         cameraScale={cameraScale}
+        focusRequest={focusRequest}
+        activePeakId={activePeakId}
         onSelectNote={onSelectNote}
       />
     </Suspense>

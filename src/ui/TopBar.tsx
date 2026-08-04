@@ -1,4 +1,4 @@
-import { BookOpen, Download, FolderOpen, ImageDown, Pencil, RotateCcw, Save, Search, Trash2, Upload, X } from 'lucide-react'
+import { BookOpen, Download, FileText, FolderOpen, ImageDown, Pencil, RotateCcw, Save, Search, Trash2, Upload, X } from 'lucide-react'
 import { useState } from 'react'
 import { useAppStore } from '../store/app-store'
 
@@ -7,9 +7,10 @@ interface TopBarProps {
   onLoadStudyPack: () => void
   onExportProject: () => void
   onExportImage: () => void
+  onExportReport: () => void
 }
 
-export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportImage }: TopBarProps) {
+export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportImage, onExportReport }: TopBarProps) {
   const project = useAppStore((state) => state.project)
   const projects = useAppStore((state) => state.projects)
   const search = useAppStore((state) => state.search)
@@ -142,6 +143,10 @@ export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportIma
                 <button type="button" onClick={onExportProject}>
                   <Download size={14} />
                   导出项目
+                </button>
+                <button type="button" onClick={onExportReport}>
+                  <FileText size={14} />
+                  导出复盘报告
                 </button>
                 <button type="button" onClick={onExportImage}>
                   <ImageDown size={14} />
