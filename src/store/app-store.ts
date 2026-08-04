@@ -29,6 +29,8 @@ interface AppState {
   error: string | null
   cameraRevision: number
   cameraScale: number
+  firstRun: boolean
+  dismissFirstRun: () => void
   lastAnalysis: { modelId: string; embeddingMode: 'semantic' | 'fallback'; device: string; elapsedMs: number } | null
   initialize: () => Promise<void>
   selectNote: (id: string | null) => void
@@ -83,7 +85,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   cameraRevision: 0,
   cameraScale: 192,
+  firstRun: localStorage.getItem('cognitive-terrain:first-run') === null,
   lastAnalysis: null,
+  dismissFirstRun: () => {
+    localStorage.setItem('cognitive-terrain:first-run', 'seen')
+    set({ firstRun: false })
+  },
   initialize: async () => {
     try {
       const projectSummaries = await listProjectSummaries()

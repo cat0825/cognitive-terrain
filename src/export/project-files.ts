@@ -1,6 +1,7 @@
 import { z } from 'zod'
-import type { TerrainProject } from '../domain/types'
+import type { TerrainProject, TerrainSnapshot } from '../domain/types'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
+import { renderShareCard } from './share-card'
 
 const projectBundleSchema = z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2)]),
@@ -75,11 +76,16 @@ export async function parseProjectBundle(file: File): Promise<TerrainProject> {
   return migrated
 }
 
-export async function exportTerrainPng(root: HTMLElement, projectName: string): Promise<void> {
+export async function exportTerrainPng(
+  root: HTMLElement,
+  project: TerrainProject,
+  snapshot?: TerrainSnapshot,
+): Promise<void> {
   const sourceCanvas = root.querySelector('canvas')
   if (sourceCanvas) {
     sourceCanvas.dispatchEvent(new Event(TERRAIN_PREPARE_EXPORT_EVENT))
-    await exportCanvasPng(sourceCanvas, projectName)
+    const blob = await renderShareCard({ sourceCanvas, project, snapshot })
+    await exportBlobPng(blob, project.name)
     return
   }
   const svg = root.querySelector('svg')
@@ -95,12 +101,10 @@ export async function exportTerrainPng(root: HTMLElement, projectName: string): 
   context.fillRect(0, 0, canvas.width, canvas.height)
   const image = await loadSvgImage(svg)
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
-  await exportCanvasPng(canvas, projectName)
+  await exportCanvasPng(canvas, project.name)
 }
 
-async function exportCanvasPng(canvas: HTMLCanvasElement, projectName: string): Promise<void> {
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png', 1))
-  if (!blob) throw new Error('无法生成 PNG')
+async function exportBlobPng(blob: Blob, projectName: string): Promise<void> {
   const fileName = `${safeFileName(projectName)}.png`
   const file = new File([blob], fileName, { type: 'image/png' })
   if (navigator.share && navigator.canShare?.({ files: [file] })) {
@@ -108,6 +112,12 @@ async function exportCanvasPng(canvas: HTMLCanvasElement, projectName: string): 
     return
   }
   downloadBlob(blob, fileName)
+}
+
+async function exportCanvasPng(canvas: HTMLCanvasElement, projectName: string): Promise<void> {
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png', 1))
+  if (!blob) throw new Error('无法生成 PNG')
+  await exportBlobPng(blob, projectName)
 }
 
 async function loadSvgImage(svg: SVGSVGElement): Promise<HTMLImageElement> {

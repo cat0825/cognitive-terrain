@@ -33,6 +33,8 @@ function App() {
   const loadStudyPack = useAppStore((state) => state.loadStudyPack)
   const reportError = useAppStore((state) => state.reportError)
   const dismissError = useAppStore((state) => state.dismissError)
+  const firstRun = useAppStore((state) => state.firstRun)
+  const dismissFirstRun = useAppStore((state) => state.dismissFirstRun)
 
   useEffect(() => {
     void initialize()
@@ -65,7 +67,9 @@ function App() {
     const root = document.getElementById('terrain-export-source')
     if (!root) return
     try {
-      await exportTerrainPng(root, project.name)
+      const index = Math.min(timelineBucket, project.snapshots.length - 1)
+      const snapshot = project.snapshots[index]
+      await exportTerrainPng(root, project, snapshot)
     } catch (exportError) {
       reportError(exportError instanceof Error ? exportError.message : '导出 PNG 失败')
     }
@@ -100,6 +104,21 @@ function App() {
         </main>
 
         <ImportPanel />
+        {firstRun && (
+          <div className="first-run-banner" role="status">
+            <div>
+              <span className="panel-kicker">GETTING STARTED</span>
+              <strong>导入你的笔记，生成专属地形</strong>
+              <p>当前展示的是演示数据。导入 JSON / CSV / Markdown 笔记，或用今天的阅读列表快速体验。</p>
+            </div>
+            <button type="button" className="primary-button" onClick={() => setImportOpen(true)}>
+              导入我的笔记
+            </button>
+            <button type="button" className="icon-button first-run-close" aria-label="关闭欢迎提示" onClick={dismissFirstRun}>
+              <X size={15} />
+            </button>
+          </div>
+        )}
         {isAnalyzing && (
           <div className="processing-overlay" role="status" aria-live="polite">
             <LoaderCircle className="spin" size={24} />
