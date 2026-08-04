@@ -55,6 +55,7 @@
 ## 阶段 6：测试与质量门
 - playwright.config.ts + e2e/visual/a11y（pixelmatch + axe，依赖已装）
 - perf 脚本绑定 scripts/perf-check.mjs；unit 补强
+- 已知限制：暗色 UI 8px mono 小字 color-contrast 未达标（设计语言系统性问题），a11y 规则排除该项，发布前酌情复核
 
 ## 阶段 7：交互纵深
 - 峰到路径 / 焦点模式 / 对比模式 / 小数据状态 / 移动端 / 首启 tour
