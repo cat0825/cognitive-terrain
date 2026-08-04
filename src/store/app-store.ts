@@ -1,9 +1,15 @@
 import { create } from 'zustand'
-import type { AnalysisOptions, NoteInput, ProcessingProgress, QualityLevel, TerrainProject, ViewMode } from '../domain/types'
+import type { AnalysisOptions, NoteInput, ProcessingProgress, ProjectSummary, QualityLevel, TerrainProject, ViewMode } from '../domain/types'
 import { createDemoProject } from '../domain/demo'
 import { TODAY_STUDY_PACK_NAME, todayStudyPack } from '../domain/study-pack'
 import { runAnalysis, type AnalysisHandle } from '../pipeline/worker-client'
-import { getProject, saveProject } from '../storage/project-repository'
+import {
+  deleteProject,
+  getProject,
+  listProjectSummaries,
+  renameProject,
+  saveProject,
+} from '../storage/project-repository'
 
 interface AppState {
   project: TerrainProject
@@ -16,6 +22,8 @@ interface AppState {
   importOpen: boolean
   filtersOpen: boolean
   detailsOpen: boolean
+  libraryOpen: boolean
+  projects: ProjectSummary[]
   isAnalyzing: boolean
   progress: ProcessingProgress | null
   error: string | null
@@ -33,6 +41,7 @@ interface AppState {
   setImportOpen: (open: boolean) => void
   setFiltersOpen: (open: boolean) => void
   setDetailsOpen: (open: boolean) => void
+  setLibraryOpen: (open: boolean) => void
   setCameraScale: (scale: number) => void
   resetCamera: () => void
   reportError: (message: string) => void
@@ -42,6 +51,10 @@ interface AppState {
   cancelAnalysis: () => void
   replaceProject: (project: TerrainProject) => Promise<void>
   resetDemo: () => void
+  openProject: (id: string) => Promise<void>
+  renameCurrentProject: (name: string) => Promise<void>
+  deleteProjectInLibrary: (id: string) => Promise<void>
+  reloadProjects: () => Promise<void>
 }
 
 let activeAnalysis: AnalysisHandle | null = null
@@ -63,6 +76,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   importOpen: false,
   filtersOpen: false,
   detailsOpen: true,
+  libraryOpen: false,
+  projects: [],
   isAnalyzing: false,
   progress: null,
   error: null,
@@ -70,9 +85,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   cameraScale: 192,
   lastAnalysis: null,
   initialize: async () => {
-    const lastProjectId = localStorage.getItem('cognitive-terrain:last-project')
-    if (!lastProjectId) return
     try {
+      const projectSummaries = await listProjectSummaries()
+      if (projectSummaries.length) set({ projects: projectSummaries })
+      const lastProjectId = localStorage.getItem('cognitive-terrain:last-project')
+      if (!lastProjectId) return
       const project = await getProject(lastProjectId)
       if (project) setProjectState(set, project)
     } catch {
@@ -101,6 +118,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setImportOpen: (importOpen) => set({ importOpen }),
   setFiltersOpen: (filtersOpen) => set({ filtersOpen }),
   setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
+  setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
   setCameraScale: (cameraScale) => set({ cameraScale: Math.max(110, Math.min(260, cameraScale)) }),
   resetCamera: () => set((state) => ({ cameraRevision: state.cameraRevision + 1, cameraScale: 192 })),
   reportError: (error) => set({ error }),
@@ -159,6 +177,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await saveProject(project)
       localStorage.setItem('cognitive-terrain:last-project', project.id)
+      await get().reloadProjects()
     } catch (error) {
       set({ error: `项目已打开，但本地保存失败：${error instanceof Error ? error.message : String(error)}` })
     }
@@ -167,6 +186,50 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = createDemoProject()
     localStorage.removeItem('cognitive-terrain:last-project')
     setProjectState(set, project)
+    void get().reloadProjects()
+  },
+  openProject: async (id) => {
+    const project = await getProject(id)
+    if (!project) {
+      set({ error: '项目不存在或已被删除' })
+      await get().reloadProjects()
+      return
+    }
+    localStorage.setItem('cognitive-terrain:last-project', id)
+    setProjectState(set, project)
+  },
+  renameCurrentProject: async (name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const currentId = get().project.id
+    const renamed = await renameProject(currentId, trimmed)
+    if (!renamed) {
+      const current = get().project
+      if (current.id !== currentId) return
+      try {
+        await saveProject({ ...current, name: trimmed })
+        set({ project: { ...current, name: trimmed } })
+      } catch (error) {
+        set({ error: `项目改名失败：${error instanceof Error ? error.message : String(error)}` })
+        return
+      }
+    } else {
+      set({ project: renamed })
+    }
+    await get().reloadProjects()
+  },
+  deleteProjectInLibrary: async (id) => {
+    await deleteProject(id)
+    const state = get()
+    if (state.project.id === id) {
+      localStorage.removeItem('cognitive-terrain:last-project')
+      setProjectState(set, createDemoProject())
+    }
+    await get().reloadProjects()
+  },
+  reloadProjects: async () => {
+    const projectSummaries = await listProjectSummaries()
+    set({ projects: projectSummaries })
   },
 }))
 

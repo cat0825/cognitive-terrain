@@ -6,6 +6,19 @@ export async function saveProject(project: TerrainProject): Promise<void> {
   await database.put('projects', project)
 }
 
+export async function renameProject(id: string, name: string): Promise<TerrainProject | undefined> {
+  const database = await getDatabase()
+  const project = await database.get('projects', id)
+  if (!project) return undefined
+  const renamed = {
+    ...migrateProject(project),
+    name,
+    updatedAt: new Date().toISOString(),
+  }
+  await database.put('projects', renamed)
+  return renamed
+}
+
 export async function getProject(id: string): Promise<TerrainProject | undefined> {
   const database = await getDatabase()
   const project = await database.get('projects', id)

@@ -23,6 +23,13 @@ export function getDatabase(): Promise<IDBPDatabase<CognitiveTerrainDB>> {
   return databasePromise
 }
 
+export async function closeDatabase(): Promise<void> {
+  if (!databasePromise) return
+  const database = await databasePromise
+  database.close()
+  databasePromise = undefined
+}
+
 export function migrateProject(project: TerrainProject): TerrainProject {
   if (project.schemaVersion >= 2) return project
   return {
