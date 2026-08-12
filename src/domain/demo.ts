@@ -377,6 +377,12 @@ function createDemoNote(index: number): TerrainNote {
     tags: [topic.domain, topic.key],
     source: 'AI Infra Knowledge Base',
     weight: topic.prominence,
+    mastery: 0.62 + ((index * 17) % 31) / 100,
+    confidence: 0.58 + ((index * 11) % 36) / 100,
+    exploration: 0.35 + ((index * 7) % 61) / 100,
+    status: index % 19 === 0 ? 'seed' : index % 13 === 0 ? 'stable' : 'growing',
+    area: topic.domain,
+    links: [],
     x,
     y,
   }

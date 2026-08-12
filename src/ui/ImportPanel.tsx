@@ -1,4 +1,4 @@
-import { AlertTriangle, FileJson, FolderOpen, UploadCloud, X } from 'lucide-react'
+import { AlertTriangle, FileJson, FolderOpen, FolderTree, UploadCloud, X } from 'lucide-react'
 import { useRef, useState, type DragEvent } from 'react'
 import type { ParsedImport } from '../domain/types'
 import { parseProjectBundle } from '../export/project-files'
@@ -6,6 +6,20 @@ import { parseImportFiles } from '../import/parse'
 import { useAppStore } from '../store/app-store'
 
 type EmbeddingChoice = 'auto' | 'deterministic'
+
+const noteExtensions = ['.md', '.markdown', '.txt']
+
+/** React 的 input 类型没有目录选择属性，用索引签名 spread 进去。 */
+const directoryAttributes: Record<string, string> = { webkitdirectory: '', directory: '' }
+
+/** vault 里混着附件和 .obsidian 配置，只取笔记文件。 */
+function markdownOnly(files: File[]): File[] {
+  return files.filter((file) => {
+    const relative = file.webkitRelativePath || file.name
+    if (relative.split('/').some((segment) => segment.startsWith('.'))) return false
+    return noteExtensions.some((extension) => file.name.toLowerCase().endsWith(extension))
+  })
+}
 
 export function ImportPanel() {
   const open = useAppStore((state) => state.importOpen)
@@ -17,6 +31,7 @@ export function ImportPanel() {
   const [busy, setBusy] = useState(false)
   const [choice, setChoice] = useState<EmbeddingChoice>('auto')
   const inputRef = useRef<HTMLInputElement>(null)
+  const folderRef = useRef<HTMLInputElement>(null)
 
   if (!open) return null
 
@@ -78,6 +93,37 @@ export function ImportPanel() {
             multiple
             accept=".json,.csv,.tsv,.md,.markdown,.txt,.yaml,.yml,.terrain.json"
             onChange={(event) => void handleFiles(Array.from(event.target.files ?? []))}
+          />
+        </div>
+
+        <div className="import-folder">
+          <button
+            type="button"
+            className="focus-button"
+            onClick={(event) => {
+              event.stopPropagation()
+              folderRef.current?.click()
+            }}
+          >
+            <FolderTree size={14} />
+            选择 Obsidian 文件夹
+          </button>
+          <small>按文件夹导入才能记下 vault 名称，回跳 Obsidian 更准确。文件仍只在本机解析。</small>
+          <input
+            ref={folderRef}
+            type="file"
+            multiple
+            {...directoryAttributes}
+            onChange={(event) => {
+              const picked = Array.from(event.target.files ?? [])
+              if (!picked.length) return
+              const notes = markdownOnly(picked)
+              if (!notes.length) {
+                reportError(`所选文件夹里没有 Markdown 笔记（已跳过 ${picked.length} 个文件）`)
+                return
+              }
+              void handleFiles(notes)
+            }}
           />
         </div>
 

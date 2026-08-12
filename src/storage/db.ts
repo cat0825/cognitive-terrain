@@ -13,10 +13,18 @@ let databasePromise: Promise<IDBPDatabase<CognitiveTerrainDB>> | undefined
 
 export function getDatabase(): Promise<IDBPDatabase<CognitiveTerrainDB>> {
   databasePromise ??= openDB<CognitiveTerrainDB>('cognitive-terrain', 2, {
-    upgrade(database, oldVersion) {
+    async upgrade(database, oldVersion, _newVersion, transaction) {
       if (oldVersion < 1) {
         const store = database.createObjectStore('projects', { keyPath: 'id' })
         store.createIndex('by-updated-at', 'updatedAt')
+      }
+      if (oldVersion >= 1 && oldVersion < 2) {
+        const store = transaction.objectStore('projects')
+        let cursor = await store.openCursor()
+        while (cursor) {
+          await cursor.update(migrateProject(cursor.value))
+          cursor = await cursor.continue()
+        }
       }
     },
   })
@@ -31,11 +39,15 @@ export async function closeDatabase(): Promise<void> {
 }
 
 export function migrateProject(project: TerrainProject): TerrainProject {
-  if (project.schemaVersion >= 2) return project
+  const legacy = project.schemaVersion < 2
   return {
     ...project,
     schemaVersion: 2,
-    embeddingMode: 'fallback',
-    noteNeighbors: [],
+    embeddingMode: legacy ? 'fallback' : project.embeddingMode ?? 'fallback',
+    noteNeighbors: legacy ? [] : project.noteNeighbors ?? [],
+    notes: project.notes.map((note) => ({
+      ...note,
+      links: note.links ?? [],
+    })),
   }
 }

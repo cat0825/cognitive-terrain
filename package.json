@@ -19,6 +19,7 @@
     "test:perf": "node scripts/perf-check.mjs",
     "size:check": "node scripts/size-budget.mjs",
     "test:perf:update": "UPDATE_BASELINES=1 playwright test -c playwright.visual.config.ts",
+    "migrate:local-notes": "node scripts/migrate-local-notes.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

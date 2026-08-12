@@ -1,8 +1,9 @@
 import { create } from 'zustand'
-import type { AnalysisOptions, NoteInput, ProcessingProgress, ProjectSummary, QualityLevel, TerrainProject, ViewMode } from '../domain/types'
+import type { AnalysisOptions, NoteInput, ProcessingProgress, ProjectSummary, QualityLevel, TerrainProject, ViewMode, VisualDimension } from '../domain/types'
 import { createDemoProject } from '../domain/demo'
 import { TODAY_STUDY_PACK_NAME, todayStudyPack } from '../domain/study-pack'
 import { runAnalysis, type AnalysisHandle } from '../pipeline/worker-client'
+import { parseWikiLinks } from '../import/parse'
 import {
   deleteProject,
   getProject,
@@ -11,6 +12,8 @@ import {
   saveProject,
 } from '../storage/project-repository'
 
+export type CameraInteractionMode = 'rotate' | 'pan'
+
 interface AppState {
   project: TerrainProject
   selectedNoteId: string | null
@@ -18,6 +21,7 @@ interface AppState {
   activeTags: string[]
   viewMode: ViewMode
   quality: QualityLevel
+  visualDimension: VisualDimension
   timeline: number
   importOpen: boolean
   filtersOpen: boolean
@@ -29,6 +33,7 @@ interface AppState {
   error: string | null
   cameraRevision: number
   cameraScale: number
+  cameraInteractionMode: CameraInteractionMode
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
   compareRef: number | null
@@ -42,12 +47,14 @@ interface AppState {
   clearTags: () => void
   setViewMode: (mode: ViewMode) => void
   setQuality: (quality: QualityLevel) => void
+  setVisualDimension: (dimension: VisualDimension) => void
   setTimeline: (timeline: number) => void
   setImportOpen: (open: boolean) => void
   setFiltersOpen: (open: boolean) => void
   setDetailsOpen: (open: boolean) => void
   setLibraryOpen: (open: boolean) => void
   setCameraScale: (scale: number) => void
+  setCameraInteractionMode: (mode: CameraInteractionMode) => void
   resetCamera: () => void
   requestFocus: (noteId: string) => void
   setActivePeak: (peakId: string | null) => void
@@ -57,7 +64,7 @@ interface AppState {
   startAnalysis: (name: string, notes: NoteInput[], options?: AnalysisOptions) => Promise<void>
   loadStudyPack: () => Promise<void>
   mergeNotes: (newNotes: NoteInput[], options?: AnalysisOptions) => Promise<void>
-  updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[] }) => Promise<void>
+  updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[]; mastery?: number | null; confidence?: number | null; exploration?: number | null; status?: TerrainProject['notes'][number]['status'] | null; area?: string | null; reviewedAt?: string | null }) => Promise<void>
   cancelAnalysis: () => void
   replaceProject: (project: TerrainProject) => Promise<void>
   resetDemo: () => void
@@ -65,6 +72,18 @@ interface AppState {
   renameCurrentProject: (name: string) => Promise<void>
   deleteProjectInLibrary: (id: string) => Promise<void>
   reloadProjects: () => Promise<void>
+}
+
+interface PerformanceControls {
+  setTimeline: (timeline: number) => void
+  setQuality: (quality: QualityLevel) => void
+  setVisualDimension: (dimension: VisualDimension) => void
+}
+
+declare global {
+  interface Window {
+    __cognitiveTerrainPerf?: PerformanceControls
+  }
 }
 
 let activeAnalysis: AnalysisHandle | null = null
@@ -82,6 +101,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeTags: [],
   viewMode: '3d',
   quality: 'high',
+  visualDimension: 'density',
   timeline: Math.max(0, initialProject.snapshots.length - 1),
   importOpen: false,
   filtersOpen: false,
@@ -93,6 +113,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   cameraRevision: 0,
   cameraScale: 192,
+  cameraInteractionMode: 'rotate',
   focusRequest: null,
   activePeakId: null,
   compareRef: null,
@@ -125,6 +146,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearTags: () => set({ activeTags: [] }),
   setViewMode: (viewMode) => set({ viewMode }),
   setQuality: (quality) => set({ quality }),
+  setVisualDimension: (visualDimension) => set({ visualDimension }),
   setTimeline: (timeline) => {
     liveTimeline = timeline
     const state = get()
@@ -134,10 +156,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   setImportOpen: (importOpen) => set({ importOpen }),
-  setFiltersOpen: (filtersOpen) => set({ filtersOpen }),
+  setFiltersOpen: (filtersOpen) => set((state) => ({
+    filtersOpen,
+    firstRun: filtersOpen ? false : state.firstRun,
+  })),
   setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
   setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
   setCameraScale: (cameraScale) => set({ cameraScale: Math.max(110, Math.min(260, cameraScale)) }),
+  setCameraInteractionMode: (cameraInteractionMode) => set({ cameraInteractionMode }),
   resetCamera: () => set((state) => ({ cameraRevision: state.cameraRevision + 1, cameraScale: 192 })),
   requestFocus: (noteId) =>
     set((state) => ({ focusRequest: { noteId, revision: (state.focusRequest?.revision ?? 0) + 1 } })),
@@ -198,7 +224,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       createdAt: note.createdAt,
       tags: note.tags,
       source: note.source,
+      sourcePath: note.sourcePath,
+      vault: note.vault,
       weight: note.weight,
+      mastery: note.mastery,
+      confidence: note.confidence,
+      exploration: note.exploration,
+      status: note.status,
+      area: note.area,
+      reviewedAt: note.reviewedAt,
+      links: note.links,
     }))
     const existingIds = new Set(existing.map((note) => note.id))
     const deduped = newNotes.filter((note) => !existingIds.has(note.id?.trim() ?? ''))
@@ -231,7 +266,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           createdAt: note.createdAt,
           tags: note.tags,
           source: note.source,
+          sourcePath: note.sourcePath,
+          vault: note.vault,
           weight: note.weight,
+          mastery: note.mastery,
+          confidence: note.confidence,
+          exploration: note.exploration,
+          status: note.status,
+          area: note.area,
+          reviewedAt: note.reviewedAt,
+          links: note.links,
         }
       }
       return {
@@ -241,7 +285,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         createdAt: note.createdAt,
         tags: patch.tags ?? note.tags,
         source: note.source,
+        sourcePath: note.sourcePath,
+        vault: note.vault,
         weight: note.weight,
+        mastery: 'mastery' in patch ? patch.mastery ?? undefined : note.mastery,
+        confidence: 'confidence' in patch ? patch.confidence ?? undefined : note.confidence,
+        exploration: 'exploration' in patch ? patch.exploration ?? undefined : note.exploration,
+        status: 'status' in patch ? patch.status ?? undefined : note.status,
+        area: 'area' in patch ? patch.area ?? undefined : note.area,
+        reviewedAt: 'reviewedAt' in patch ? patch.reviewedAt ?? undefined : note.reviewedAt,
+        links: patch.content === undefined ? note.links : parseWikiLinks(patch.content),
       }
     })
     const effective = {
@@ -316,6 +369,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ projects: projectSummaries })
   },
 }))
+
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf')) {
+  window.__cognitiveTerrainPerf = {
+    setTimeline: (timeline) => useAppStore.getState().setTimeline(timeline),
+    setQuality: (quality) => useAppStore.getState().setQuality(quality),
+    setVisualDimension: (dimension) => useAppStore.getState().setVisualDimension(dimension),
+  }
+}
 
 function setProjectState(set: (partial: Partial<AppState>) => void, project: TerrainProject): void {
   liveTimeline = Math.max(0, project.snapshots.length - 1)

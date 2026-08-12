@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto'
+import { openDB } from 'idb'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { TerrainProject } from '../../src/domain/types'
 import { createDemoProject } from '../../src/domain/demo'
@@ -9,7 +10,7 @@ import {
   renameProject,
   saveProject,
 } from '../../src/storage/project-repository'
-import { closeDatabase } from '../../src/storage/db'
+import { closeDatabase, getDatabase } from '../../src/storage/db'
 
 function oldV1Project(id: string, name: string): TerrainProject {
   const base = createDemoProject()
@@ -28,14 +29,23 @@ beforeEach(async () => {
 })
 
 describe('project repository', () => {
-  it('migrates v1 projects to v2 on read', async () => {
+  it('persists v1 to v2 migrations during the IndexedDB upgrade', async () => {
     const legacy = oldV1Project('legacy-1', '旧项目')
-    await saveProject(legacy)
+    const versionOne = await openDB('cognitive-terrain', 1, {
+      upgrade(database) {
+        const store = database.createObjectStore('projects', { keyPath: 'id' })
+        store.createIndex('by-updated-at', 'updatedAt')
+      },
+    })
+    await versionOne.put('projects', legacy)
+    versionOne.close()
 
-    const loaded = await getProject('legacy-1')
-    expect(loaded?.schemaVersion).toBe(2)
-    expect(loaded?.embeddingMode).toBe('fallback')
-    expect(loaded?.noteNeighbors).toEqual([])
+    const upgraded = await getDatabase()
+    const stored = await upgraded.get('projects', 'legacy-1')
+    expect(upgraded.version).toBe(2)
+    expect(stored?.schemaVersion).toBe(2)
+    expect(stored?.embeddingMode).toBe('fallback')
+    expect(stored?.noteNeighbors).toEqual([])
   })
 
   it('lists summaries sorted by updatedAt descending', async () => {
