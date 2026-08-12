@@ -39,8 +39,17 @@ npm run preview
 ```bash
 npm run typecheck
 npm run lint
-npm test
+npm run test:unit
+npm run build
+npm run size:check
+npm run test:e2e
+npm run test:visual
+npm run test:a11y
+# 另开 `npm run preview -- --port 4174 --strictPort` 后执行：
+npm run test:perf
 ```
+
+首次运行 Playwright 时需先执行 `npx playwright install chromium`。
 
 ## 导入格式
 
@@ -111,7 +120,7 @@ tags:
 
 ## 今日学习清单
 
-打开项目工具菜单并选择“加载今日学习”，应用会将最近转帖整理为 6 条带来源的学习笔记，并通过现有分析 Worker 生成一张可搜索、可筛选的学习地形。重点主题包括 Agent Harness、长程 Agent 状态管理、评测、前端 Skill、UI 审查与产品视频工作流。
+打开项目工具菜单并选择“加载今日学习”，应用会将截至 2026-08-03 收集的转帖整理为 6 条带来源的学习笔记，并通过现有分析 Worker 生成一张可搜索、可筛选的学习地形。重点主题包括 Agent Harness、长程 Agent 状态管理、评测、前端 Skill、UI 审查与产品视频工作流。
 
 ## 代码结构
 
@@ -146,11 +155,16 @@ tests/unit/     算法、导入与 Worker 回归测试
 
 在项目信息中可查看当前项目的 `modelId`（`semantic` 或 `deterministic-local-fallback`）。
 
-## 依赖审计
+## 已知缺口
 
-截至 2026-07-31，`npm audit` 报告 4 个 high、0 个 critical，且没有可用的自动修复：
+- 2026-08-12 fresh check：`npm audit --omit=dev --audit-level=high` 报告 4 个 high、0 个 critical，且没有可用的自动修复：
 
-- `@huggingface/transformers` 经 `onnxruntime-node` 引入受影响的 `adm-zip`。
-- `@huggingface/transformers` 引入受影响的 `sharp`。
+  - `@huggingface/transformers` 经 `onnxruntime-node` 引入受影响的 `adm-zip`。
+  - `@huggingface/transformers` 引入受影响的 `sharp`。
 
-这些告警位于 Transformers.js 的 Node 侧依赖链，当前浏览器运行路径使用 WebGPU/WASM，但仍应随上游版本修复及时升级。部署前应根据实际威胁模型重新运行 `npm audit`。
+- 演示知识点主要是确定性模板数据，不等同于有来源、可引用的知识库。
+- 仅 IndexedDB 本地存储，缺少自动备份、修订历史、回收站和跨设备同步。
+- 搜索仍以字符串匹配为主；小规模编辑会触发全量 embedding/UMAP，布局稳定性和 10k/50k 数据规模未验证。
+- a11y 门禁当前排除了暗色 8px 等宽小字的 `color-contrast` 规则，不能据此宣称完整 WCAG 2.2 AA。
+
+完整交接见 [SESSION.md](SESSION.md)，成熟产品差距见 [GAP.md](GAP.md)。
