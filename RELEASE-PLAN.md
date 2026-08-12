@@ -84,7 +84,7 @@
 | --- | --- |
 | typecheck / lint | 通过，0 warning |
 | unit | 9 files / 25 tests 通过 |
-| build / size | 主包 269.5 KiB；JS 总量 2068.4 KiB；CSS 22.4 KiB |
+| build / size | 主包 271.7 KiB；JS 总量 2070.6 KiB；CSS 22.7 KiB |
 | e2e / visual / a11y | 10 / 2 / 4 全部通过 |
 | perf | 本机 Chrome headless 的 idle/playback/orbit/scrub 约 120 FPS，p95 ≤ 9.1 ms |
 | Canvas / export | 非背景像素 89.45%；PNG 924,082 bytes；控制台 0 error |

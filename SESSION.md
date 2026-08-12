@@ -26,7 +26,7 @@
 - `npm run lint`：exit 0，0 warning。
 - `npm run test:unit`：9 test files / 25 tests passed。
 - `npm run build`：TypeScript + Vite 构建成功；主包 278.16 kB，Three chunk 1,149.46 kB，分析 WASM 23.57 MB。
-- `npm run size:check`：主包 269.5 KiB、JS 2068.4 KiB、CSS 22.4 KiB，budget passed。
+- `npm run size:check`：主包 271.7 KiB、JS 2070.6 KiB、CSS 22.7 KiB，budget passed。
 - `npm run test:e2e`：desktop + mobile 共 10/10 passed。首次运行发现移动端 dock/欢迎横幅拦截控件及并行 WebGL 超时，最小修复后按原交互断言通过。
 - `npm run test:visual`：2/2 passed；未用更新基线绕过失败。
 - `npm run test:a11y`：4/4 passed；仍保留 README 所述对比度排除边界。
