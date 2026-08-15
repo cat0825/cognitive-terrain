@@ -46,3 +46,22 @@ test('project recovery menu is accessible', async ({ page }) => {
 
   expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
 })
+
+test('note detail sheet is accessible', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 20_000 })
+  await page.getByRole('button', { name: '切换二维等高线' }).click()
+  const note = page.getByRole('button', { name: 'GPU 资源池化', exact: true })
+  await note.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByLabel('笔记详情')).toBeVisible()
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa'])
+    .include('.note-detail')
+    .disableRules(['color-contrast'])
+    .analyze()
+
+  expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
+})

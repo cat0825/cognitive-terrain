@@ -134,7 +134,7 @@ export function getLiveTimeline(): number {
 
 export const useAppStore = create<AppState>((set, get) => ({
   project: initialProject,
-  selectedNoteId: initialProject.notes[0]?.id ?? null,
+  selectedNoteId: null,
   search: '',
   activeTags: [],
   activeAreas: [],
@@ -144,7 +144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   timeline: Math.max(0, initialProject.snapshots.length - 1),
   importOpen: false,
   filtersOpen: false,
-  detailsOpen: true,
+  detailsOpen: false,
   libraryOpen: false,
   projects: [],
   backups: [],
@@ -552,11 +552,11 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
   set({
     project,
     timeline: Math.max(0, project.snapshots.length - 1),
-    selectedNoteId: project.notes[0]?.id ?? null,
+    selectedNoteId: null,
     activeTags: [],
     activeAreas: [],
     search: '',
-    detailsOpen: true,
+    detailsOpen: false,
     focusRequest: null,
     activePeakId: null,
     activeCollisionId: null,

@@ -41,6 +41,7 @@ async function compareScreenshot(page: import('@playwright/test').Page, name: st
   if (ratio >= 0.002) {
     mkdirSync(diffDir, { recursive: true })
     writeFileSync(path.join(diffDir, `${name}-${platform}.png`), PNG.sync.write(diff))
+    writeFileSync(path.join(diffDir, `${name}-${platform}-current.png`), shot)
   }
 }
 
@@ -52,9 +53,12 @@ test('desktop overview renders stably', async ({ page }) => {
 })
 
 test('note details panel renders stably', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
   await page.goto('/')
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 20_000 })
   await page.waitForTimeout(800)
+  await page.locator('.peak-label:visible').first().click()
+  await expect(page.locator('.note-detail')).toBeVisible()
   await page.locator('.note-detail').hover()
   await compareScreenshot(page, 'desktop-note-details')
 })
