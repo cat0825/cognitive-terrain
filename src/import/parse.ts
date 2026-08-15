@@ -1,6 +1,7 @@
 import Papa from 'papaparse'
 import { parse as parseYaml } from 'yaml'
 import type { ImportIssue, NoteInput, NoteStatus, ParsedImport } from '../domain/types'
+import { parseObsidianCognitiveFields } from './obsidian-frontmatter'
 
 export async function parseImportFile(file: File): Promise<ParsedImport> {
   const extension = file.name.split('.').at(-1)?.toLowerCase() ?? ''
@@ -88,11 +89,17 @@ function parseTextDocument(
   modifiedAt: number,
   location: { vault?: string; path: string } = { path: fileName },
 ): ParsedImport {
-  const { frontmatter, body } = splitFrontmatter(text)
+  const { frontmatter, body, issue: frontmatterIssue } = splitFrontmatter(text)
+  const cognitive = parseObsidianCognitiveFields(frontmatter)
   const title = stringValue(frontmatter.title) ?? fileName.replace(/\.[^.]+$/, '')
   const createdAt = stringValue(frontmatter.createdAt) ?? new Date(modifiedAt).toISOString()
   const tags = normalizeTags(frontmatter.tags)
   const content = body.trim() || text.trim()
+  const issues: ImportIssue[] = [
+    ...(frontmatterIssue ? [{ file: fileName, message: frontmatterIssue }] : []),
+    ...cognitive.issues.map((item) => ({ file: fileName, field: item.field, message: item.message })),
+  ]
+  if (!content) issues.push({ file: fileName, message: '文件内容为空' })
   return {
     notes: [{
       title,
@@ -102,15 +109,17 @@ function parseTextDocument(
       source: fileName,
       sourcePath: stringValue(frontmatter.sourcePath) ?? location.path,
       vault: stringValue(frontmatter.vault) ?? location.vault,
-      mastery: numberValue(frontmatter.mastery),
-      confidence: numberValue(frontmatter.confidence),
-      exploration: numberValue(frontmatter.exploration),
-      status: statusValue(frontmatter.status),
-      area: stringValue(frontmatter.area),
-      reviewedAt: stringValue(frontmatter.reviewedAt),
+      mastery: cognitive.fields.mastery,
+      confidence: cognitive.fields.confidence,
+      exploration: cognitive.fields.exploration,
+      status: cognitive.fields.status,
+      area: cognitive.fields.area,
+      areas: cognitive.fields.areas,
+      reviewedAt: cognitive.fields.reviewedAt,
+      cognitiveStateProvenance: Object.keys(cognitive.fields).length ? 'yaml' : undefined,
       links: [...new Set([...parseWikiLinks(content), ...normalizeLinks(frontmatter.links)])],
     }],
-    issues: content ? [] : [{ file: fileName, message: '文件内容为空' }],
+    issues,
     name: title,
   }
 }
@@ -163,22 +172,27 @@ function normalizeNote(value: unknown): { note?: NoteInput; issue?: Omit<ImportI
       confidence: numberValue(record.confidence),
       exploration: numberValue(record.exploration),
       status: statusValue(record.status),
-      area: stringValue(record.area),
+      area: stringValue(record.area) ?? stringArray(record.area)?.[0] ?? stringArray(record.areas)?.[0],
+      areas: mergeStringArrays(stringArray(record.area), stringArray(record.areas)),
       reviewedAt: stringValue(record.reviewedAt) ?? stringValue(record.reviewed_at),
       links: [...new Set([...parseWikiLinks(content), ...normalizeLinks(record.links)])],
     },
   }
 }
 
-function splitFrontmatter(text: string): { frontmatter: Record<string, unknown>; body: string } {
+function splitFrontmatter(text: string): { frontmatter: Record<string, unknown>; body: string; issue?: string } {
   if (!text.startsWith('---')) return { frontmatter: {}, body: text }
   const end = text.indexOf('\n---', 3)
-  if (end < 0) return { frontmatter: {}, body: text }
+  if (end < 0) return { frontmatter: {}, body: text, issue: 'YAML frontmatter 未闭合' }
   try {
     const frontmatter = parseYaml(text.slice(3, end)) as Record<string, unknown>
     return { frontmatter: frontmatter && typeof frontmatter === 'object' ? frontmatter : {}, body: text.slice(end + 4) }
-  } catch {
-    return { frontmatter: {}, body: text }
+  } catch (error) {
+    return {
+      frontmatter: {},
+      body: text.slice(end + 4),
+      issue: `YAML frontmatter 无法解析：${errorMessage(error)}`,
+    }
   }
 }
 
@@ -186,6 +200,17 @@ function stringValue(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) return value.trim()
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return undefined
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const values = value.flatMap((item) => typeof item === 'string' && item.trim() ? [item.trim()] : [])
+  return values.length ? values : undefined
+}
+
+function mergeStringArrays(...values: Array<string[] | undefined>): string[] | undefined {
+  const merged = [...new Set(values.flatMap((value) => value ?? []))]
+  return merged.length ? merged : undefined
 }
 
 function numberValue(value: unknown): number | undefined {

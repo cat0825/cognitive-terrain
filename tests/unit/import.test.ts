@@ -61,8 +61,69 @@ describe('import parsing', () => {
       exploration: 0.9,
       status: 'growing',
       area: '数学',
+      reviewedAt: undefined,
       links: ['线性代数', '概率论'],
     })
+  })
+
+  it('merges scalar area and areas into normalized multi-discipline membership', async () => {
+    const file = new File(
+      ['---\ntitle: Quantum geometry\narea: 数学\nareas: [数学, 物理, " 物理 "]\n---\n交叉学科正文。'],
+      'quantum-geometry.md',
+      { type: 'text/markdown' },
+    )
+
+    const result = await parseImportFile(file)
+
+    expect(result.issues).toEqual([])
+    expect(result.notes[0]).toMatchObject({ area: '数学', areas: ['数学', '物理'] })
+  })
+
+  it('accepts an area array and reports invalid areas without discarding content', async () => {
+    const valid = new File(['---\narea: [数学, 物理]\n---\n正文。'], 'valid-areas.md')
+    const invalid = new File(['---\nareas: [数学, 42]\n---\n正文仍保留。'], 'invalid-areas.md')
+
+    const validResult = await parseImportFile(valid)
+    const invalidResult = await parseImportFile(invalid)
+
+    expect(validResult.notes[0]).toMatchObject({ area: '数学', areas: ['数学', '物理'] })
+    expect(invalidResult.notes[0]?.content).toBe('正文仍保留。')
+    expect(invalidResult.issues).toEqual([{ file: 'invalid-areas.md', field: 'areas', message: '必须是非空文本或非空文本数组' }])
+  })
+
+  it('reads multi-discipline areas from structured records', () => {
+    const result = normalizeNoteInputs([
+      { title: 'Cross field', content: 'Body', createdAt: '2026-04-05', area: '数学', areas: ['数学', '物理'] },
+    ])
+
+    expect(result.notes[0]).toMatchObject({ area: '数学', areas: ['数学', '物理'] })
+  })
+
+  it('reports invalid cognitive fields without discarding valid fields or body content', async () => {
+    const file = new File(
+      ['---\nmastery: 1.4\nconfidence: 0.6\nstatus: unknown\nreviewedAt: not-a-date\n---\n仍然保留正文。'],
+      'invalid-state.md',
+      { type: 'text/markdown' },
+    )
+
+    const result = await parseImportFile(file)
+
+    expect(result.notes[0]).toMatchObject({ content: '仍然保留正文。', confidence: 0.6 })
+    expect(result.notes[0]?.mastery).toBeUndefined()
+    expect(result.notes[0]?.status).toBeUndefined()
+    expect(result.issues.map((issue) => issue.field)).toEqual(['mastery', 'status', 'reviewedAt'])
+  })
+
+  it('reports malformed frontmatter and keeps the Markdown body', async () => {
+    const file = new File(['---\nmastery: [\n---\n正文仍可导入'], 'broken-frontmatter.md', {
+      type: 'text/markdown',
+    })
+
+    const result = await parseImportFile(file)
+
+    expect(result.notes[0]?.content).toBe('正文仍可导入')
+    expect(result.issues).toHaveLength(1)
+    expect(result.issues[0]?.message).toContain('YAML frontmatter 无法解析')
   })
 
   it('uses the embedded project name for structured imports', async () => {

@@ -1,5 +1,47 @@
 export type NoteStatus = 'seed' | 'growing' | 'stable' | 'gap' | 'archived'
 
+export type CognitiveStateProvenance = 'yaml' | 'app' | 'migration'
+
+export interface CognitiveState {
+  itemId: string
+  mastery?: number
+  confidence?: number
+  exploration?: number
+  status?: NoteStatus
+  reviewedAt?: string
+  updatedAt: string
+  provenance: CognitiveStateProvenance
+}
+
+export type InteractionEventType =
+  | 'created'
+  | 'edited'
+  | 'opened'
+  | 'reviewed'
+  | 'linked'
+  | 'classified'
+
+export interface InteractionEvent {
+  id: string
+  itemId: string
+  type: InteractionEventType
+  occurredAt: string
+  payload?: Record<string, unknown>
+}
+
+export type TerrainElevation = 'density' | 'mastery' | 'exploration' | 'activity' | 'structure'
+export type TerrainColor = 'area' | 'source-kind' | 'trust'
+export type TerrainOverlay = 'temperature' | 'confidence' | 'staleness' | 'gaps'
+
+export interface TerrainProfile {
+  id: string
+  label: string
+  elevation: TerrainElevation
+  color: TerrainColor
+  overlay?: TerrainOverlay
+  formulaVersion: string
+}
+
 export interface NoteInput {
   id?: string
   title?: string
@@ -15,7 +57,9 @@ export interface NoteInput {
   exploration?: number
   status?: NoteStatus
   area?: string
+  areas?: string[]
   reviewedAt?: string
+  cognitiveStateProvenance?: CognitiveStateProvenance
   links?: string[]
 }
 
@@ -36,7 +80,9 @@ export interface TerrainNote {
   exploration?: number
   status?: NoteStatus
   area?: string
+  areas?: string[]
   reviewedAt?: string
+  cognitiveStateProvenance?: CognitiveStateProvenance
   links: string[]
   x: number
   y: number
@@ -58,7 +104,7 @@ export interface TerrainPeak {
 }
 
 export interface TerrainProject {
-  schemaVersion: 2
+  schemaVersion: 3
   id: string
   name: string
   createdAt: string
@@ -72,6 +118,10 @@ export interface TerrainProject {
   snapshots: TerrainSnapshot[]
   peaks: TerrainPeak[]
   noteNeighbors: string[][]
+  cognitiveStates: CognitiveState[]
+  interactionEvents: InteractionEvent[]
+  terrainProfiles: TerrainProfile[]
+  activeTerrainProfileId: string
 }
 
 export interface AnalysisOptions {
@@ -111,11 +161,31 @@ export interface ParsedImport {
 
 export type ViewMode = '3d' | '2d'
 export type QualityLevel = 'high' | 'medium' | 'low'
-export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'area'
+export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'temperature' | 'area'
 
 export interface ProjectSummary {
   id: string
   name: string
   updatedAt: string
+  noteCount: number
+}
+
+export type ProjectBackupReason = 'manual' | 'before-save' | 'before-delete' | 'before-restore'
+
+export interface ProjectBackup {
+  id: string
+  projectId: string
+  projectName: string
+  createdAt: string
+  reason: ProjectBackupReason
+  project: TerrainProject
+}
+
+export interface ProjectBackupSummary {
+  id: string
+  projectId: string
+  projectName: string
+  createdAt: string
+  reason: ProjectBackupReason
   noteCount: number
 }

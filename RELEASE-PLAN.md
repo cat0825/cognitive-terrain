@@ -1,11 +1,11 @@
 # Cognitive Terrain — 发布与改善计划（终版）
 
 - 项目：`cognitive-terrain`（`/Users/qianyuhe/Documents/GitHub/cognitive-terrain`）
-- 基线日期：2026-08-12（fresh 校验：typecheck ✓ lint ✓ unit 25/25 ✓ build ✓ size ✓ e2e 10/10 ✓ visual 2/2 ✓ a11y 4/4 ✓ perf ✓）
+- 基线日期：2026-08-14（fresh 校验：typecheck ✓ lint ✓ unit 45/45 ✓ build ✓ size ✓ e2e 12/12 ✓ visual 2/2 ✓ a11y 6/6 ✓；perf 沿用 2026-08-12 口径）
 - 产品形态：本地优先、无后端的"认知地形"知识地图
 - 发布形态：公开 Demo（Cloudflare Pages）+ 开源仓库（GitHub）
 - LICENSE：AGPL-3.0（严格 copyleft，网络服务亦须开源）
-- Schema：TerrainProject v1 → v2（含 IndexedDB 迁移）
+- Schema：兼容 `TerrainProject` v3；IndexedDB 数据库 v5（恢复点 + Schema v3 多对象物化）
 - 发布文档：HTML + Markdown 双份
 
 ## 已决策项
@@ -15,7 +15,7 @@
 | 仓库 | 独立 git 仓库，GitHub `cat0825/cognitive-terrain` |
 | LICENSE | AGPL-3.0 |
 | 部署 | Cloudflare Pages，本地 wrangler CLI（已认证） |
-| Schema | v2（embeddingMode / noteNeighbors）+ 迁移 |
+| Schema | `TerrainProject` v3 兼容仓 + IndexedDB v5 多对象物化 |
 | 发布文档 | HTML 可视化报告 + MD 可执行版 |
 | 范围 | 阶段 0–9 全部 |
 
@@ -90,6 +90,15 @@
 | Canvas / export | 非背景像素 89.45%；PNG 924,082 bytes；控制台 0 error |
 | npm audit | 4 high，均在 transformers Node 依赖链，无可用修复 |
 | Pages 候选 | `https://codex-release-plan-hardening.cognitive-terrain.pages.dev`（生产域名未覆盖） |
+
+## 发布后成熟化增量（2026-08-14）
+
+- IndexedDB v3 新增 `backups` store；覆盖、改名、删除和恢复前自动保留恢复点，支持手动创建与从项目菜单恢复。
+- 单项目最多保留 8 份恢复点；恢复点仍与项目同属站点数据，不能替代 `.terrain.json` 站点外备份。
+- IndexedDB v5 新增 11 个 Schema v3 对象仓；v1/v4 项目在升级事务内完成数量/ID 校验和原子物化，失败保持旧数据库不变。
+- `projects`/`backups` 兼容仓与多对象仓在保存、改名、删除、恢复时同事务更新；workspace 复合键允许不同项目复用相同 item ID。
+- 当前 Citation 迁移为空；Revision 只保留 hash 基线，不是完整编辑历史，删除后从兼容恢复点恢复也不会带回旧 revision 历史。
+- 验证：typecheck、lint、build、size 全部通过；unit 12 files / 45 tests、E2E 12/12、a11y 6/6、visual 2/2；实际浏览器 v4→v5 物化 1800 items 对账通过。
 
 ---
 

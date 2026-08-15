@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, ExternalLink, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ExternalLink, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
 import type { TerrainNote, TerrainProject } from '../domain/types'
+import { buildActivitySummaries, temperatureColor } from '../domain/activity-temperature'
+import { areasForNote, plateColor, similarityReasons, type PlateCollision } from '../domain/knowledge-plates'
 import { findNeighbors } from '../pipeline/neighbors'
 import { maintenanceCandidates, resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
 import { useAppStore } from '../store/app-store'
@@ -8,12 +10,14 @@ import { useAppStore } from '../store/app-store'
 interface NoteDetailProps {
   project: TerrainProject
   note: TerrainNote | undefined
+  collision?: PlateCollision
   visibleCount: number
 }
 
-export function NoteDetail({ project, note, visibleCount }: NoteDetailProps) {
+export function NoteDetail({ project, note, collision, visibleCount }: NoteDetailProps) {
   const detailsOpen = useAppStore((state) => state.detailsOpen)
   const selectNote = useAppStore((state) => state.selectNote)
+  const selectCollision = useAppStore((state) => state.selectCollision)
   const setDetailsOpen = useAppStore((state) => state.setDetailsOpen)
   if (!detailsOpen) return null
 
@@ -22,7 +26,7 @@ export function NoteDetail({ project, note, visibleCount }: NoteDetailProps) {
       <div className="detail-grip" aria-hidden="true" />
       <header>
         <span className="panel-kicker">
-          {note ? 'SELECTED NOTE' : 'PROJECT OVERVIEW'}
+          {collision ? 'PLATE COLLISION' : note ? 'SELECTED NOTE' : 'PROJECT OVERVIEW'}
           <span className={`mode-badge mode-badge--${project.embeddingMode}`}>
             {embeddingModeLabel(project.embeddingMode)}
           </span>
@@ -33,14 +37,53 @@ export function NoteDetail({ project, note, visibleCount }: NoteDetailProps) {
           aria-label="关闭详情"
           onClick={() => {
             selectNote(null)
+            selectCollision(null)
             setDetailsOpen(false)
           }}
         >
           <X size={16} />
         </button>
       </header>
-      {note ? <NoteContent key={note.id} note={note} /> : <ProjectOverview project={project} visibleCount={visibleCount} />}
+      {collision
+        ? <CollisionContent collision={collision} project={project} />
+        : note
+          ? <NoteContent key={note.id} note={note} />
+          : <ProjectOverview project={project} visibleCount={visibleCount} />}
     </aside>
+  )
+}
+
+function CollisionContent({ collision, project }: { collision: PlateCollision; project: TerrainProject }) {
+  const selectNote = useAppStore((state) => state.selectNote)
+  const notesById = new Map(project.notes.map((note) => [note.id, note]))
+  const pairs = collision.bridges.flatMap((bridge) => {
+    const from = notesById.get(bridge.fromId)
+    const to = notesById.get(bridge.toId)
+    return from && to ? [{ from, to }] : []
+  })
+  return (
+    <div className="collision-content">
+      <span className="panel-kicker">板块碰撞带</span>
+      <h2>{collision.firstArea} × {collision.secondArea}</h2>
+      <div className="collision-route" aria-label={`${collision.firstArea} 与 ${collision.secondArea}`}>
+        <span><i style={{ backgroundColor: plateColor(collision.firstArea) }} aria-hidden="true" />{collision.firstArea}</span>
+        <b>×</b>
+        <span><i style={{ backgroundColor: plateColor(collision.secondArea) }} aria-hidden="true" />{collision.secondArea}</span>
+      </div>
+      <div className="collision-metric"><strong>{collision.relationCount}</strong><span>条跨域 WikiLink</span></div>
+      <p className="collision-method">仅统计当前可见笔记中可解析的 WikiLink，按无向板块对聚合；共享任一领域时不计为跨域，完全不相交时按双方主领域计入一次。带宽表示关系数量，不代表因果强度。</p>
+      <section className="collision-pairs">
+        <span className="panel-kicker">代表关系</span>
+        <ul>
+          {pairs.slice(0, 6).map(({ from, to }) => (
+            <li key={`${from.id}-${to.id}`}>
+              <button type="button" onClick={() => selectNote(from.id)}><span>{from.title}</span><small>↔ {to.title}</small></button>
+            </li>
+          ))}
+        </ul>
+        {pairs.length > 6 && <small>另有 {pairs.length - 6} 条关系</small>}
+      </section>
+    </div>
   )
 }
 
@@ -49,21 +92,26 @@ function NoteContent({ note }: { note: TerrainNote }) {
   const selectNote = useAppStore((state) => state.selectNote)
   const requestFocus = useAppStore((state) => state.requestFocus)
   const updateNote = useAppStore((state) => state.updateNote)
+  const markNoteReviewed = useAppStore((state) => state.markNoteReviewed)
   const neighbors = findNeighbors(project, note.id, 6)
   const semanticCandidates = semanticLinkCandidates(project.notes, note.id, 3)
+  const noteAreas = areasForNote(note)
+  const activity = useMemo(
+    () => buildActivitySummaries([note], project.interactionEvents).get(note.id),
+    [note, project.interactionEvents],
+  )
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(note.title)
   const [draftContent, setDraftContent] = useState(note.content)
   const [draftTags, setDraftTags] = useState(note.tags.join(', '))
+  const [draftAreas, setDraftAreas] = useState(noteAreas.join(', '))
   const [draftMastery, setDraftMastery] = useState(note.mastery === undefined ? '' : String(Math.round(note.mastery * 100)))
   const [draftConfidence, setDraftConfidence] = useState(note.confidence === undefined ? '' : String(Math.round(note.confidence * 100)))
   const [draftExploration, setDraftExploration] = useState(note.exploration === undefined ? '' : String(Math.round(note.exploration * 100)))
   const [draftStatus, setDraftStatus] = useState(note.status ?? '')
+  const [isReviewing, setIsReviewing] = useState(false)
   const isAnalyzing = useAppStore((state) => state.isAnalyzing)
-  const dirty = useMemo(
-    () => draftTitle.trim() !== note.title || draftContent.trim() !== note.content || splitTags(draftTags).join(',') !== note.tags.join(',') || draftMastery !== scoreText(note.mastery) || draftConfidence !== scoreText(note.confidence) || draftExploration !== scoreText(note.exploration) || draftStatus !== (note.status ?? ''),
-    [draftTitle, draftContent, draftTags, draftMastery, draftConfidence, draftExploration, draftStatus, note],
-  )
+  const dirty = draftTitle.trim() !== note.title || draftContent.trim() !== note.content || splitTags(draftTags).join(',') !== note.tags.join(',') || splitAreas(draftAreas).join(',') !== noteAreas.join(',') || draftMastery !== scoreText(note.mastery) || draftConfidence !== scoreText(note.confidence) || draftExploration !== scoreText(note.exploration) || draftStatus !== (note.status ?? '')
   if (editing) {
     return (
       <div className="note-content">
@@ -80,6 +128,10 @@ function NoteContent({ note }: { note: TerrainNote }) {
           <span>标签（逗号分隔）</span>
           <input value={draftTags} onChange={(event) => setDraftTags(event.target.value)} />
         </label>
+        <label className="edit-field">
+          <span>领域（逗号分隔）</span>
+          <input value={draftAreas} onChange={(event) => setDraftAreas(event.target.value)} placeholder="例如：数学, 物理" />
+        </label>
         <div className="state-grid">
           <label className="edit-field"><span>熟练度 0–100</span><input inputMode="numeric" value={draftMastery} onChange={(event) => setDraftMastery(event.target.value)} placeholder="未标注" /></label>
           <label className="edit-field"><span>置信度 0–100</span><input inputMode="numeric" value={draftConfidence} onChange={(event) => setDraftConfidence(event.target.value)} placeholder="未标注" /></label>
@@ -92,7 +144,7 @@ function NoteContent({ note }: { note: TerrainNote }) {
             className="primary-button"
             disabled={!dirty || isAnalyzing}
             onClick={async () => {
-              await updateNote(note.id, { title: draftTitle, content: draftContent, tags: splitTags(draftTags), mastery: parseScore(draftMastery), confidence: parseScore(draftConfidence), exploration: parseScore(draftExploration), status: draftStatus ? draftStatus as TerrainNote['status'] : null })
+              await updateNote(note.id, { title: draftTitle, content: draftContent, tags: splitTags(draftTags), areas: splitAreas(draftAreas), mastery: parseScore(draftMastery), confidence: parseScore(draftConfidence), exploration: parseScore(draftExploration), status: draftStatus ? draftStatus as TerrainNote['status'] : null })
               setEditing(false)
             }}
           >
@@ -133,7 +185,19 @@ function NoteContent({ note }: { note: TerrainNote }) {
           <span>置信度 <strong>{scoreLabel(note.confidence)}</strong></span>
           <span>探索度 <strong>{scoreLabel(note.exploration)}</strong></span>
         </div>
-        <small>{note.status ? `状态：${note.status}` : '尚未标注状态'}{note.area ? ` · ${note.area}` : ''}</small>
+        <small>{note.status ? `状态：${note.status}` : '尚未标注状态'}</small>
+        {noteAreas.length > 0 && (
+          <div className="note-areas" aria-label="领域归属">
+            {noteAreas.map((area) => (
+              <span key={area}><i style={{ backgroundColor: plateColor(area) }} aria-hidden="true" />{area}</span>
+            ))}
+          </div>
+        )}
+        <div className="note-activity" aria-label="知识温度">
+          <div><span>知识温度</span><strong style={{ color: temperatureColor(activity?.score ?? 0) }}>{Math.round((activity?.score ?? 0) * 100)}%</strong></div>
+          <small>打开 {activity?.openedCount ?? 0} · 编辑 {activity?.editedCount ?? 0} · 复习 {activity?.reviewedCount ?? 0}</small>
+          <small>{activity?.lastActivityAt ? `最近活动：${relativeActivityTime(activity.lastActivityAt)}` : '尚无活动记录'}</small>
+        </div>
       </section>
       <div className="note-actions">
         <button type="button" className="focus-button" onClick={() => requestFocus(note.id)}>
@@ -144,27 +208,42 @@ function NoteContent({ note }: { note: TerrainNote }) {
           <Pencil size={13} />
           编辑
         </button>
+        <button
+          type="button"
+          className="focus-button"
+          disabled={isReviewing || isAnalyzing}
+          onClick={async () => {
+            setIsReviewing(true)
+            await markNoteReviewed(note.id)
+            setIsReviewing(false)
+          }}
+        >
+          <CheckCircle2 size={13} />
+          {isReviewing ? '记录中…' : '标记已复习'}
+        </button>
       </div>
       {neighbors.length > 0 && (
         <section className="neighbor-section">
           <span className="panel-kicker">相关笔记</span>
           <ul className="neighbor-list">
-            {neighbors.map((neighbor) => (
-              <li key={neighbor.id}>
+            {neighbors.map((neighbor) => {
+              const reasons = similarityReasons(project.notes, note.id, neighbor.id)
+              return <li key={neighbor.id}>
                 <button
                   type="button"
                   onClick={() => selectNote(neighbor.id)}
                 >
                   <strong>{neighbor.title}</strong>
                   <small>{neighbor.tags.slice(0, 3).map((tag) => `#${tag}`).join(' ')}</small>
+                  <small className="similarity-reasons">{reasons.map((reason) => reason.label).join(' · ')}</small>
                 </button>
               </li>
-            ))}
+            })}
           </ul>
         </section>
       )}
       <RelationSection note={note} />
-      {semanticCandidates.length > 0 && <SemanticCandidateSection candidates={semanticCandidates} />}
+      {semanticCandidates.length > 0 && <SemanticCandidateSection candidates={semanticCandidates} originId={note.id} project={project} />}
       {note.source?.startsWith('http') && (
         <a href={note.source} target="_blank" rel="noreferrer">
           打开来源
@@ -269,7 +348,7 @@ function RelationList({ icon, label, notes, onSelect }: { icon: ReactNode; label
   return <div className="relation-group"><span>{icon}{label}</span><ul className="relation-list">{notes.slice(0, 5).map((linked) => <li key={linked.id}><button type="button" onClick={() => onSelect(linked.id)}>{linked.title}</button></li>)}</ul></div>
 }
 
-function SemanticCandidateSection({ candidates }: { candidates: Array<{ note: TerrainNote; distance: number }> }) {
+function SemanticCandidateSection({ candidates, originId, project }: { candidates: Array<{ note: TerrainNote; distance: number }>; originId: string; project: TerrainProject }) {
   const reportError = useAppStore((state) => state.reportError)
   const [copied, setCopied] = useState<string | null>(null)
   const copiedTimer = useRef<number | null>(null)
@@ -283,7 +362,7 @@ function SemanticCandidateSection({ candidates }: { candidates: Array<{ note: Te
     if (copiedTimer.current) window.clearTimeout(copiedTimer.current)
     copiedTimer.current = window.setTimeout(() => setCopied(null), 2400)
   }
-  return <section className="relation-section semantic-candidates"><span className="panel-kicker">语义候选补链</span><small>模型投影位置接近，但当前没有明确双链</small><ul className="relation-list">{candidates.map(({ note, distance }) => <li key={note.id}><button type="button" onClick={() => void copy(note.title)}><strong>{note.title}</strong><small>{copied === note.title ? '已复制 wikilink' : `布局距离 ${(distance * 100).toFixed(1)}`}</small></button></li>)}</ul><small aria-live="polite" className={copied ? 'copy-status is-copied' : 'copy-status'}>{copied ? `已复制 [[${copied}]]，确认后再写回 Obsidian。` : '点击候选可复制 [[笔记名]]，确认后再写回 Obsidian。'}</small></section>
+  return <section className="relation-section semantic-candidates"><span className="panel-kicker">语义候选补链</span><small>模型投影位置接近，但当前没有明确双链</small><ul className="relation-list">{candidates.map(({ note }) => { const reasons = similarityReasons(project.notes, originId, note.id); return <li key={note.id}><button type="button" onClick={() => void copy(note.title)}><strong>{note.title}</strong><small>{copied === note.title ? '已复制 wikilink' : reasons.map((reason) => reason.label).join(' · ')}</small></button></li> })}</ul><small aria-live="polite" className={copied ? 'copy-status is-copied' : 'copy-status'}>{copied ? `已复制 [[${copied}]]，确认后再写回 Obsidian。` : '点击候选可复制 [[笔记名]]，确认后再写回 Obsidian。'}</small></section>
 }
 
 function snapshotCutoff(project: TerrainProject, index: number): number {
@@ -300,6 +379,10 @@ function splitTags(value: string): string[] {
     .filter(Boolean)
 }
 
+function splitAreas(value: string): string[] {
+  return areasForNote({ areas: value.split(/[,，|\n]+/) })
+}
+
 function parseScore(value: string): number | null {
   const parsed = Number(value)
   return value.trim() && Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed / 100)) : null
@@ -311,6 +394,17 @@ function scoreText(value: number | undefined): string {
 
 function scoreLabel(value: number | undefined): string {
   return value === undefined ? '未标注' : `${Math.round(value * 100)}%`
+}
+
+function relativeActivityTime(value: string): string {
+  const elapsedMs = Math.max(0, Date.now() - Date.parse(value))
+  const minutes = Math.floor(elapsedMs / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  return days < 30 ? `${days} 天前` : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value))
 }
 
 async function copyWikiLink(title: string, reportError: (message: string) => void): Promise<boolean> {

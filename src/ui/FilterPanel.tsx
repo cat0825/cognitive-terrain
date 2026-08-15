@@ -1,4 +1,7 @@
 import { Check, RotateCcw, X } from 'lucide-react'
+import { useMemo } from 'react'
+import { buildPlateCollisions, normalizeArea, summarizeKnowledgePlates } from '../domain/knowledge-plates'
+import { buildActivitySummaries, TEMPERATURE_COLORS } from '../domain/activity-temperature'
 import { projectTagCounts } from '../domain/project-view'
 import type { QualityLevel, VisualDimension } from '../domain/types'
 import { useAppStore } from '../store/app-store'
@@ -6,15 +9,33 @@ import { useAppStore } from '../store/app-store'
 export function FilterPanel() {
   const project = useAppStore((state) => state.project)
   const activeTags = useAppStore((state) => state.activeTags)
+  const activeAreas = useAppStore((state) => state.activeAreas)
   const quality = useAppStore((state) => state.quality)
   const visualDimension = useAppStore((state) => state.visualDimension)
   const filtersOpen = useAppStore((state) => state.filtersOpen)
   const toggleTag = useAppStore((state) => state.toggleTag)
   const clearTags = useAppStore((state) => state.clearTags)
+  const toggleArea = useAppStore((state) => state.toggleArea)
+  const clearAreas = useAppStore((state) => state.clearAreas)
   const setQuality = useAppStore((state) => state.setQuality)
   const setVisualDimension = useAppStore((state) => state.setVisualDimension)
   const setFiltersOpen = useAppStore((state) => state.setFiltersOpen)
   const tags = projectTagCounts(project).slice(0, 18)
+  const plates = useMemo(() => summarizeKnowledgePlates(project.notes), [project.notes])
+  const collisions = useMemo(() => buildPlateCollisions(project.notes), [project.notes])
+  const bridgeCount = collisions.reduce((sum, collision) => sum + collision.relationCount, 0)
+  const bandCount = collisions.filter((collision) => collision.mode === 'band').length
+  const unassignedCount = useMemo(() => project.notes.filter((note) => !note.area && !note.areas?.length).length, [project.notes])
+  const activitySummary = useMemo(() => {
+    const summaries = [...buildActivitySummaries(project.notes, project.interactionEvents).values()]
+    return summaries.reduce((result, summary) => ({
+      activeNotes: result.activeNotes + (summary.totalCount > 0 ? 1 : 0),
+      eventCount: result.eventCount + summary.totalCount,
+      openedCount: result.openedCount + summary.openedCount,
+      editedCount: result.editedCount + summary.editedCount,
+      reviewedCount: result.reviewedCount + summary.reviewedCount,
+    }), { activeNotes: 0, eventCount: 0, openedCount: 0, editedCount: 0, reviewedCount: 0 })
+  }, [project.interactionEvents, project.notes])
 
   if (!filtersOpen) return null
   return (
@@ -58,9 +79,9 @@ export function FilterPanel() {
         </div>
       </section>
       <section className="filter-section">
-        <span className="filter-heading">点云编码</span>
+        <span className="filter-heading">地形口径</span>
         <div className="visual-dimension-control">
-          {(['density', 'mastery', 'exploration', 'area'] as VisualDimension[]).map((dimension) => (
+          {(['density', 'mastery', 'exploration', 'temperature', 'area'] as VisualDimension[]).map((dimension) => (
             <button
               type="button"
               key={dimension}
@@ -73,6 +94,49 @@ export function FilterPanel() {
           ))}
         </div>
         <p className="dimension-help">{dimensionHelp(visualDimension)}</p>
+        {visualDimension === 'temperature' && (
+          <div className="temperature-legend" role="group" aria-label="知识温度图例">
+            <div className="temperature-scale" aria-hidden="true">
+              <span><i style={{ backgroundColor: TEMPERATURE_COLORS.cold }} />冷</span>
+              <span><i style={{ backgroundColor: TEMPERATURE_COLORS.warm }} />温</span>
+              <span><i style={{ backgroundColor: TEMPERATURE_COLORS.hot }} />热</span>
+            </div>
+            <p>{activitySummary.activeNotes} 条有活动 · {activitySummary.eventCount} 个事件</p>
+            <small>打开 {activitySummary.openedCount} · 编辑 {activitySummary.editedCount} · 复习 {activitySummary.reviewedCount}</small>
+          </div>
+        )}
+        {visualDimension === 'area' && (
+          <div className="plate-legend" role="group" aria-label="知识板块图例">
+            <div className="plate-legend-heading">
+              <span>知识板块</span>
+              {activeAreas.length > 0 && <button type="button" onClick={clearAreas}>显示全部</button>}
+            </div>
+            <div className="plate-legend-list">
+              {plates.map((plate) => {
+                const area = normalizeArea(plate.label) ?? plate.label
+                const selected = activeAreas.includes(area)
+                return (
+                  <button
+                    type="button"
+                    key={plate.id}
+                    className={selected ? 'is-active' : ''}
+                    onClick={() => toggleArea(area)}
+                    aria-pressed={selected}
+                    title={`${plate.noteCount} 条笔记 · ${plate.crossLinkCount} 条跨板块 WikiLink`}
+                  >
+                    <span className="plate-swatch" style={{ backgroundColor: plate.color }} aria-hidden="true" />
+                    <span>{plate.label}</span>
+                    <small>{plate.noteCount}</small>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="plate-legend-summary">
+              {plates.length} 个板块 · {bridgeCount} 条跨域 WikiLink · {bandCount} 个碰撞带
+              {unassignedCount > 0 ? ` · ${unassignedCount} 条未分类` : ''}
+            </p>
+          </div>
+        )}
       </section>
       <section className="filter-section">
         <span className="filter-heading">渲染质量</span>
@@ -97,15 +161,17 @@ export function FilterPanel() {
 function dimensionLabel(dimension: VisualDimension): string {
   if (dimension === 'mastery') return '熟练度'
   if (dimension === 'exploration') return '探索度'
+  if (dimension === 'temperature') return '温度'
   if (dimension === 'area') return '领域'
   return '密度'
 }
 
 function dimensionHelp(dimension: VisualDimension): string {
-  if (dimension === 'mastery') return '越清晰、越明亮表示掌握程度越高；未标注保持中性。'
-  if (dimension === 'exploration') return '暖色和较大节点表示更值得继续探索。'
-  if (dimension === 'area') return '颜色来自 YAML area；没有 area 时使用首个标签。'
-  return '沿用当前地形层级：高度、重要性、新鲜度与峰值邻近共同决定亮度。'
+  if (dimension === 'mastery') return '海拔：知识密度 × 置信度加权熟练度；未标注不参与高度。'
+  if (dimension === 'exploration') return '海拔：知识密度 × 探索度；暖色节点表示更高探索意愿。'
+  if (dimension === 'temperature') return '颜色：打开、编辑和复习事件按时间衰减叠加；保持稳定坐标与知识密度海拔。'
+  if (dimension === 'area') return '海拔保持知识密度；颜色来自 YAML area/areas，多选板块按任一归属筛选，跨域金色山脊表示可追溯的 WikiLink。'
+  return '海拔：笔记在稳定语义坐标中的局部密度。'
 }
 
 function qualityLabel(level: QualityLevel): string {

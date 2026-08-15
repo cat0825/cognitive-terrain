@@ -1,8 +1,8 @@
 # Cognitive Terrain 成熟产品计划
 
-> 状态：后续成熟化路线图；其中 Schema v3、真实来源库、引用式 RAG、同步等尚未实现
+> 状态：后续成熟化路线图；Schema v3 第一阶段多对象物化已实现，真实来源库、完整 Citation/Revision、引用式 RAG、同步等仍未实现
 >
-> 基线：2026-08-07，分支 `codex/release-plan-hardening`
+> 基线：2026-08-15，分支 `codex/semantic-terrain-foundation`；Issue 路线图见 [#9](https://github.com/cat0825/cognitive-terrain/issues/9)
 >
 > 关联文档：`RELEASE-PLAN.md` 负责“公开 Demo 如何发布”；本文负责“如何从 Demo 变成成熟 AI Infra 知识产品”
 > 规划口径：1 名高级前端/数据工程师 + 0.5 名内容研究人员；预计 12–17 周。单人同时承担内容整理时，预计 16–22 周。
@@ -19,7 +19,7 @@ Cognitive Terrain 当前已经是一个完成度较高的可发布 Demo：全屏
 2. 每个点只有 Note 级字段，缺来源、引用、实体、关系、版本和分类体系。
 3. 搜索是字符串包含匹配，无法承担知识发现。
 4. 编辑一条笔记会重新 embedding 并全量 UMAP，已有山丘可能漂移。
-5. 数据只保存在 IndexedDB 单表，误删、浏览器清理和迁移失败都缺恢复链路。
+5. IndexedDB 已有项目表与本地恢复点表，可恢复覆盖或误删的项目；但清站点数据会同时删除二者，迁移回滚和站点外自动备份仍未成立。
 6. 地形是当前唯一强视图，尚缺结果列表、来源库、Inbox、关系视图和引用式问答。
 
 因此，后续不应继续堆叠视觉效果。正确顺序是：
@@ -67,7 +67,7 @@ Cognitive Terrain 当前已经是一个完成度较高的可发布 Demo：全屏
 | 3D/2D 地形 | Three.js / React Three Fiber，等高线、峰、点、时间演化 | Demo 强项 |
 | AI Infra 演示图 | 30 个主题、每主题 60 个点，共 1800 条 | 视觉成立，内容不可信 |
 | 本地分析 | Transformers embedding，失败时确定性向量降级 | 可用基线 |
-| 项目操作 | 导入、合并、编辑、项目库、改名、删除项目、导出 | 只有项目级闭环 |
+| 项目操作 | 导入、合并、编辑、项目库、改名、删除、导出、项目级恢复点 | 有项目级恢复闭环，缺条目级修订与回收站 |
 | 时间与对比 | 时间轴、播放、快照比较 | 已形成差异化 |
 | 性能处理 | Worker、动态加载模型、质量档位、性能脚本 | 适合继续演进 |
 | 测试 | unit、E2E、visual、a11y、perf、size | 有工程基础 |
@@ -82,9 +82,9 @@ Cognitive Terrain 当前已经是一个完成度较高的可发布 Demo：全屏
 | `src/store/app-store.ts:203` | 合并和编辑都调用完整 `startAnalysis` | 小改动也会触发全量计算 |
 | `src/pipeline/layout.ts:22` | 每次对全部向量重新运行 UMAP | 已有地形缺位置稳定承诺 |
 | `src/pipeline/neighbors.ts:10` | 每条笔记与全部笔记比较并完整排序 | 近似 `O(n² log n)`，无法直接扩到 50k |
-| `src/storage/db.ts:4` | IndexedDB 只有 `projects` 单对象仓 | 缺事务边界、修订、回收站、索引与可恢复备份 |
+| `src/storage/db.ts:4` | IndexedDB 有 `projects` 与 `backups`，单项目保留 8 个恢复点 | 恢复点仍在同一站点数据内；缺条目级修订、回收站、站点外备份和迁移回滚 |
 | `tests/a11y/accessibility.spec.ts:4` | 主流程主动关闭 `color-contrast` 规则 | 不能宣称完整 WCAG 2.2 AA |
-| `tests/e2e/smoke.spec.ts:3` | E2E 主要覆盖加载和一次导入 | 未覆盖编辑、删除、恢复、迁移、大数据和故障路径 |
+| `tests/e2e/smoke.spec.ts:3` | E2E 覆盖加载、导入和项目恢复点 | 未覆盖编辑、删除后恢复、迁移、大数据和故障路径 |
 
 ### 3.3 运行态体验审计
 
@@ -298,7 +298,9 @@ interface Revision {
 - 山丘高度由可解释指标组成：内容密度为主，可叠加质量、活跃度或用户权重；UI 必须显示当前高度口径。
 - 自动聚类与人工 taxonomy 不一致时保留二者：位置表达语义，边界/标签表达领域骨架。
 
-### 6.4 IndexedDB v3 存储布局
+### 6.4 Schema v3 / IndexedDB v5 存储布局
+
+截至 2026-08-14，IndexedDB v5 已将兼容项目原子物化为 Workspace、Item、Source、Relation、CognitiveState、InteractionEvent、PlateMembership、Layout、TerrainProfile、Citation 和 Revision stores。对象使用 workspace 复合键隔离；Citation 对旧数据为空，Revision 仅记录 content/entity hash 基线。TaxonomyNode、Entity、Embedding、Operation、完整 revision patch 和 backup manifest 仍按下表后续补齐。
 
 | Object Store | 主键 / 索引 |
 | --- | --- |

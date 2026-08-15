@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runAnalysis } from '../../src/pipeline/worker-client'
+import { runAnalysis, runTerrainProfile } from '../../src/pipeline/worker-client'
 import type { AnalysisWorkerRequest } from '../../src/pipeline/worker-protocol'
 
 class FakeWorker {
@@ -42,6 +42,30 @@ describe('analysis worker client', () => {
 
     await expect(handle.promise).rejects.toMatchObject({ name: 'AbortError' })
     expect(worker.posted.map((message) => message.type)).toEqual(['analyze', 'cancel'])
+    expect(worker.terminated).toBe(true)
+  })
+
+  it('resolves terrain profile requests and terminates the worker', async () => {
+    vi.stubGlobal('Worker', FakeWorker)
+    const handle = runTerrainProfile({
+      type: 'build-terrain-profile',
+      notes: [],
+      gridSize: 32,
+      timeZone: 'UTC',
+      elevation: 'mastery',
+    })
+    const worker = FakeWorker.instances[0]
+    const request = worker.posted[0]
+    worker.onmessage?.({
+      data: {
+        type: 'terrain-profile-complete',
+        requestId: request.requestId,
+        terrain: { snapshots: [], peaks: [], bandwidth: 0.08 },
+      },
+    } as MessageEvent)
+
+    await expect(handle.promise).resolves.toMatchObject({ snapshots: [], peaks: [] })
+    expect(request.type).toBe('build-terrain-profile')
     expect(worker.terminated).toBe(true)
   })
 })

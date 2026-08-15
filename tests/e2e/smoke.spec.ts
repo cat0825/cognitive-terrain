@@ -10,6 +10,8 @@ test('app loads the demo terrain and renders a canvas', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('slider', { name: '时间轴' })).toBeVisible()
+  await expect(page.locator('.similarity-reasons').first()).toContainText('布局距离')
+  await expect(page.getByLabel('领域归属').locator('span')).toHaveCount(2)
   await expect.poll(
     () => page.locator('.peak-label-anchor[style*="transform"]').count(),
     { timeout: 15_000 },
@@ -75,4 +77,24 @@ test('imports a JSON study pack and generates terrain', async ({ page }) => {
     page.getByRole('heading', { name: 'DeepSeek Harness 内测：用代表作说话' }),
   ).toBeVisible({ timeout: 60_000 })
   await expect(page.locator('canvas').first()).toBeVisible()
+})
+
+test('creates and restores a local recovery point', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('cognitive-terrain:first-run', 'seen')
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开项目菜单' }).click()
+  await page.getByRole('button', { name: '创建恢复点' }).click()
+
+  await expect(page.getByText('已创建本地恢复点', { exact: true })).toBeVisible()
+  const recoveryPoint = page.getByRole('button', { name: /AI Infra 知识地形 手动/ })
+  await expect(recoveryPoint).toBeVisible()
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await recoveryPoint.click()
+  await expect(page.locator('.project-menu')).toBeHidden()
+  await page.getByRole('button', { name: '打开项目菜单' }).click()
+  await expect(page.getByText('项目已恢复', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: /AI Infra 知识地形 1800 条/ })).toBeVisible({ timeout: 15_000 })
 })

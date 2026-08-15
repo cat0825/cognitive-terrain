@@ -1,18 +1,25 @@
 import type { TerrainNote, TerrainProject } from './types'
+import { areasForNote, normalizeArea } from './knowledge-plates'
 
 export function visibleNotesFor(
   project: TerrainProject,
   timeline: number,
   search: string,
   activeTags: string[],
+  activeAreas: string[] = [],
 ): TerrainNote[] {
   const cutoff = timelineCutoff(project, timeline)
   const query = search.trim().toLocaleLowerCase()
   return project.notes.filter((note) => {
     if (note.createdAtMs > cutoff) return false
     if (activeTags.length && !activeTags.every((tag) => note.tags.includes(tag))) return false
+    const noteAreas = areasForNote(note).flatMap((area) => {
+      const normalized = normalizeArea(area)
+      return normalized ? [normalized] : []
+    })
+    if (activeAreas.length && !activeAreas.some((area) => noteAreas.includes(area))) return false
     if (!query) return true
-    return `${note.title}\n${note.content}\n${note.tags.join(' ')}`.toLocaleLowerCase().includes(query)
+    return `${note.title}\n${note.content}\n${note.tags.join(' ')}\n${areasForNote(note).join(' ')}`.toLocaleLowerCase().includes(query)
   })
 }
 
