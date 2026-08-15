@@ -44,6 +44,18 @@ function App() {
     void initialize()
   }, [initialize])
 
+  useEffect(() => {
+    if (!firstRun) return
+    const dismissWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      dismissFirstRun()
+      focusTerrainStage()
+    }
+    document.addEventListener('keydown', dismissWithEscape)
+    return () => document.removeEventListener('keydown', dismissWithEscape)
+  }, [dismissFirstRun, firstRun])
+
   const visibleNotes = useMemo(
     () => visibleNotesFor(project, timelineBucket, search, activeTags, activeAreas),
     [activeAreas, activeTags, project, search, timelineBucket],
@@ -92,7 +104,13 @@ function App() {
           onExportReport={() => void downloadProjectReport(project)}
         />
         <main className="terrain-workspace">
-          <section id="terrain-export-source" className="terrain-stage" aria-label="认知地形地图">
+          <section
+            id="terrain-export-source"
+            className="terrain-stage"
+            aria-label="认知地形地图"
+            data-selected-note-id={selectedNoteId ?? ''}
+            tabIndex={-1}
+          >
             <TerrainCanvas
               project={project}
               notes={filteredNotes}
@@ -127,12 +145,27 @@ function App() {
             <div>
               <span className="panel-kicker">GETTING STARTED</span>
               <strong>导入你的笔记，生成专属地形</strong>
-              <p>当前展示的是演示数据。导入 JSON / CSV / Markdown 笔记，或用今天的阅读列表快速体验。</p>
+              <p>当前为演示数据。支持 JSON、CSV 与 Markdown。</p>
             </div>
-            <button type="button" className="primary-button" onClick={() => setImportOpen(true)}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                dismissFirstRun()
+                setImportOpen(true)
+              }}
+            >
               导入我的笔记
             </button>
-            <button type="button" className="icon-button first-run-close" aria-label="关闭欢迎提示" onClick={dismissFirstRun}>
+            <button
+              type="button"
+              className="icon-button first-run-close"
+              aria-label="关闭欢迎提示"
+              onClick={() => {
+                dismissFirstRun()
+                focusTerrainStage()
+              }}
+            >
               <X size={15} />
             </button>
           </div>
@@ -173,6 +206,10 @@ function App() {
       </div>
     </div>
   )
+}
+
+function focusTerrainStage(): void {
+  window.requestAnimationFrame(() => document.getElementById('terrain-export-source')?.focus())
 }
 
 export default App

@@ -62,7 +62,6 @@ test('records note activity without moving its stable coordinates', async ({ pag
   await page.goto('/')
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: '关闭欢迎提示' }).click()
-  await page.getByRole('button', { name: '关闭详情' }).click()
   await page.getByRole('button', { name: '切换二维等高线' }).click()
 
   const note = page.getByRole('button', { name: 'SM 与 Tensor Core', exact: true })

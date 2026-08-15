@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ExternalLink, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
 import type { TerrainNote, TerrainProject } from '../domain/types'
 import { buildActivitySummaries, temperatureColor } from '../domain/activity-temperature'
 import { areasForNote, plateColor, similarityReasons, type PlateCollision } from '../domain/knowledge-plates'
@@ -17,12 +17,45 @@ interface NoteDetailProps {
 export function NoteDetail({ project, note, collision, visibleCount }: NoteDetailProps) {
   const detailsOpen = useAppStore((state) => state.detailsOpen)
   const selectNote = useAppStore((state) => state.selectNote)
-  const selectCollision = useAppStore((state) => state.selectCollision)
-  const setDetailsOpen = useAppStore((state) => state.setDetailsOpen)
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const returnFocus = useRef<HTMLElement | SVGElement | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (!detailsOpen) return
+    const activeElement = document.activeElement
+    returnFocus.current = (activeElement instanceof HTMLElement || activeElement instanceof SVGElement)
+      && !activeElement.closest('.note-detail')
+      ? activeElement
+      : document.getElementById('terrain-export-source')
+    setCollapsed(false)
+    const focusFrame = window.requestAnimationFrame(() => closeButton.current?.focus())
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      selectNote(null)
+    }
+    document.addEventListener('keydown', closeWithEscape)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.removeEventListener('keydown', closeWithEscape)
+      const target = returnFocus.current
+      window.requestAnimationFrame(() => {
+        if (target?.isConnected) target.focus()
+        else document.getElementById('terrain-export-source')?.focus()
+      })
+    }
+  }, [detailsOpen, selectNote])
+
+  useEffect(() => setCollapsed(false), [collision?.id, note?.id])
+
   if (!detailsOpen) return null
 
   return (
-    <aside className="note-detail">
+    <aside
+      className={collapsed ? 'note-detail is-collapsed' : 'note-detail'}
+      aria-label={collision ? '板块碰撞详情' : note ? '笔记详情' : '知识概览'}
+    >
       <div className="detail-grip" aria-hidden="true" />
       <header>
         <span className="panel-kicker">
@@ -31,24 +64,35 @@ export function NoteDetail({ project, note, collision, visibleCount }: NoteDetai
             {embeddingModeLabel(project.embeddingMode)}
           </span>
         </span>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="关闭详情"
-          onClick={() => {
-            selectNote(null)
-            selectCollision(null)
-            setDetailsOpen(false)
-          }}
-        >
-          <X size={16} />
-        </button>
+        <div className="detail-header-actions">
+          <button
+            type="button"
+            className="icon-button detail-collapse"
+            aria-label={collapsed ? '展开详情' : '收起详情'}
+            aria-expanded={!collapsed}
+            aria-controls="note-detail-body"
+            onClick={() => setCollapsed((value) => !value)}
+          >
+            {collapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          <button
+            ref={closeButton}
+            type="button"
+            className="icon-button"
+            aria-label="关闭详情"
+            onClick={() => selectNote(null)}
+          >
+            <X size={16} />
+          </button>
+        </div>
       </header>
-      {collision
-        ? <CollisionContent collision={collision} project={project} />
-        : note
-          ? <NoteContent key={note.id} note={note} />
-          : <ProjectOverview project={project} visibleCount={visibleCount} />}
+      <div id="note-detail-body" className="detail-body" hidden={collapsed}>
+        {collision
+          ? <CollisionContent collision={collision} project={project} />
+          : note
+            ? <NoteContent key={note.id} note={note} />
+            : <ProjectOverview project={project} visibleCount={visibleCount} />}
+      </div>
     </aside>
   )
 }

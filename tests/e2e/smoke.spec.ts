@@ -10,8 +10,7 @@ test('app loads the demo terrain and renders a canvas', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('slider', { name: '时间轴' })).toBeVisible()
-  await expect(page.locator('.similarity-reasons').first()).toContainText('布局距离')
-  await expect(page.getByLabel('领域归属').locator('span')).toHaveCount(2)
+  await expect(page.locator('.note-detail')).toBeHidden()
   await expect.poll(
     () => page.locator('.peak-label-anchor[style*="transform"]').count(),
     { timeout: 15_000 },
@@ -66,6 +65,7 @@ test('switches between rotate and pan camera drag modes', async ({ page }) => {
 })
 
 test('imports a JSON study pack and generates terrain', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.addInitScript(() => {
     localStorage.setItem('cognitive-terrain:embedding', 'deterministic')
   })
@@ -73,10 +73,13 @@ test('imports a JSON study pack and generates terrain', async ({ page }) => {
   await page.getByRole('button', { name: '打开项目菜单' }).click()
   await page.getByRole('button', { name: '加载今日学习' }).click()
 
-  await expect(
-    page.getByRole('heading', { name: 'DeepSeek Harness 内测：用代表作说话' }),
-  ).toBeVisible({ timeout: 60_000 })
-  await expect(page.locator('canvas').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '当前时间层' })).toContainText('2026年8月', { timeout: 60_000 })
+  await expect(page.locator('.note-detail')).toBeHidden()
+  await page.getByRole('button', { name: '切换二维等高线' }).click()
+  const importedNote = page.getByRole('button', { name: 'DeepSeek Harness 内测：用代表作说话', exact: true })
+  await importedNote.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: 'DeepSeek Harness 内测：用代表作说话' })).toBeVisible()
 })
 
 test('creates and restores a local recovery point', async ({ page }) => {
