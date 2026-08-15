@@ -33,6 +33,14 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-failure-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
 
   a11y:
     runs-on: ubuntu-latest
@@ -59,3 +67,19 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:visual
+        env:
+          UPDATE_BASELINES: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-visual-baselines
+          path: tests/visual/baselines/*-linux.png
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-failure-artifacts
+          path: |
+            tests/visual/diffs/
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
