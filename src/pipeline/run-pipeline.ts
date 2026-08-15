@@ -1,4 +1,3 @@
-import { pipeline } from '@huggingface/transformers'
 import type { AnalysisOptions, NoteInput, ProcessingProgress, TerrainNote } from '../domain/types'
 import { createProjectFromNotes } from '../domain/demo'
 import { buildStableLayout, normalizeVector } from './layout'
@@ -66,6 +65,7 @@ async function embedWithTransformers(
 ): Promise<number[][]> {
   report(onProgress, 'model', 0, 1, `加载本地模型 ${modelId}`)
   const device = typeof navigator !== 'undefined' && 'gpu' in navigator ? 'webgpu' : 'wasm'
+  const { pipeline } = await import('@huggingface/transformers')
   const extractor = await pipeline('feature-extraction', modelId, {
     device,
     dtype: 'q8',
@@ -109,7 +109,8 @@ function materializeInput(input: NoteInput, index: number): TerrainNote {
   const createdAtMs = Date.parse(input.createdAt)
   const createdAt = Number.isNaN(createdAtMs) ? new Date().toISOString() : new Date(createdAtMs).toISOString()
   const tags = normalizeTags(input.tags)
-  const fingerprint = input.id?.trim() || hash(`${title}\n${content}\n${createdAt}\n${tags.join('|')}`)
+  const links = normalizeLinks(input.links)
+  const fingerprint = input.id?.trim() || hash(`${title}\n${content}\n${createdAt}\n${tags.join('|')}\n${links.join('|')}`)
   return {
     id: input.id?.trim() || `note-${fingerprint}`,
     fingerprint,
@@ -119,10 +120,34 @@ function materializeInput(input: NoteInput, index: number): TerrainNote {
     createdAtMs: Number.isNaN(createdAtMs) ? Date.parse(createdAt) : createdAtMs,
     tags,
     source: input.source,
+    sourcePath: input.sourcePath,
+    vault: input.vault,
     weight: Number.isFinite(input.weight) ? Math.max(0.05, input.weight ?? 1) : 1,
+    mastery: normalizeScore(input.mastery),
+    confidence: normalizeScore(input.confidence),
+    exploration: normalizeScore(input.exploration),
+    status: input.status,
+    area: input.area,
+    reviewedAt: normalizeReviewedAt(input.reviewedAt),
+    links,
     x: 0,
     y: 0,
   }
+}
+
+function normalizeLinks(links: NoteInput['links']): string[] {
+  if (!Array.isArray(links)) return []
+  return [...new Set(links.map((link) => link.trim()).filter(Boolean))]
+}
+
+function normalizeScore(value: number | undefined): number | undefined {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value as number)) : undefined
+}
+
+function normalizeReviewedAt(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? undefined : new Date(timestamp).toISOString()
 }
 
 function normalizeTags(tags: NoteInput['tags']): string[] {

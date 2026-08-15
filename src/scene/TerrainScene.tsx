@@ -1,13 +1,12 @@
 import { Html, OrbitControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/app-store'
 import {
   AdditiveBlending,
   BufferAttribute,
   BufferGeometry,
-  CanvasTexture,
   Color,
   DataTexture,
   DoubleSide,
@@ -16,20 +15,21 @@ import {
   Group,
   LinearFilter,
   MathUtils,
-  MeshBasicMaterial,
+  MOUSE,
+  NormalBlending,
   RedFormat,
   ShaderMaterial,
   Sphere,
-  SphereGeometry,
-  SpriteMaterial,
   UniformsLib,
   UniformsUtils,
   Vector2,
   Vector3,
+  TOUCH,
 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import type { QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot } from '../domain/types'
+import type { QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot, VisualDimension } from '../domain/types'
 import { sampleHeight } from '../pipeline/terrain'
+import { linkedNotes } from '../domain/knowledge-maintenance'
 import { getLiveTimeline } from '../store/app-store'
 import {
   TERRAIN_CAMERA_POSITION,
@@ -38,6 +38,8 @@ import {
   TERRAIN_HEIGHT,
   TERRAIN_WIDTH,
 } from './terrain-config'
+import { TerrainMist } from './TerrainMist'
+import { getTerrainQualityProfile, TERRAIN_VISUAL_PROFILE } from './terrain-visual-profile'
 
 interface TerrainSceneProps {
   snapshots: TerrainSnapshot[]
@@ -48,6 +50,8 @@ interface TerrainSceneProps {
   quality: QualityLevel
   cameraRevision: number
   cameraScale: number
+  cameraInteractionMode: 'rotate' | 'pan'
+  visualDimension: VisualDimension
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
   onSelectNote: (id: string | null) => void
@@ -70,9 +74,9 @@ interface HeightAtlas {
   gridSize: number
 }
 
-const POINT_LOW = new Color('#9b9a95')
-const POINT_HIGH = new Color('#bcb8a8')
-const POINT_SELECTED = new Color('#fff2b8')
+const POINT_LOW = new Color(TERRAIN_VISUAL_PROFILE.colors.pointLow)
+const POINT_HIGH = new Color(TERRAIN_VISUAL_PROFILE.colors.pointHigh)
+const POINT_SELECTED = new Color(TERRAIN_VISUAL_PROFILE.colors.selected)
 
 const HEIGHT_ATLAS_SHADER = `
   uniform sampler2D uHeightAtlas;
@@ -102,8 +106,24 @@ const HEIGHT_ATLAS_SHADER = `
   }
 `
 
+function usePrefersReducedMotion(): boolean {
+  const [reducedMotion, setReducedMotion] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setReducedMotion(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  return reducedMotion
+}
+
 export function TerrainScene(props: TerrainSceneProps) {
-  const { cameraRevision, cameraScale, quality, focusRequest, activePeakId } = props
+  const { cameraRevision, cameraScale, cameraInteractionMode, quality, focusRequest, activePeakId } = props
+  const reducedMotion = usePrefersReducedMotion()
   const controls = useRef<OrbitControlsImpl>(null)
   const previousScale = useRef(cameraScale)
   const previousRevision = useRef<number | null>(null)
@@ -129,6 +149,18 @@ export function TerrainScene(props: TerrainSceneProps) {
     return baseOffset.multiplyScalar(viewportScale).add(cameraTarget)
   }, [cameraTarget, viewportScale])
   const peakLabelLimit = quality === 'high' ? (compactLabels ? 18 : 30) : quality === 'medium' ? 18 : 0
+  const mouseButtons = useMemo(
+    () => cameraInteractionMode === 'pan'
+      ? { LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }
+      : { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN },
+    [cameraInteractionMode],
+  )
+  const touches = useMemo(
+    () => cameraInteractionMode === 'pan'
+      ? { ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE }
+      : { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN },
+    [cameraInteractionMode],
+  )
 
   useEffect(() => {
     if (cameraRevision !== previousRevision.current || viewportScale !== previousViewportScale.current) {
@@ -212,10 +244,15 @@ export function TerrainScene(props: TerrainSceneProps) {
 
   return (
     <>
-      <color attach="background" args={['#141414']} />
-      <fog attach="fog" args={['#141414', 9.2, 15.5]} />
+      <color attach="background" args={[TERRAIN_VISUAL_PROFILE.colors.background]} />
+      <fog attach="fog" args={[TERRAIN_VISUAL_PROFILE.colors.background, 8.7, 15.2]} />
       <TerrainField />
-      <TerrainSurface {...props} compactLabels={compactLabels} peakLabelLimit={peakLabelLimit} />
+      <TerrainSurface
+        {...props}
+        compactLabels={compactLabels}
+        peakLabelLimit={peakLabelLimit}
+        reducedMotion={reducedMotion}
+      />
       <PeakPath
         snapshots={props.snapshots}
         gridSize={props.gridSize}
@@ -232,12 +269,23 @@ export function TerrainScene(props: TerrainSceneProps) {
         maxDistance={18}
         minPolarAngle={0.42}
         maxPolarAngle={1.34}
+        mouseButtons={mouseButtons}
+        touches={touches}
+        screenSpacePanning
         target={[cameraTarget.x, cameraTarget.y, cameraTarget.z]}
       />
       {quality !== 'low' && (
         <EffectComposer multisampling={0}>
-          <Bloom intensity={quality === 'high' ? 0.42 : 0.32} luminanceThreshold={0.62} luminanceSmoothing={0.7} />
-          <Vignette eskil={false} offset={0.26} darkness={0.34} />
+          <Bloom
+            intensity={TERRAIN_VISUAL_PROFILE.post.bloomIntensity[quality]}
+            luminanceThreshold={TERRAIN_VISUAL_PROFILE.post.bloomThreshold}
+            luminanceSmoothing={TERRAIN_VISUAL_PROFILE.post.bloomSmoothing}
+          />
+          <Vignette
+            eskil={false}
+            offset={TERRAIN_VISUAL_PROFILE.post.vignetteOffset}
+            darkness={TERRAIN_VISUAL_PROFILE.post.vignetteDarkness}
+          />
         </EffectComposer>
       )}
     </>
@@ -251,11 +299,11 @@ function TerrainField() {
   return (
     <group>
       <lineSegments geometry={crosses} position={[0, -0.125, 0]}>
-        <lineBasicMaterial color="#3a3a39" transparent opacity={0.5} />
+        <lineBasicMaterial color={TERRAIN_VISUAL_PROFILE.colors.fieldGrid} transparent opacity={0.42} />
       </lineSegments>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.145, 0]}>
         <planeGeometry args={[18, 18]} />
-        <meshBasicMaterial color="#141414" />
+        <meshBasicMaterial color={TERRAIN_VISUAL_PROFILE.colors.field} />
       </mesh>
     </group>
   )
@@ -271,14 +319,21 @@ function TerrainSurface({
   compactLabels,
   peakLabelLimit,
   onSelectNote,
-}: TerrainSceneProps & { compactLabels: boolean; peakLabelLimit: number }) {
+  reducedMotion,
+  visualDimension,
+}: TerrainSceneProps & { compactLabels: boolean; peakLabelLimit: number; reducedMotion: boolean }) {
   const heightAtlas = useMemo(() => buildHeightAtlas(snapshots, gridSize), [gridSize, snapshots])
+  const heightAtlasSize = useMemo(
+    () => new Vector2(heightAtlas.width, heightAtlas.height),
+    [heightAtlas],
+  )
   const geometry = useMemo(() => buildSurfaceGeometry(gridSize), [gridSize])
   const material = useMemo(() => makeTerrainMaterial(quality, heightAtlas), [heightAtlas, quality])
   const visiblePeaks = selectVisiblePeaks(peaks, peakLabelLimit, compactLabels)
 
-  useFrame(() => {
+  useFrame(({ clock }) => {
     material.uniforms.uTimeline.value = getLiveTimeline()
+    material.uniforms.uTime.value = reducedMotion ? 0 : clock.elapsedTime
   })
 
   useEffect(() => () => geometry.dispose(), [geometry])
@@ -290,25 +345,43 @@ function TerrainSurface({
       <mesh geometry={geometry}>
         <primitive object={material} attach="material" />
       </mesh>
+      {getTerrainQualityProfile(quality).useMist && (
+        <TerrainMist
+          heightTexture={heightAtlas.texture}
+          heightAtlasSize={heightAtlasSize}
+          atlasColumns={heightAtlas.columns}
+          heightGridSize={heightAtlas.gridSize}
+          heightFrameCount={heightAtlas.frameCount}
+          quality={quality}
+          reducedMotion={reducedMotion}
+        />
+      )}
       <NotePoints
         snapshots={snapshots}
         gridSize={gridSize}
         notes={notes}
         heightAtlas={heightAtlas}
+        peaks={peaks}
+        quality={quality}
+        reducedMotion={reducedMotion}
         selectedNoteId={selectedNoteId}
         onSelectNote={onSelectNote}
+        visualDimension={visualDimension}
       />
       <SelectedMarker
         snapshots={snapshots}
         gridSize={gridSize}
         note={notes.find((note) => note.id === selectedNoteId)}
       />
+      <SelectedRelationLines snapshots={snapshots} gridSize={gridSize} notes={notes} selectedNoteId={selectedNoteId} />
       {quality !== 'low' && (
         <PeakField
           snapshots={snapshots}
           gridSize={gridSize}
+          notes={notes}
           peaks={visiblePeaks}
           compact={compactLabels}
+          reducedMotion={reducedMotion}
           onSelectNote={onSelectNote}
         />
       )}
@@ -316,15 +389,54 @@ function TerrainSurface({
   )
 }
 
+function SelectedRelationLines({ snapshots, gridSize, notes, selectedNoteId }: { snapshots: TerrainSnapshot[]; gridSize: number; notes: TerrainNote[]; selectedNoteId: string | null }) {
+  const geometry = useMemo(() => new BufferGeometry(), [])
+  const related = useMemo(() => selectedNoteId ? linkedNotes(notes, selectedNoteId) : [], [notes, selectedNoteId])
+  const positions = useMemo(() => new Float32Array(Math.max(0, related.length) * 6), [related.length])
+  useFrame(() => {
+    const line = geometry.getAttribute('position') as BufferAttribute | undefined
+    if (!line) {
+      geometry.setAttribute('position', new BufferAttribute(positions, 3))
+      return
+    }
+    const frame = resolveSnapshotFrame(snapshots, getLiveTimeline())
+    const origin = notes.find((note) => note.id === selectedNoteId)
+    if (!origin) return
+    for (let index = 0; index < related.length; index += 1) {
+      const target = related[index]
+      const originHeight = MathUtils.lerp(sampleHeight(frame.a.values, gridSize, origin.x, origin.y), sampleHeight(frame.b.values, gridSize, origin.x, origin.y), frame.mix)
+      const targetHeight = MathUtils.lerp(sampleHeight(frame.a.values, gridSize, target.x, target.y), sampleHeight(frame.b.values, gridSize, target.x, target.y), frame.mix)
+      const offset = index * 6
+      positions[offset] = origin.x * (TERRAIN_WIDTH / 2)
+      positions[offset + 1] = originHeight * TERRAIN_HEIGHT - 0.015
+      positions[offset + 2] = -origin.y * (TERRAIN_DEPTH / 2)
+      positions[offset + 3] = target.x * (TERRAIN_WIDTH / 2)
+      positions[offset + 4] = targetHeight * TERRAIN_HEIGHT - 0.015
+      positions[offset + 5] = -target.y * (TERRAIN_DEPTH / 2)
+    }
+    line.needsUpdate = true
+    geometry.computeBoundingSphere()
+  })
+  useEffect(() => () => geometry.dispose(), [geometry])
+  if (!selectedNoteId || !related.length) return null
+  return <lineSegments geometry={geometry}><lineBasicMaterial color="#9b8ad9" transparent opacity={0.62} depthWrite={false} /></lineSegments>
+}
+
 function NotePoints({
   snapshots,
   gridSize,
   notes,
   heightAtlas,
+  peaks,
+  quality,
+  reducedMotion,
   selectedNoteId,
   onSelectNote,
-}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote'> & {
+  visualDimension,
+}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension'> & {
   heightAtlas: HeightAtlas
+  peaks: TerrainPeak[]
+  reducedMotion: boolean
 }) {
   const initialFrame = useMemo(
     () => resolveSnapshotFrame(snapshots, getLiveTimeline()),
@@ -343,17 +455,20 @@ function NotePoints({
         heightFrames[initialFrame.bIndex],
         initialFrame.mix,
         birthFrames,
+        peaks,
+        visualDimension,
       ),
-    [birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes],
+    [birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, visualDimension],
   )
-  const material = useMemo(() => makeNoteMaterial(heightAtlas), [heightAtlas])
+  const material = useMemo(() => makeNoteMaterial(heightAtlas, quality), [heightAtlas, quality])
   const lastRaycastBucket = useRef(Number.NaN)
 
-  useFrame(({ gl, size }) => {
+  useFrame(({ gl, size, clock }) => {
     const timeline = getLiveTimeline()
     material.uniforms.uTimeline.value = timeline
     material.uniforms.uVisibleBucket.value = Math.ceil(timeline)
     material.uniforms.uScale.value = size.height * gl.getPixelRatio() * 0.5
+    material.uniforms.uTime.value = reducedMotion ? 0 : clock.elapsedTime
 
     // The shader interpolates point height every frame. CPU positions only back raycasting,
     // so updating them per whole time bucket avoids rewriting the full point buffer while scrubbing.
@@ -514,11 +629,11 @@ function SelectedMarker({
     <group ref={marker}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.043, 0.058, 32]} />
-        <meshBasicMaterial color="#d7c27e" transparent opacity={0.86} />
+        <meshBasicMaterial color={TERRAIN_VISUAL_PROFILE.colors.selected} transparent opacity={0.86} />
       </mesh>
       <mesh position={[0, 0.008, 0]}>
         <sphereGeometry args={[0.012, 10, 8]} />
-        <meshBasicMaterial color="#fff0b0" />
+        <meshBasicMaterial color={TERRAIN_VISUAL_PROFILE.colors.selected} />
       </mesh>
     </group>
   )
@@ -527,25 +642,31 @@ function SelectedMarker({
 function PeakField({
   snapshots,
   gridSize,
+  notes,
   peaks,
   compact,
+  reducedMotion,
   onSelectNote,
 }: {
   snapshots: TerrainSnapshot[]
   gridSize: number
+  notes: TerrainNote[]
   peaks: TerrainPeak[]
   compact: boolean
+  reducedMotion: boolean
   onSelectNote: (id: string | null) => void
 }) {
-  const groups = useRef<Array<Group | null>>([])
   const labels = useRef<Array<HTMLDivElement | null>>([])
   const projected = useMemo(() => new Vector3(), [])
-  const glowTexture = useMemo(() => makeGlowTexture(), [])
-  const beaconGeometry = useMemo(() => new SphereGeometry(0.012, 12, 10), [])
-  const beaconMaterial = useMemo(() => new MeshBasicMaterial({ color: '#f1ead2' }), [])
   const setActivePeak = useAppStore((state) => state.setActivePeak)
   const activePeakId = useAppStore((state) => state.activePeakId)
-  const peakPositions = useMemo(() => new Float32Array(peaks.length * 3), [peaks])
+  const geometry = useMemo(() => buildPeakGeometry(peaks, notes), [notes, peaks])
+  const coreMaterial = useMemo(() => makePeakMaterial(false), [])
+  const glowMaterial = useMemo(() => makePeakMaterial(true), [])
+  const peakPositions = useMemo(
+    () => (geometry.getAttribute('position') as BufferAttribute).array as Float32Array,
+    [geometry],
+  )
   const lastTimeline = useRef(Number.NaN)
   const nextLabelUpdate = useRef(0)
   const projectedView = useRef({
@@ -560,20 +681,7 @@ function PeakField({
     height: 0,
     timeline: Number.NaN,
   })
-  const glowMaterial = useMemo(
-    () =>
-      new SpriteMaterial({
-        map: glowTexture,
-        color: '#e6dfc6',
-        transparent: true,
-        opacity: 0.23,
-        depthWrite: false,
-        blending: AdditiveBlending,
-      }),
-    [glowTexture],
-  )
-
-  useFrame(({ camera, clock, size }) => {
+  useFrame(({ camera, clock, gl, size }) => {
     const timeline = getLiveTimeline()
     if (timeline !== lastTimeline.current) {
       const frame = resolveSnapshotFrame(snapshots, timeline)
@@ -588,14 +696,16 @@ function PeakField({
         peakPositions[offset] = peak.x * (TERRAIN_WIDTH / 2)
         peakPositions[offset + 1] = height * TERRAIN_HEIGHT - 0.035
         peakPositions[offset + 2] = -peak.y * (TERRAIN_DEPTH / 2)
-        groups.current[index]?.position.set(
-          peakPositions[offset],
-          peakPositions[offset + 1],
-          peakPositions[offset + 2],
-        )
       }
+      ;(geometry.getAttribute('position') as BufferAttribute).needsUpdate = true
       lastTimeline.current = timeline
     }
+
+    const pixelScale = size.height * gl.getPixelRatio() * 0.5
+    coreMaterial.uniforms.uScale.value = pixelScale
+    glowMaterial.uniforms.uScale.value = pixelScale
+    coreMaterial.uniforms.uTime.value = reducedMotion ? 0 : clock.elapsedTime
+    glowMaterial.uniforms.uTime.value = reducedMotion ? 0 : clock.elapsedTime
 
     const previousView = projectedView.current
     const projectionChanged =
@@ -609,7 +719,10 @@ function PeakField({
       previousView.quaternionW !== camera.quaternion.w ||
       previousView.width !== size.width ||
       previousView.height !== size.height
-    if (!projectionChanged || clock.elapsedTime < nextLabelUpdate.current) return
+    const hasUnpositionedLabel = labels.current.some(
+      (label) => label !== null && label.style.transform.length === 0,
+    )
+    if ((!projectionChanged && !hasUnpositionedLabel) || clock.elapsedTime < nextLabelUpdate.current) return
 
     for (let index = 0; index < peaks.length; index += 1) {
       const offset = index * 3
@@ -637,33 +750,28 @@ function PeakField({
       height: size.height,
       timeline,
     }
-    nextLabelUpdate.current = clock.elapsedTime + 1 / 60
+    nextLabelUpdate.current = clock.elapsedTime + 1 / 30
   })
 
-  useEffect(
-    () => () => {
-      glowTexture.dispose()
-      beaconGeometry.dispose()
-      beaconMaterial.dispose()
-      glowMaterial.dispose()
-    },
-    [beaconGeometry, beaconMaterial, glowMaterial, glowTexture],
-  )
+  useEffect(() => {
+    const selected = (geometry.getAttribute('selected') as BufferAttribute).array as Float32Array
+    for (let index = 0; index < peaks.length; index += 1) {
+      selected[index] = peaks[index].id === activePeakId ? 1 : 0
+    }
+    ;(geometry.getAttribute('selected') as BufferAttribute).needsUpdate = true
+  }, [activePeakId, geometry, peaks])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => {
+    coreMaterial.dispose()
+    glowMaterial.dispose()
+  }, [coreMaterial, glowMaterial])
 
   const edgeThreshold = compact ? 0.3 : 0.55
   return (
     <>
-      {peaks.map((peak, index) => (
-        <group
-          key={peak.id}
-          ref={(element) => {
-            groups.current[index] = element
-          }}
-        >
-          <sprite scale={[0.36, 0.36, 1]} position={[0, 0.055, 0]} material={glowMaterial} />
-          <mesh position={[0, 0.028, 0]} geometry={beaconGeometry} material={beaconMaterial} />
-        </group>
-      ))}
+      <points geometry={geometry} material={glowMaterial} renderOrder={2} />
+      <points geometry={geometry} material={coreMaterial} renderOrder={3} />
       <Html fullscreen zIndexRange={[24, 0]} style={{ pointerEvents: 'none' }}>
         <div className="peak-label-layer">
           {peaks.map((peak, index) => (
@@ -779,6 +887,47 @@ function buildSurfaceGeometry(size: number): BufferGeometry {
 }
 
 function makeTerrainMaterial(quality: QualityLevel, atlas: HeightAtlas): ShaderMaterial {
+  const profile = getTerrainQualityProfile(quality)
+  const highQualityNormal = quality === 'high'
+    ? `
+        vec2 texel = vec2(1.0 / max(1.0, uHeightGridSize - 1.0));
+        float heightLeft = sampleTimelineHeight(terrainPosition - vec2(texel.x, 0.0));
+        float heightRight = sampleTimelineHeight(terrainPosition + vec2(texel.x, 0.0));
+        float heightNear = sampleTimelineHeight(terrainPosition - vec2(0.0, texel.y));
+        float heightFar = sampleTimelineHeight(terrainPosition + vec2(0.0, texel.y));
+        float worldStepX = ${TERRAIN_WIDTH.toFixed(1)} / max(1.0, uHeightGridSize - 1.0);
+        float worldStepZ = ${TERRAIN_DEPTH.toFixed(1)} / max(1.0, uHeightGridSize - 1.0);
+        float slopeX = (heightRight - heightLeft) * uTerrainHeight / (2.0 * worldStepX);
+        float slopeZ = (heightNear - heightFar) * uTerrainHeight / (2.0 * worldStepZ);
+        vec3 objectNormal = normalize(vec3(-slopeX, 1.0, -slopeZ));
+        vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
+        vSlope = clamp(1.0 - objectNormal.y, 0.0, 1.0);
+        vCurvature = max(0.0, (vHeight * 4.0 - heightLeft - heightRight - heightNear - heightFar) * 4.0);
+      `
+    : `
+        vWorldNormal = vec3(0.0, 1.0, 0.0);
+        vSlope = 0.0;
+        vCurvature = 0.0;
+      `
+  const fragmentNormal = quality === 'medium'
+    ? `
+        vec3 worldNormal = normalize(cross(dFdx(vWorldPosition), dFdy(vWorldPosition)));
+        if (!gl_FrontFacing) worldNormal *= -1.0;
+        float slope = clamp(1.0 - abs(worldNormal.y), 0.0, 1.0);
+      `
+    : `
+        vec3 worldNormal = normalize(vWorldNormal);
+        float slope = vSlope;
+      `
+  const dynamicReflection = profile.useDynamicTerrain
+    ? `
+        float reflectionPhase = vWorldPosition.z * 0.72 + vWorldPosition.x * 1.18 - uTime * ${TERRAIN_VISUAL_PROFILE.terrain.reflectionSpeed.toFixed(3)};
+        float reflectionBand = pow(0.5 + 0.5 * sin(reflectionPhase), 8.0)
+          * smoothstep(0.18, 0.82, vHeight)
+          * (0.35 + slope * 0.65);
+      `
+    : 'float reflectionBand = 0.0;'
+
   return new ShaderMaterial({
     side: DoubleSide,
     fog: true,
@@ -787,12 +936,13 @@ function makeTerrainMaterial(quality: QualityLevel, atlas: HeightAtlas): ShaderM
       {
         ...heightAtlasUniforms(atlas),
         uTerrainHeight: { value: TERRAIN_HEIGHT },
-        uContourLevels: { value: quality === 'high' ? 28 : quality === 'medium' ? 22 : 16 },
-        uContourOpacity: { value: quality === 'low' ? 0.08 : 0.14 },
-        uLow: { value: new Color('#141414') },
-        uMiddle: { value: new Color('#1a1a19') },
-        uHigh: { value: new Color('#24231f') },
-        uContour: { value: new Color('#858580') },
+        uTime: { value: 0 },
+        uContourLevels: { value: profile.contourLevels },
+        uContourOpacity: { value: profile.contourOpacity },
+        uLow: { value: new Color(TERRAIN_VISUAL_PROFILE.colors.terrainLow) },
+        uMiddle: { value: new Color(TERRAIN_VISUAL_PROFILE.colors.terrainMiddle) },
+        uHigh: { value: new Color(TERRAIN_VISUAL_PROFILE.colors.terrainHigh) },
+        uContour: { value: new Color(TERRAIN_VISUAL_PROFILE.colors.contour) },
       },
     ]),
     vertexShader: `
@@ -800,6 +950,10 @@ function makeTerrainMaterial(quality: QualityLevel, atlas: HeightAtlas): ShaderM
       #include <fog_pars_vertex>
       uniform float uTerrainHeight;
       varying float vHeight;
+      varying float vSlope;
+      varying float vCurvature;
+      varying vec3 vWorldNormal;
+      varying vec3 vWorldPosition;
       ${HEIGHT_ATLAS_SHADER}
 
       void main() {
@@ -808,8 +962,10 @@ function makeTerrainMaterial(quality: QualityLevel, atlas: HeightAtlas): ShaderM
           -position.z / ${TERRAIN_DEPTH.toFixed(1)} + 0.5
         );
         vHeight = sampleTimelineHeight(terrainPosition);
+        ${highQualityNormal}
         vec3 transformed = position;
         transformed.y = vHeight * uTerrainHeight - 0.09;
+        vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         #include <fog_vertex>
@@ -824,16 +980,44 @@ function makeTerrainMaterial(quality: QualityLevel, atlas: HeightAtlas): ShaderM
       uniform vec3 uMiddle;
       uniform vec3 uHigh;
       uniform vec3 uContour;
+      uniform float uTime;
       varying float vHeight;
+      varying float vSlope;
+      varying float vCurvature;
+      varying vec3 vWorldNormal;
+      varying vec3 vWorldPosition;
 
       void main() {
+        ${fragmentNormal}
+        ${dynamicReflection}
+        vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+        vec3 lightDirection = normalize(vec3(-0.38, 0.78, 0.5));
+        float slopeLight = max(dot(worldNormal, lightDirection), 0.0);
+        float fresnel = pow(1.0 - max(dot(worldNormal, viewDirection), 0.0), 3.0);
+        float ridge = smoothstep(0.006, 0.085, vCurvature);
+        float valleyOcclusion = (1.0 - smoothstep(0.1, 0.42, vHeight)) * 0.08;
+        float distanceFade = 1.0 - smoothstep(7.0, 14.0, distance(cameraPosition, vWorldPosition));
+
         vec3 base = mix(uLow, uMiddle, smoothstep(0.02, 0.58, vHeight));
-        base = mix(base, uHigh, smoothstep(0.58, 1.0, vHeight));
+        base = mix(base, uHigh, smoothstep(0.62, 1.0, vHeight));
+        float materialLight = 0.72
+          + slopeLight * 0.26
+          + ridge * 0.13
+          + reflectionBand * ${TERRAIN_VISUAL_PROFILE.terrain.reflectionAmount.toFixed(3)}
+          + fresnel * ${TERRAIN_VISUAL_PROFILE.terrain.fresnelAmount.toFixed(3)}
+          - valleyOcclusion;
+        base *= materialLight;
+
         float contourCoordinate = vHeight * uContourLevels;
         float contourDistance = abs(fract(contourCoordinate + 0.5) - 0.5);
         float contourWidth = max(fwidth(contourCoordinate) * 0.82, 0.004);
         float contour = 1.0 - smoothstep(contourWidth, contourWidth * 2.4, contourDistance);
-        gl_FragColor = vec4(mix(base, uContour, contour * uContourOpacity), 1.0);
+        float contourWeight = contour
+          * uContourOpacity
+          * mix(0.42, 1.0, slope)
+          * smoothstep(0.1, 0.3, vHeight)
+          * distanceFade;
+        gl_FragColor = vec4(mix(base, uContour, contourWeight), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -859,21 +1043,58 @@ function buildNoteGeometry(
   heightsB: Float32Array,
   mix: number,
   birthFrames: Float32Array,
+  peaks: TerrainPeak[],
+  visualDimension: VisualDimension,
 ): BufferGeometry {
   const geometry = new BufferGeometry()
   const positions = new Float32Array(notes.length * 3)
   const selected = new Float32Array(notes.length)
+  const importance = new Float32Array(notes.length)
+  const freshness = new Float32Array(notes.length)
+  const peakAffinity = new Float32Array(notes.length)
+  const mastery = new Float32Array(notes.length)
+  const visualValue = new Float32Array(notes.length)
+  const visualMode = new Float32Array(notes.length)
+  const visualColor = new Float32Array(notes.length * 3)
+  const seed = new Float32Array(notes.length)
+  const weightRange = numericRange(notes.map((note) => note.weight))
+  const timestampRange = numericRange(notes.map((note) => note.createdAtMs))
   for (let index = 0; index < notes.length; index += 1) {
+    const note = notes[index]
     const offset = index * 3
     const height = MathUtils.lerp(heightsA[index], heightsB[index], mix)
-    positions[offset] = notes[index].x * (TERRAIN_WIDTH / 2)
+    positions[offset] = note.x * (TERRAIN_WIDTH / 2)
     positions[offset + 1] = height * TERRAIN_HEIGHT - 0.055
-    positions[offset + 2] = -notes[index].y * (TERRAIN_DEPTH / 2)
+    positions[offset + 2] = -note.y * (TERRAIN_DEPTH / 2)
+    importance[index] = normalizeRange(note.weight, weightRange.min, weightRange.max, 0.5)
+    freshness[index] = normalizeRange(
+      note.createdAtMs,
+      timestampRange.min,
+      timestampRange.max,
+      0.5,
+    )
+    peakAffinity[index] = resolvePeakAffinity(note, peaks)
+    mastery[index] = note.mastery ?? 0.5
+    visualValue[index] = dimensionValue(note, visualDimension)
+    visualMode[index] = dimensionMode(visualDimension)
+    const color = dimensionColor(note, visualDimension)
+    visualColor[offset] = color.r
+    visualColor[offset + 1] = color.g
+    visualColor[offset + 2] = color.b
+    seed[index] = stableUnitHash(note.id)
   }
   const selectedAttribute = new BufferAttribute(selected, 1)
   selectedAttribute.setUsage(DynamicDrawUsage)
   geometry.setAttribute('position', new BufferAttribute(positions, 3))
   geometry.setAttribute('birthFrame', new BufferAttribute(birthFrames, 1))
+  geometry.setAttribute('importance', new BufferAttribute(importance, 1))
+  geometry.setAttribute('freshness', new BufferAttribute(freshness, 1))
+  geometry.setAttribute('peakAffinity', new BufferAttribute(peakAffinity, 1))
+  geometry.setAttribute('mastery', new BufferAttribute(mastery, 1))
+  geometry.setAttribute('visualValue', new BufferAttribute(visualValue, 1))
+  geometry.setAttribute('visualMode', new BufferAttribute(visualMode, 1))
+  geometry.setAttribute('visualColor', new BufferAttribute(visualColor, 3))
+  geometry.setAttribute('seed', new BufferAttribute(seed, 1))
   geometry.setAttribute('selected', selectedAttribute)
   geometry.boundingSphere = new Sphere(
     new Vector3(0, TERRAIN_HEIGHT * 0.5, 0),
@@ -907,7 +1128,12 @@ function resolveNoteBirthFrames(notes: TerrainNote[], snapshots: TerrainSnapshot
   return birthFrames
 }
 
-function makeNoteMaterial(atlas: HeightAtlas): ShaderMaterial {
+function makeNoteMaterial(atlas: HeightAtlas, quality: QualityLevel): ShaderMaterial {
+  const maximumPixels = quality === 'high'
+    ? TERRAIN_VISUAL_PROFILE.points.maximumPixels
+    : quality === 'medium'
+      ? 6.5
+      : 5.2
   return new ShaderMaterial({
     transparent: true,
     depthWrite: true,
@@ -917,9 +1143,12 @@ function makeNoteMaterial(atlas: HeightAtlas): ShaderMaterial {
       {
         ...heightAtlasUniforms(atlas),
         uVisibleBucket: { value: 0 },
+        uTime: { value: 0 },
         uTerrainHeight: { value: TERRAIN_HEIGHT },
-        uPointSize: { value: 0.032 },
+        uPointSize: { value: TERRAIN_VISUAL_PROFILE.points.baseSize },
         uScale: { value: 480 },
+        uMinimumPixels: { value: TERRAIN_VISUAL_PROFILE.points.minimumPixels },
+        uMaximumPixels: { value: maximumPixels },
         uLow: { value: POINT_LOW },
         uHigh: { value: POINT_HIGH },
         uSelected: { value: POINT_SELECTED },
@@ -930,13 +1159,33 @@ function makeNoteMaterial(atlas: HeightAtlas): ShaderMaterial {
       #include <fog_pars_vertex>
       attribute float birthFrame;
       attribute float selected;
+      attribute float importance;
+      attribute float freshness;
+      attribute float peakAffinity;
+      attribute float mastery;
+      attribute float visualValue;
+      attribute float visualMode;
+      attribute vec3 visualColor;
+      attribute float seed;
       uniform float uVisibleBucket;
+      uniform float uTime;
       uniform float uTerrainHeight;
       uniform float uPointSize;
       uniform float uScale;
+      uniform float uMinimumPixels;
+      uniform float uMaximumPixels;
       varying float vHeight;
       varying float vSelected;
       varying float vVisible;
+      varying float vImportance;
+      varying float vFreshness;
+      varying float vPeakAffinity;
+      varying float vMastery;
+      varying float vVisualValue;
+      varying float vVisualMode;
+      varying vec3 vVisualColor;
+      varying float vSeed;
+      varying float vDepthFade;
       ${HEIGHT_ATLAS_SHADER}
 
       void main() {
@@ -947,11 +1196,26 @@ function makeNoteMaterial(atlas: HeightAtlas): ShaderMaterial {
         vHeight = sampleTimelineHeight(terrainPosition);
         vSelected = selected;
         vVisible = step(birthFrame, uVisibleBucket);
+        vImportance = importance;
+        vFreshness = freshness;
+        vPeakAffinity = peakAffinity;
+        vMastery = mastery;
+        vVisualValue = visualValue;
+        vVisualMode = visualMode;
+        vVisualColor = visualColor;
+        vSeed = seed;
         vec3 transformed = position;
         transformed.y = vHeight * uTerrainHeight - 0.055;
         vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = vVisible * uPointSize * (uScale / max(0.1, -mvPosition.z));
+        float hierarchy = mix(0.78, 1.28, importance)
+          * mix(0.9, 1.12, freshness)
+          * mix(0.88, 1.18, peakAffinity);
+        float pulse = 1.0 + freshness * (0.025 + peakAffinity * 0.035)
+          * sin(uTime * 0.55 + seed * 6.2831853);
+        float pointPixels = uPointSize * (uScale / max(0.1, -mvPosition.z)) * hierarchy * pulse * mix(0.92, 1.08, mastery);
+        gl_PointSize = vVisible * clamp(pointPixels, uMinimumPixels, uMaximumPixels);
+        vDepthFade = 1.0 - smoothstep(7.0, 14.0, -mvPosition.z);
         #include <fog_vertex>
       }
     `,
@@ -964,6 +1228,15 @@ function makeNoteMaterial(atlas: HeightAtlas): ShaderMaterial {
       varying float vHeight;
       varying float vSelected;
       varying float vVisible;
+      varying float vImportance;
+      varying float vFreshness;
+      varying float vPeakAffinity;
+      varying float vMastery;
+      varying float vVisualValue;
+      varying float vVisualMode;
+      varying vec3 vVisualColor;
+      varying float vSeed;
+      varying float vDepthFade;
 
       void main() {
         if (vVisible < 0.5) discard;
@@ -971,9 +1244,144 @@ function makeNoteMaterial(atlas: HeightAtlas): ShaderMaterial {
         float edge = max(fwidth(distanceToCenter), 0.012);
         float alpha = 1.0 - smoothstep(0.46 - edge, 0.5 + edge, distanceToCenter);
         if (alpha < 0.02) discard;
-        float heightMix = smoothstep(0.34, 0.78, vHeight);
+        float hierarchy = vImportance * 0.44 + vFreshness * 0.18 + vPeakAffinity * 0.38;
+        float heightMix = smoothstep(0.28, 0.82, vHeight * 0.72 + hierarchy * 0.38);
         vec3 color = mix(uLow, uHigh, heightMix);
+        if (vVisualMode > 0.5 && vVisualMode < 1.5) color = mix(vec3(0.25, 0.23, 0.32), vec3(0.84, 0.94, 0.87), vVisualValue);
+        if (vVisualMode > 1.5 && vVisualMode < 2.5) color = mix(vec3(0.24, 0.3, 0.33), vec3(0.88, 0.58, 0.3), vVisualValue);
+        if (vVisualMode > 2.5) color = vVisualColor;
+        float freshLight = vFreshness * (0.025 + 0.025 * sin(vSeed * 6.2831853));
+        color *= 0.82 + hierarchy * 0.24 + freshLight;
         color = mix(color, uSelected, vSelected);
+        float opacity = alpha * mix(0.5, 1.0, vMastery) * mix(0.62, 1.0, hierarchy) * mix(0.62, 1.0, vDepthFade);
+        gl_FragColor = vec4(color, opacity);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }
+    `,
+  })
+}
+
+function buildPeakGeometry(peaks: TerrainPeak[], notes: TerrainNote[]): BufferGeometry {
+  const geometry = new BufferGeometry()
+  const positions = new Float32Array(peaks.length * 3)
+  const strength = new Float32Array(peaks.length)
+  const selected = new Float32Array(peaks.length)
+  const seed = new Float32Array(peaks.length)
+  const noteById = new Map(notes.map((note) => [note.id, note]))
+  const heightRange = numericRange(peaks.map((peak) => peak.height))
+  const countRange = numericRange(peaks.map((peak) => Math.log1p(peak.noteIds.length)))
+  const dateRange = numericRange(notes.map((note) => note.createdAtMs))
+
+  for (let index = 0; index < peaks.length; index += 1) {
+    const peak = peaks[index]
+    const height = normalizeRange(peak.height, heightRange.min, heightRange.max, 0.5)
+    const noteCount = normalizeRange(
+      Math.log1p(peak.noteIds.length),
+      countRange.min,
+      countRange.max,
+      0.5,
+    )
+    let newestTimestamp = dateRange.min
+    for (const noteId of peak.noteIds) {
+      newestTimestamp = Math.max(newestTimestamp, noteById.get(noteId)?.createdAtMs ?? dateRange.min)
+    }
+    const freshness = normalizeRange(newestTimestamp, dateRange.min, dateRange.max, 0.5)
+    const confidenceProxy = height * 0.68 + noteCount * 0.32
+    strength[index] = MathUtils.clamp(
+      height * 0.4 + noteCount * 0.3 + freshness * 0.2 + confidenceProxy * 0.1,
+      0,
+      1,
+    )
+    seed[index] = stableUnitHash(peak.id)
+  }
+
+  const positionAttribute = new BufferAttribute(positions, 3)
+  positionAttribute.setUsage(DynamicDrawUsage)
+  const selectedAttribute = new BufferAttribute(selected, 1)
+  selectedAttribute.setUsage(DynamicDrawUsage)
+  geometry.setAttribute('position', positionAttribute)
+  geometry.setAttribute('strength', new BufferAttribute(strength, 1))
+  geometry.setAttribute('selected', selectedAttribute)
+  geometry.setAttribute('seed', new BufferAttribute(seed, 1))
+  geometry.boundingSphere = new Sphere(
+    new Vector3(0, TERRAIN_HEIGHT * 0.5, 0),
+    Math.hypot(TERRAIN_WIDTH * 0.5, TERRAIN_DEPTH * 0.5, TERRAIN_HEIGHT * 0.5) + 0.5,
+  )
+  return geometry
+}
+
+function makePeakMaterial(glow: boolean): ShaderMaterial {
+  const pointSize = glow
+    ? TERRAIN_VISUAL_PROFILE.peaks.glowSize
+    : TERRAIN_VISUAL_PROFILE.peaks.coreSize
+  const minimumPixels = glow ? 18 : 2.2
+  const maximumPixels = glow ? 94 : 9.5
+  return new ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    fog: true,
+    blending: glow ? AdditiveBlending : NormalBlending,
+    uniforms: UniformsUtils.merge([
+      UniformsLib.fog,
+      {
+        uScale: { value: 480 },
+        uTime: { value: 0 },
+        uPointSize: { value: pointSize },
+        uMinimumPixels: { value: minimumPixels },
+        uMaximumPixels: { value: maximumPixels },
+        uOpacity: {
+          value: glow ? TERRAIN_VISUAL_PROFILE.peaks.glowOpacity : 1,
+        },
+        uColor: { value: new Color(TERRAIN_VISUAL_PROFILE.colors.peak) },
+        uSelected: { value: new Color(TERRAIN_VISUAL_PROFILE.colors.selected) },
+      },
+    ]),
+    vertexShader: `
+      #include <common>
+      #include <fog_pars_vertex>
+      attribute float strength;
+      attribute float selected;
+      attribute float seed;
+      uniform float uScale;
+      uniform float uTime;
+      uniform float uPointSize;
+      uniform float uMinimumPixels;
+      uniform float uMaximumPixels;
+      varying float vStrength;
+      varying float vSelected;
+
+      void main() {
+        vStrength = strength;
+        vSelected = selected;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        float pulse = 1.0 + sin(uTime * 0.42 + seed * 6.2831853) * 0.035;
+        float hierarchy = mix(0.54, 1.18, strength) * mix(1.0, 1.2, selected);
+        float pointPixels = uPointSize * (uScale / max(0.1, -mvPosition.z)) * hierarchy * pulse;
+        gl_PointSize = clamp(pointPixels, uMinimumPixels, uMaximumPixels);
+        #include <fog_vertex>
+      }
+    `,
+    fragmentShader: `
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform float uOpacity;
+      uniform vec3 uColor;
+      uniform vec3 uSelected;
+      varying float vStrength;
+      varying float vSelected;
+
+      void main() {
+        float radial = length(gl_PointCoord - vec2(0.5)) * 2.0;
+        ${glow
+          ? 'float alpha = pow(max(0.0, 1.0 - radial), 2.4) * uOpacity * mix(0.42, 1.0, vStrength);'
+          : 'float alpha = 1.0 - smoothstep(0.72, 1.0, radial);'}
+        if (alpha < 0.008) discard;
+        vec3 color = mix(uColor, uSelected, vSelected);
+        color *= mix(0.72, 1.12, vStrength);
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -981,6 +1389,62 @@ function makeNoteMaterial(atlas: HeightAtlas): ShaderMaterial {
       }
     `,
   })
+}
+
+function numericRange(values: number[]): { min: number; max: number } {
+  if (!values.length) return { min: 0, max: 1 }
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const value of values) {
+    if (value < min) min = value
+    if (value > max) max = value
+  }
+  return { min, max }
+}
+
+function normalizeRange(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value) || max - min < Number.EPSILON) return fallback
+  return MathUtils.clamp((value - min) / (max - min), 0, 1)
+}
+
+function dimensionValue(note: TerrainNote, dimension: VisualDimension): number {
+  if (dimension === 'mastery') return note.mastery ?? 0.5
+  if (dimension === 'exploration') return note.exploration ?? 0.5
+  return 0.5
+}
+
+function dimensionMode(dimension: VisualDimension): number {
+  if (dimension === 'mastery') return 1
+  if (dimension === 'exploration') return 2
+  if (dimension === 'area') return 3
+  return 0
+}
+
+function dimensionColor(note: TerrainNote, dimension: VisualDimension): Color {
+  if (dimension !== 'area') return new Color('#8a918f')
+  const palette = ['#76a6a0', '#9b8ad9', '#c49b67', '#7f9fc8', '#b67f8c', '#8da56d']
+  const value = note.area ?? note.tags[0] ?? note.id
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619)
+  return new Color(palette[Math.abs(hash) % palette.length])
+}
+
+function resolvePeakAffinity(note: TerrainNote, peaks: TerrainPeak[]): number {
+  if (!peaks.length) return 0.35
+  let nearest = Number.POSITIVE_INFINITY
+  for (const peak of peaks) {
+    nearest = Math.min(nearest, Math.hypot(note.x - peak.x, note.y - peak.y))
+  }
+  return 1 - MathUtils.smoothstep(nearest, 0.08, 0.72)
+}
+
+function stableUnitHash(value: string): number {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0) / 4294967295
 }
 
 function selectVisiblePeaks(peaks: TerrainPeak[], limit: number, compact: boolean): TerrainPeak[] {
@@ -1007,24 +1471,4 @@ function buildCrossFieldGeometry(): BufferGeometry {
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
   return geometry
-}
-
-function makeGlowTexture() {
-  const canvas = document.createElement('canvas')
-  canvas.width = 128
-  canvas.height = 128
-  const context = canvas.getContext('2d')
-  if (context) {
-    const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 62)
-    gradient.addColorStop(0, 'rgba(255, 250, 224, 1)')
-    gradient.addColorStop(0.12, 'rgba(244, 231, 190, 0.8)')
-    gradient.addColorStop(0.48, 'rgba(216, 204, 168, 0.22)')
-    gradient.addColorStop(1, 'rgba(194, 184, 151, 0)')
-    context.fillStyle = gradient
-    context.fillRect(0, 0, 128, 128)
-  }
-  const texture = new CanvasTexture(canvas)
-  texture.minFilter = LinearFilter
-  texture.magFilter = LinearFilter
-  return texture
 }

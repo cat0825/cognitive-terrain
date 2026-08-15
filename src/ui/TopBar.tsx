@@ -1,4 +1,4 @@
-import { BookOpen, Download, FileText, FolderOpen, ImageDown, Pencil, RotateCcw, Save, Search, Trash2, Upload, X } from 'lucide-react'
+import { BookOpen, Download, FileText, Filter, FolderOpen, ImageDown, ListTodo, Pencil, RotateCcw, Save, Search, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { useAppStore } from '../store/app-store'
 
@@ -15,9 +15,10 @@ export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportIma
   const projects = useAppStore((state) => state.projects)
   const search = useAppStore((state) => state.search)
   const setSearch = useAppStore((state) => state.setSearch)
+  const resetCamera = useAppStore((state) => state.resetCamera)
+  const selectNote = useAppStore((state) => state.selectNote)
   const setDetailsOpen = useAppStore((state) => state.setDetailsOpen)
   const setFiltersOpen = useAppStore((state) => state.setFiltersOpen)
-  const resetCamera = useAppStore((state) => state.resetCamera)
   const openProject = useAppStore((state) => state.openProject)
   const renameCurrentProject = useAppStore((state) => state.renameCurrentProject)
   const deleteProjectInLibrary = useAppStore((state) => state.deleteProjectInLibrary)
@@ -28,28 +29,6 @@ export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportIma
 
   return (
     <>
-      <header className="top-bar">
-        <div className="window-lights" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-        <button
-          type="button"
-          className="window-close"
-          title="关闭浮层"
-          aria-label="关闭浮层"
-          onClick={() => {
-            setDetailsOpen(false)
-            setFiltersOpen(false)
-            setFilesOpen(false)
-            setSearchOpen(false)
-          }}
-        >
-          <X size={13} />
-        </button>
-      </header>
-
       <nav className="utility-dock" aria-label="项目工具">
         <button
           type="button"
@@ -77,6 +56,20 @@ export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportIma
         </button>
         <button type="button" title="重置视角" aria-label="重置视角" onClick={resetCamera}>
           <RotateCcw size={14} />
+        </button>
+        <button
+          type="button"
+          title="知识概览"
+          aria-label="打开知识概览"
+          onClick={() => {
+            selectNote(null)
+            setDetailsOpen(true)
+          }}
+        >
+          <ListTodo size={14} />
+        </button>
+        <button type="button" title="地图筛选" aria-label="打开地图筛选" onClick={() => setFiltersOpen(true)}>
+          <Filter size={14} />
         </button>
 
         {filesOpen && (

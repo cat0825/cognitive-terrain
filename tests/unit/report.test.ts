@@ -12,7 +12,7 @@ describe('project review report', () => {
     expect(report).toMatch(/模型：/)
     expect(report).toMatch(/笔记数：1800/)
     expect(report).toMatch(/^### /m)
-    expect(report).toMatch(/^\- \[/m)
+    expect(report).toMatch(/^- \[/m)
   })
 
   it('sorts peaks by height descending', async () => {

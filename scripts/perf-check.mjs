@@ -4,7 +4,12 @@ import { chromium } from '@playwright/test'
 
 const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:4174/'
 const quality = process.env.QUALITY
-const perfFlags = process.env.PERF_FLAGS ? `?${process.env.PERF_FLAGS}` : ''
+const visualDimension = process.env.VISUAL_DIMENSION
+const targetUrl = new URL(baseUrl)
+targetUrl.searchParams.set('perf', '1')
+for (const [key, value] of new URLSearchParams(process.env.PERF_FLAGS)) {
+  targetUrl.searchParams.set(key, value)
+}
 const outputDir = path.resolve('output/playwright')
 const screenshotPath = path.join(outputDir, 'perf-final-desktop.png')
 const exportPath = path.join(outputDir, 'perf-export.png')
@@ -26,15 +31,25 @@ page.on('console', (message) => {
 page.on('pageerror', (error) => errors.push(error.message))
 
 try {
-  await page.goto(`${baseUrl}${baseUrl.includes('?') ? '&' : ''}${perfFlags.replace(/^\?/, '')}`, {
+  await page.goto(targetUrl.href, {
     waitUntil: 'networkidle',
   })
   if (quality) {
     if (!['high', 'medium', 'low'].includes(quality)) throw new Error(`未知渲染质量：${quality}`)
-    await page.evaluate(async (level) => {
-      const { useAppStore } = await import('/src/store/app-store.ts')
-      useAppStore.getState().setQuality(level)
+    await page.evaluate((level) => {
+      if (!window.__cognitiveTerrainPerf) throw new Error('性能控制面未启用')
+      window.__cognitiveTerrainPerf.setQuality(level)
     }, quality)
+  }
+  if (visualDimension) {
+    if (!['density', 'mastery', 'exploration', 'area'].includes(visualDimension)) {
+      throw new Error(`未知点云编码：${visualDimension}`)
+    }
+    await page.evaluate((dimension) => {
+      if (!window.__cognitiveTerrainPerf) throw new Error('性能控制面未启用')
+      window.__cognitiveTerrainPerf.setVisualDimension(dimension)
+    }, visualDimension)
+    await page.waitForTimeout(400)
   }
   await page.locator('canvas').waitFor({ state: 'visible' })
   await page.waitForTimeout(1000)
@@ -120,21 +135,21 @@ try {
   })
   const directStoreScrub = await measure(page, 2100, async () => {
     await page.evaluate(
-      (maximum) =>
-        new Promise((resolve) => {
-          import('/src/store/app-store.ts').then(({ useAppStore }) => {
-            const startedAt = performance.now()
-            const duration = 1800
-            const tick = (now) => {
-              const progress = Math.min(1, (now - startedAt) / duration)
-              const sweep = progress < 0.5 ? 1 - progress * 2 : (progress - 0.5) * 2
-              useAppStore.getState().setTimeline(sweep * maximum)
-              if (progress < 1) requestAnimationFrame(tick)
-              else resolve()
-            }
-            requestAnimationFrame(tick)
-          })
-        }),
+      async (maximum) => {
+        if (!window.__cognitiveTerrainPerf) throw new Error('性能控制面未启用')
+        await new Promise((resolve) => {
+          const startedAt = performance.now()
+          const duration = 1800
+          const tick = (now) => {
+            const progress = Math.min(1, (now - startedAt) / duration)
+            const sweep = progress < 0.5 ? 1 - progress * 2 : (progress - 0.5) * 2
+            window.__cognitiveTerrainPerf.setTimeline(sweep * maximum)
+            if (progress < 1) requestAnimationFrame(tick)
+            else resolve()
+          }
+          requestAnimationFrame(tick)
+        })
+      },
       Number(await timeline.getAttribute('aria-valuemax')),
     )
     await page.waitForTimeout(300)
@@ -180,7 +195,7 @@ try {
 
   console.log(
     JSON.stringify(
-      { idle, playback, orbit, syntheticScrub, directStoreScrub, pointerScrub, pixels, exportBytes: exported.size, errors },
+      { visualDimension: visualDimension ?? 'density', quality: quality ?? 'high', idle, playback, orbit, syntheticScrub, directStoreScrub, pointerScrub, pixels, exportBytes: exported.size, errors },
       null,
       2,
     ),

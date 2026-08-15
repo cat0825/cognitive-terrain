@@ -7,21 +7,27 @@ import pixelmatch from 'pixelmatch'
 const baselineDir = path.resolve('tests/visual/baselines')
 const diffDir = path.resolve('tests/visual/diffs')
 const update = process.env.UPDATE_BASELINES === '1'
+const platform = process.platform
 
 async function compareScreenshot(page: import('@playwright/test').Page, name: string): Promise<void> {
   const shot = await page.screenshot({ animations: 'disabled' })
-  const baselinePath = path.join(baselineDir, `${name}.png`)
-  if (update || !existsSync(baselinePath)) {
+  const baselineName = `${name}-${platform}.png`
+  const baselinePath = path.join(baselineDir, baselineName)
+  if (update) {
     mkdirSync(baselineDir, { recursive: true })
     writeFileSync(baselinePath, shot)
-    expect.soft(true).toBe(true)
     return
   }
+  expect(existsSync(baselinePath), `Missing ${platform} visual baseline: ${baselineName}`).toBe(true)
+  if (!existsSync(baselinePath)) return
+
   const baseline = PNG.sync.read(readFileSync(baselinePath))
   const current = PNG.sync.read(shot)
-  const width = Math.max(baseline.width, current.width)
-  const height = Math.max(baseline.height, current.height)
-  const diff = new PNG({ width, height })
+  expect(current.width).toBe(baseline.width)
+  expect(current.height).toBe(baseline.height)
+  if (current.width !== baseline.width || current.height !== baseline.height) return
+
+  const diff = new PNG({ width: baseline.width, height: baseline.height })
   const changed = pixelmatch(
     baseline.data,
     current.data,
@@ -34,7 +40,7 @@ async function compareScreenshot(page: import('@playwright/test').Page, name: st
   expect.soft(ratio).toBeLessThan(0.002)
   if (ratio >= 0.002) {
     mkdirSync(diffDir, { recursive: true })
-    writeFileSync(path.join(diffDir, `${name}.png`), PNG.sync.write(diff))
+    writeFileSync(path.join(diffDir, `${name}-${platform}.png`), PNG.sync.write(diff))
   }
 }
 

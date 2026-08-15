@@ -41,12 +41,13 @@ li{margin:4px 0}
 <p>阶段 0–9 全部完成。应用在浏览器内完成导入 → 向量化 → 二维布局 → 密度地形生成 → 本地保存，无业务后端。模型降级、WebGL 降级两条路径均可选。</p>
 <table>
 <tr><th>指标</th><th>值</th></tr>
-<tr><td>首屏 JS(主包)</td><td>255.6 KiB ⇒ 84.6 KiB gzip</td></tr>
-<tr><td>JS 总量(javaScript)</td><td>1997.6 KiB(含懒加载 three / Terrain3D / ONNX WASM)</td></tr>
-<tr><td>单元测试</td><td>16 通过(算法/导入/worker/报告)</td></tr>
-<tr><td>e2e</td><td>4 通过(桌面 + 移动)</td></tr>
+<tr><td>首屏 JS(主包)</td><td>271.7 KiB</td></tr>
+<tr><td>JS 总量(javaScript)</td><td>2070.6 KiB(含按需分析 Worker、three 与 Terrain3D)</td></tr>
+<tr><td>单元测试</td><td>25 通过(算法/导入/worker/知识维护/报告)</td></tr>
+<tr><td>e2e</td><td>10 通过(桌面 + 移动)</td></tr>
 <tr><td>视觉基线</td><td>2 通过(desktop-overview / desktop-note-details)</td></tr>
 <tr><td>a11y</td><td>4 通过(含对比度排除项,见已知限制)</td></tr>
+<tr><td>生产性能</td><td>本机 Chrome headless：idle / playback / orbit / scrub 约 120 FPS，p95 ≤ 9.1ms</td></tr>
 </table>
 
 <h2>二、新增功能(阶段 7–8)</h2>
@@ -63,9 +64,9 @@ li{margin:4px 0}
 <h3>健壮性(阶段 5–6)</h3>
 <ul>
 <li>3D 与 2D 等高线双视图,WebGL 不可用时自动降级到 2D。</li>
-<li>模型不可用时静默切换为确定性本地向量,界面标注「降级」。</li>
+<li>模型不可用时明确标记「降级」后切换为确定性本地向量。</li>
 <li>编码/导入多格式(JSON/CSV/TSV/Markdown/YAML)；项目自动保存 IndexedDB。</li>
-<li>代码拆分:three 与 Terrain3D 独立懒加载 chunk,首屏不含 1.15MB three。</li>
+<li>代码拆分:three 与 Terrain3D 独立懒加载 chunk；transformers 仅在分析 Worker 语义路径加载。</li>
 <li>CI:typecheck / lint / unit / build / size:check / e2e / a11y / visual 全套质量门。</li>
 </ul>
 
@@ -86,7 +87,7 @@ npm run test:a11y                 # 4 a11y(port 4176)</pre>
 <tr><th>项</th><th>说明</th><th>状态</th></tr>
 <tr><td>npm audit 4 high</td><td>adm-zip / sharp 由 transformers-node 链引入,无可用修复。浏览器运行路径走 WebGPU/WASM,不触碰 Node 侧。</td><td class="mut">随上游升级</td></tr>
 <tr><td>a11y color-contrast</td><td>暗色 8px mono 小字未达标(设计系统统一风格),已在 a11y 规则排除该项。</td><td class="ok">复核过</td></tr>
-<tr><td>模型体量</td><td>多语言 e5-small WASM 资源约 23MB(懒加载,gzip 5.8MB)。语义路径需网络下载模型。</td><td class="ok">有降级</td></tr>
+<tr><td>模型体量</td><td>多语言 e5-small WASM 资源约 23MB(gzip 5.8MB)，不进入首屏主包。语义路径需网络下载模型。</td><td class="ok">有降级</td></tr>
 </table>
 
 <h2>六、部署</h2>
@@ -97,6 +98,7 @@ npm run preview -- --port 4174 --strictPort
 # 推 Pages(需已安装 wrangler)
 npx wrangler pages deploy dist --project-name cognitive-terrain</pre>
 <p class="mut">生产地址:<a href="https://cognitive-terrain.pages.dev" style="color:var(--gold)">https://cognitive-terrain.pages.dev</a></p>
+<p class="mut">发布候选:<a href="https://codex-release-plan-hardening.cognitive-terrain.pages.dev" style="color:var(--gold)">https://codex-release-plan-hardening.cognitive-terrain.pages.dev</a>（生产域名未覆盖）</p>
 
 </div>
 </body>

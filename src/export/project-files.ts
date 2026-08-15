@@ -24,7 +24,16 @@ const projectBundleSchema = z.object({
       createdAtMs: z.number(),
       tags: z.array(z.string()),
       source: z.string().optional(),
+      sourcePath: z.string().optional(),
+      vault: z.string().optional(),
       weight: z.number(),
+      mastery: z.number().min(0).max(1).optional(),
+      confidence: z.number().min(0).max(1).optional(),
+      exploration: z.number().min(0).max(1).optional(),
+      status: z.enum(['seed', 'growing', 'stable', 'gap', 'archived']).optional(),
+      area: z.string().optional(),
+      reviewedAt: z.string().optional(),
+      links: z.array(z.string()).optional(),
       x: z.number(),
       y: z.number(),
     }),
@@ -68,6 +77,10 @@ export async function parseProjectBundle(file: File): Promise<TerrainProject> {
     schemaVersion: 2,
     embeddingMode: parsed.embeddingMode ?? 'fallback',
     noteNeighbors: parsed.noteNeighbors ?? [],
+    notes: parsed.notes.map((note) => ({
+      ...note,
+      links: note.links ?? [],
+    })),
     snapshots: parsed.snapshots.map((snapshot) => ({
       ...snapshot,
       values: new Float32Array(snapshot.values),
@@ -146,6 +159,8 @@ export async function buildProjectReport(project: TerrainProject): Promise<strin
   lines.push(`- 模型：${project.modelId}（${project.embeddingMode}）`)
   lines.push(`- 笔记数：${project.notes.length}`)
   lines.push(`- 主题峰值：${project.peaks.length}`)
+  const maintenance = [...project.notes].sort(maintenancePriority).slice(0, 8)
+  lines.push(`- 待维护建议：${maintenance.length}`, '')
   lines.push(`- 时间层：${project.snapshots.length}`, '')
   lines.push('## 主题峰值', '')
   const sortedPeaks = [...project.peaks].sort((a, b) => b.height - a.height)
@@ -165,8 +180,27 @@ export async function buildProjectReport(project: TerrainProject): Promise<strin
   for (const note of byTime) {
     lines.push(`- [${note.title}](${note.source ?? ''}) — ${note.tags.map((tag) => `#${tag}`).join(' ')}`)
   }
+  lines.push('', '## 待维护建议', '')
+  for (const note of maintenance) {
+    lines.push(`- ${note.title} — 熟练度 ${note.mastery === undefined ? '未标注' : `${(note.mastery * 100).toFixed(0)}%`}，连接 ${note.links.length} 条，状态 ${note.status ?? '未标注'}`)
+  }
   lines.push('')
   return lines.join('\n')
+}
+
+function maintenancePriority(a: TerrainProject['notes'][number], b: TerrainProject['notes'][number]): number {
+  const scoreA = maintenanceScore(a)
+  const scoreB = maintenanceScore(b)
+  return scoreB - scoreA || a.title.localeCompare(b.title)
+}
+
+function maintenanceScore(note: TerrainProject['notes'][number]): number {
+  const needsAssessment = note.mastery === undefined ? 0.25 : 0
+  return needsAssessment
+    + (1 - (note.mastery ?? 0.5)) * 0.4
+    + (1 - (note.confidence ?? 0.5)) * 0.15
+    + Math.min(1, note.links.length / 6) * 0.1
+    + (note.exploration ?? 0.5) * 0.1
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {

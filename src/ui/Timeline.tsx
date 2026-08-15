@@ -169,10 +169,6 @@ export function Timeline({ snapshots, onExportImage }: TimelineProps) {
         <button type="button" className="share-button" aria-label="分享截图" onClick={onExportImage}>
           分享截图
         </button>
-        <span>
-          <b aria-hidden="true">i</b>
-          当前内容由 AI 生成，仅供参考
-        </span>
       </div>
     </>
   )

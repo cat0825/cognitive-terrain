@@ -22,6 +22,7 @@ output/playwright
 # Reference material and scraped raw data
 output/reference-video
 output/watch-reference-20260731
+output/migration
 public/imports/*.raw.json
 
 # Editor directories and files

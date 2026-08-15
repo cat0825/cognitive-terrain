@@ -1,3 +1,5 @@
+export type NoteStatus = 'seed' | 'growing' | 'stable' | 'gap' | 'archived'
+
 export interface NoteInput {
   id?: string
   title?: string
@@ -5,7 +7,16 @@ export interface NoteInput {
   createdAt: string
   tags?: string[] | string
   source?: string
+  sourcePath?: string
+  vault?: string
   weight?: number
+  mastery?: number
+  confidence?: number
+  exploration?: number
+  status?: NoteStatus
+  area?: string
+  reviewedAt?: string
+  links?: string[]
 }
 
 export interface TerrainNote {
@@ -17,7 +28,16 @@ export interface TerrainNote {
   createdAtMs: number
   tags: string[]
   source?: string
+  sourcePath?: string
+  vault?: string
   weight: number
+  mastery?: number
+  confidence?: number
+  exploration?: number
+  status?: NoteStatus
+  area?: string
+  reviewedAt?: string
+  links: string[]
   x: number
   y: number
 }
@@ -91,6 +111,7 @@ export interface ParsedImport {
 
 export type ViewMode = '3d' | '2d'
 export type QualityLevel = 'high' | 'medium' | 'low'
+export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'area'
 
 export interface ProjectSummary {
   id: string

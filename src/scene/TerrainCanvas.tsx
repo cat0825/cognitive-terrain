@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useEffect, useState } from 'react'
-import type { QualityLevel, TerrainNote, TerrainProject, ViewMode } from '../domain/types'
+import type { QualityLevel, TerrainNote, TerrainProject, ViewMode, VisualDimension } from '../domain/types'
 import { interpolateSnapshots, mixHeightValues } from '../pipeline/terrain'
 import { Terrain2D } from '../fallback/Terrain2D'
 import { useAppStore } from '../store/app-store'
@@ -12,6 +12,7 @@ interface TerrainCanvasProps {
   selectedNoteId: string | null
   viewMode: ViewMode
   quality: QualityLevel
+  visualDimension: VisualDimension
   cameraRevision: number
   cameraScale: number
   onSelectNote: (id: string | null) => void
@@ -23,6 +24,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
   selectedNoteId,
   viewMode,
   quality,
+  visualDimension,
   cameraRevision,
   cameraScale,
   onSelectNote,
@@ -43,6 +45,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
         project={project}
         notes={notes}
         selectedNoteId={selectedNoteId}
+        visualDimension={visualDimension}
         onSelectNote={onSelectNote}
       />
     )
@@ -55,6 +58,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
           project={project}
           notes={notes}
           selectedNoteId={selectedNoteId}
+          visualDimension={visualDimension}
           onSelectNote={onSelectNote}
         />
       }
@@ -64,6 +68,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
         notes={notes}
         selectedNoteId={selectedNoteId}
         quality={quality}
+        visualDimension={visualDimension}
         cameraRevision={cameraRevision}
         cameraScale={cameraScale}
         focusRequest={focusRequest}
@@ -78,8 +83,9 @@ function AnimatedTerrain2D({
   project,
   notes,
   selectedNoteId,
+  visualDimension,
   onSelectNote,
-}: Pick<TerrainCanvasProps, 'project' | 'notes' | 'selectedNoteId' | 'onSelectNote'>) {
+}: Pick<TerrainCanvasProps, 'project' | 'notes' | 'selectedNoteId' | 'visualDimension' | 'onSelectNote'>) {
   const timeline = useAppStore((state) => Math.round(state.timeline * 4) / 4)
   const pair = interpolateSnapshots(project.snapshots, timeline)
   const values = pair.mix === 0 ? pair.a.values : mixHeightValues(pair.a.values, pair.b.values, pair.mix)
@@ -90,6 +96,7 @@ function AnimatedTerrain2D({
       notes={notes}
       peaks={project.peaks}
       selectedNoteId={selectedNoteId}
+      visualDimension={visualDimension}
       onSelectNote={onSelectNote}
     />
   )

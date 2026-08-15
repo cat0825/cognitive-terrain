@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import type { TerrainNote, TerrainPeak } from '../domain/types'
+import type { TerrainNote, TerrainPeak, VisualDimension } from '../domain/types'
+import { linkedNotes } from '../domain/knowledge-maintenance'
 import { buildContourPaths, sampleHeight } from '../pipeline/terrain'
 
 interface Terrain2DProps {
@@ -8,6 +9,7 @@ interface Terrain2DProps {
   notes: TerrainNote[]
   peaks: TerrainPeak[]
   selectedNoteId: string | null
+  visualDimension: VisualDimension
   onSelectNote: (id: string | null) => void
 }
 
@@ -17,6 +19,7 @@ export function Terrain2D({
   notes,
   peaks,
   selectedNoteId,
+  visualDimension,
   onSelectNote,
 }: Terrain2DProps) {
   const contours = useMemo(() => buildContourPaths(values, gridSize, 14), [gridSize, values])
@@ -37,6 +40,8 @@ export function Terrain2D({
       ),
     [contours, gridSize],
   )
+  const selected = notes.find((note) => note.id === selectedNoteId)
+  const relations = selected ? linkedNotes(notes, selected.id) : []
 
   return (
     <div className="terrain-2d" onClick={() => onSelectNote(null)}>
@@ -77,6 +82,7 @@ export function Terrain2D({
             />
           ))}
         </g>
+        {selected && relations.length > 0 && <g className="explicit-relation-lines" aria-hidden="true">{relations.map((target) => <line key={target.id} x1={selected.x * 2.8} y1={-selected.y * 2.8} x2={target.x * 2.8} y2={-target.y * 2.8} stroke="#9b8ad9" strokeWidth="0.012" opacity="0.7" />)}</g>}
         <g className="terrain-points">
           {notes.map((note) => {
             const selected = note.id === selectedNoteId
@@ -87,8 +93,8 @@ export function Terrain2D({
                 cx={note.x * 2.8}
                 cy={-note.y * 2.8}
                 r={selected ? 0.07 : 0.024 + height * 0.022}
-                fill={selected ? '#fff2bd' : height > 0.55 ? '#c6bfa7' : '#888883'}
-                opacity={selected ? 1 : 0.36 + height * 0.4}
+                fill={selected ? '#fff2bd' : noteColor(note, height, visualDimension)}
+                opacity={selected ? 1 : noteOpacity(note, height, visualDimension)}
                 filter={selected ? 'url(#selected-glow)' : undefined}
                 role="button"
                 aria-label={note.title}
@@ -115,4 +121,35 @@ export function Terrain2D({
       <div className="terrain-2d-badge">2D CONTOUR FALLBACK</div>
     </div>
   )
+}
+
+function noteColor(note: TerrainNote, height: number, dimension: VisualDimension): string {
+  if (dimension === 'mastery') return colorRamp(note.mastery, '#665f7a', '#d7f0df')
+  if (dimension === 'exploration') return colorRamp(note.exploration, '#647078', '#e3aa66')
+  if (dimension === 'area') return categoricalColor(note.area ?? note.tags[0] ?? note.id)
+  return height > 0.55 ? '#c6bfa7' : '#888883'
+}
+
+function noteOpacity(note: TerrainNote, height: number, dimension: VisualDimension): number {
+  if (dimension === 'mastery') return 0.3 + (note.mastery ?? 0.5) * 0.7
+  if (dimension === 'exploration') return 0.38 + (note.exploration ?? 0.5) * 0.62
+  return 0.36 + height * 0.4
+}
+
+function colorRamp(value: number | undefined, low: string, high: string): string {
+  const t = value ?? 0.5
+  const a = hexRgb(low)
+  const b = hexRgb(high)
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`
+}
+
+function categoricalColor(value: string): string {
+  const palette = ['#76a6a0', '#9b8ad9', '#c49b67', '#7f9fc8', '#b67f8c', '#8da56d']
+  let hash = 0
+  for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619)
+  return palette[Math.abs(hash) % palette.length]
+}
+
+function hexRgb(value: string): [number, number, number] {
+  return [Number.parseInt(value.slice(1, 3), 16), Number.parseInt(value.slice(3, 5), 16), Number.parseInt(value.slice(5, 7), 16)]
 }

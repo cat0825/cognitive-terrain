@@ -20,6 +20,7 @@ function App() {
   const timelineBucket = useAppStore((state) => Math.ceil(state.timeline))
   const viewMode = useAppStore((state) => state.viewMode)
   const quality = useAppStore((state) => state.quality)
+  const visualDimension = useAppStore((state) => state.visualDimension)
   const cameraRevision = useAppStore((state) => state.cameraRevision)
   const cameraScale = useAppStore((state) => state.cameraScale)
   const isAnalyzing = useAppStore((state) => state.isAnalyzing)
@@ -93,6 +94,7 @@ function App() {
               selectedNoteId={selectedNoteId}
               viewMode={viewMode}
               quality={quality}
+              visualDimension={visualDimension}
               cameraRevision={cameraRevision}
               cameraScale={cameraScale}
               onSelectNote={selectNote}
