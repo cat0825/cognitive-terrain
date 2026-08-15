@@ -1,6 +1,8 @@
 import type { TerrainNote, TerrainProject } from './types'
 import { buildTerrainData } from '../pipeline/terrain'
 import { computeNeighbors } from '../pipeline/neighbors'
+import { cognitiveStateFromNote } from './cognitive-state'
+import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 
 interface DemoTopic {
   key: string
@@ -306,10 +308,16 @@ const topics: DemoTopic[] = [
 
 export function createDemoProject(): TerrainProject {
   const notes = Array.from({ length: topics.length * articlesPerTopic }, (_, index) => createDemoNote(index))
+  const bridgeStride = Math.max(1, Math.floor(topics.length / 3))
+  for (let topicIndex = 0; topicIndex < topics.length; topicIndex += 1) {
+    const from = notes[topicIndex]
+    const to = notes[(topicIndex + bridgeStride) % topics.length]
+    if (from && to && from.area !== to.area) from.links = [to.title]
+  }
   const terrain = buildTerrainData(notes, 128, 'Asia/Shanghai', 0.052)
   const timestamp = '2025-12-31T20:00:00+08:00'
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: 'demo-ai-infra-terrain',
     name: 'AI Infra 知识地形',
     createdAt: timestamp,
@@ -332,6 +340,10 @@ export function createDemoProject(): TerrainProject {
         .map((note) => note.id),
     })),
     noteNeighbors: computeNeighbors(notes, 6),
+    cognitiveStates: buildCognitiveStates(notes, timestamp),
+    interactionEvents: [],
+    terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
+    activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
   }
 }
 
@@ -339,7 +351,7 @@ export function createProjectFromNotes(name: string, notes: TerrainNote[], model
   const terrain = buildTerrainData(notes)
   const timestamp = new Date().toISOString()
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: `project-${hash(`${name}-${timestamp}`)}`,
     name,
     createdAt: timestamp,
@@ -353,7 +365,22 @@ export function createProjectFromNotes(name: string, notes: TerrainNote[], model
     snapshots: terrain.snapshots,
     peaks: terrain.peaks,
     noteNeighbors: computeNeighbors(notes, 6),
+    cognitiveStates: buildCognitiveStates(notes, timestamp),
+    interactionEvents: [],
+    terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
+    activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
   }
+}
+
+function buildCognitiveStates(notes: TerrainNote[], updatedAt: string): TerrainProject['cognitiveStates'] {
+  return notes.flatMap((note) => {
+    const state = cognitiveStateFromNote(
+      note,
+      note.cognitiveStateProvenance ?? 'migration',
+      note.reviewedAt ?? updatedAt,
+    )
+    return state ? [state] : []
+  })
 }
 
 function createDemoNote(index: number): TerrainNote {
@@ -382,6 +409,11 @@ function createDemoNote(index: number): TerrainNote {
     exploration: 0.35 + ((index * 7) % 61) / 100,
     status: index % 19 === 0 ? 'seed' : index % 13 === 0 ? 'stable' : 'growing',
     area: topic.domain,
+    areas: topic.key === 'Agent Infra'
+      ? [topic.domain, 'Agent 系统']
+      : index === 0
+        ? [topic.domain, '计算机体系结构']
+        : [topic.domain],
     links: [],
     x,
     y,

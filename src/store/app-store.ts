@@ -1,14 +1,32 @@
 import { create } from 'zustand'
-import type { AnalysisOptions, NoteInput, ProcessingProgress, ProjectSummary, QualityLevel, TerrainProject, ViewMode, VisualDimension } from '../domain/types'
+import type {
+  AnalysisOptions,
+  NoteInput,
+  ProcessingProgress,
+  ProjectBackupSummary,
+  ProjectSummary,
+  QualityLevel,
+  InteractionEvent,
+  TerrainProject,
+  ViewMode,
+  VisualDimension,
+} from '../domain/types'
 import { createDemoProject } from '../domain/demo'
+import { commitAnalyzedProject, createInteractionEvent, eventTypeForNoteUpdate } from '../domain/cognitive-state'
+import { shouldRecordOpenedEvent } from '../domain/activity-temperature'
+import { areasForNote } from '../domain/knowledge-plates'
 import { TODAY_STUDY_PACK_NAME, todayStudyPack } from '../domain/study-pack'
 import { runAnalysis, type AnalysisHandle } from '../pipeline/worker-client'
 import { parseWikiLinks } from '../import/parse'
 import {
+  appendProjectInteractionEvent,
+  createProjectBackup,
   deleteProject,
   getProject,
+  listProjectBackups,
   listProjectSummaries,
   renameProject,
+  restoreProjectBackup,
   saveProject,
 } from '../storage/project-repository'
 
@@ -19,6 +37,7 @@ interface AppState {
   selectedNoteId: string | null
   search: string
   activeTags: string[]
+  activeAreas: string[]
   viewMode: ViewMode
   quality: QualityLevel
   visualDimension: VisualDimension
@@ -28,6 +47,7 @@ interface AppState {
   detailsOpen: boolean
   libraryOpen: boolean
   projects: ProjectSummary[]
+  backups: ProjectBackupSummary[]
   isAnalyzing: boolean
   progress: ProcessingProgress | null
   error: string | null
@@ -36,6 +56,7 @@ interface AppState {
   cameraInteractionMode: CameraInteractionMode
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
+  activeCollisionId: string | null
   compareRef: number | null
   firstRun: boolean
   dismissFirstRun: () => void
@@ -45,6 +66,8 @@ interface AppState {
   setSearch: (search: string) => void
   toggleTag: (tag: string) => void
   clearTags: () => void
+  toggleArea: (area: string) => void
+  clearAreas: () => void
   setViewMode: (mode: ViewMode) => void
   setQuality: (quality: QualityLevel) => void
   setVisualDimension: (dimension: VisualDimension) => void
@@ -58,13 +81,20 @@ interface AppState {
   resetCamera: () => void
   requestFocus: (noteId: string) => void
   setActivePeak: (peakId: string | null) => void
+  selectCollision: (collisionId: string | null) => void
   setCompareRef: (bucketIndex: number | null) => void
   reportError: (message: string) => void
   dismissError: () => void
-  startAnalysis: (name: string, notes: NoteInput[], options?: AnalysisOptions) => Promise<void>
+  startAnalysis: (
+    name: string,
+    notes: NoteInput[],
+    options?: AnalysisOptions,
+    commit?: AnalysisCommitContext,
+  ) => Promise<void>
   loadStudyPack: () => Promise<void>
   mergeNotes: (newNotes: NoteInput[], options?: AnalysisOptions) => Promise<void>
-  updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[]; mastery?: number | null; confidence?: number | null; exploration?: number | null; status?: TerrainProject['notes'][number]['status'] | null; area?: string | null; reviewedAt?: string | null }) => Promise<void>
+  updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[]; mastery?: number | null; confidence?: number | null; exploration?: number | null; status?: TerrainProject['notes'][number]['status'] | null; area?: string | null; areas?: string[] | null; reviewedAt?: string | null }) => Promise<void>
+  markNoteReviewed: (noteId: string) => Promise<void>
   cancelAnalysis: () => void
   replaceProject: (project: TerrainProject) => Promise<void>
   resetDemo: () => void
@@ -72,6 +102,14 @@ interface AppState {
   renameCurrentProject: (name: string) => Promise<void>
   deleteProjectInLibrary: (id: string) => Promise<void>
   reloadProjects: () => Promise<void>
+  createBackup: () => Promise<boolean>
+  restoreBackup: (id: string) => Promise<boolean>
+  reloadBackups: () => Promise<void>
+}
+
+interface AnalysisCommitContext {
+  baseProject: TerrainProject
+  events?: InteractionEvent[]
 }
 
 interface PerformanceControls {
@@ -99,6 +137,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedNoteId: initialProject.notes[0]?.id ?? null,
   search: '',
   activeTags: [],
+  activeAreas: [],
   viewMode: '3d',
   quality: 'high',
   visualDimension: 'density',
@@ -108,6 +147,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   detailsOpen: true,
   libraryOpen: false,
   projects: [],
+  backups: [],
   isAnalyzing: false,
   progress: null,
   error: null,
@@ -116,6 +156,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   cameraInteractionMode: 'rotate',
   focusRequest: null,
   activePeakId: null,
+  activeCollisionId: null,
   compareRef: null,
   firstRun: localStorage.getItem('cognitive-terrain:first-run') === null,
   lastAnalysis: null,
@@ -125,8 +166,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   initialize: async () => {
     try {
-      const projectSummaries = await listProjectSummaries()
+      const [projectSummaries, backups] = await Promise.all([
+        listProjectSummaries(),
+        listProjectBackups(),
+      ])
       if (projectSummaries.length) set({ projects: projectSummaries })
+      if (backups.length) set({ backups })
       const lastProjectId = localStorage.getItem('cognitive-terrain:last-project')
       if (!lastProjectId) return
       const project = await getProject(lastProjectId)
@@ -135,7 +180,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStorage.removeItem('cognitive-terrain:last-project')
     }
   },
-  selectNote: (selectedNoteId) => set({ selectedNoteId, detailsOpen: selectedNoteId !== null }),
+  selectNote: (selectedNoteId) => {
+    const state = get()
+    const occurredAt = new Date().toISOString()
+    const event = selectedNoteId
+      && selectedNoteId !== state.selectedNoteId
+      && state.project.notes.some((note) => note.id === selectedNoteId)
+      && shouldRecordOpenedEvent(state.project.interactionEvents, selectedNoteId, occurredAt)
+      ? createInteractionEvent(selectedNoteId, 'opened', occurredAt)
+      : undefined
+    const project = event
+      ? { ...state.project, interactionEvents: [...state.project.interactionEvents, event] }
+      : state.project
+    set({
+      project,
+      selectedNoteId,
+      activeCollisionId: null,
+      detailsOpen: selectedNoteId !== null,
+    })
+    if (event) {
+      void appendProjectInteractionEvent(project.id, event).catch((error) => {
+        set({ error: `活动记录保存失败：${error instanceof Error ? error.message : String(error)}` })
+      })
+    }
+  },
   setSearch: (search) => set({ search }),
   toggleTag: (tag) =>
     set((state) => ({
@@ -144,6 +212,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         : [...state.activeTags, tag],
     })),
   clearTags: () => set({ activeTags: [] }),
+  toggleArea: (area) => set((state) => ({
+    activeAreas: state.activeAreas.includes(area)
+      ? state.activeAreas.filter((activeArea) => activeArea !== area)
+      : [...state.activeAreas, area],
+  })),
+  clearAreas: () => set({ activeAreas: [] }),
   setViewMode: (viewMode) => set({ viewMode }),
   setQuality: (quality) => set({ quality }),
   setVisualDimension: (visualDimension) => set({ visualDimension }),
@@ -168,10 +242,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   requestFocus: (noteId) =>
     set((state) => ({ focusRequest: { noteId, revision: (state.focusRequest?.revision ?? 0) + 1 } })),
   setActivePeak: (activePeakId) => set({ activePeakId }),
+  selectCollision: (activeCollisionId) => set({
+    activeCollisionId,
+    selectedNoteId: null,
+    detailsOpen: activeCollisionId !== null,
+  }),
   setCompareRef: (compareRef) => set({ compareRef }),
   reportError: (error) => set({ error }),
   dismissError: () => set({ error: null }),
-  startAnalysis: async (name, notes, options = {}) => {
+  startAnalysis: async (name, notes, options = {}, commit) => {
     if (!notes.length) {
       set({ error: '没有可分析的笔记' })
       return
@@ -186,7 +265,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     activeAnalysis = runAnalysis(name, notes, options, (progress) => set({ progress }))
     try {
-      const project = await activeAnalysis.promise
+      const analyzedProject = await activeAnalysis.promise
+      const project = commit
+        ? commitAnalyzedProject(analyzedProject, commit.baseProject, commit.events)
+        : analyzedProject
       const embeddingMode: 'semantic' | 'fallback' =
         project.embeddingMode === 'semantic' ? 'semantic' : 'fallback'
       set({
@@ -217,6 +299,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   mergeNotes: async (newNotes, options = {}) => {
     const current = get().project
+    const stateProvenance = new Map(current.cognitiveStates.map((state) => [state.itemId, state.provenance]))
     const existing: NoteInput[] = current.notes.map((note) => ({
       id: note.id,
       title: note.title,
@@ -232,7 +315,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       exploration: note.exploration,
       status: note.status,
       area: note.area,
+      areas: note.areas,
       reviewedAt: note.reviewedAt,
+      cognitiveStateProvenance: stateProvenance.get(note.id),
       links: note.links,
     }))
     const existingIds = new Set(existing.map((note) => note.id))
@@ -248,7 +333,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         | 'transformers'
         | 'deterministic',
     }
-    await get().startAnalysis(current.name, merged, effective)
+    await get().startAnalysis(current.name, merged, effective, { baseProject: current })
   },
   updateNote: async (noteId, patch) => {
     const current = get().project
@@ -257,6 +342,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: '笔记不存在' })
       return
     }
+    const stateProvenance = new Map(current.cognitiveStates.map((state) => [state.itemId, state.provenance]))
+    const changesCognitiveState = ['mastery', 'confidence', 'exploration', 'status', 'reviewedAt']
+      .some((field) => field in patch)
     const inputs: NoteInput[] = current.notes.map((note) => {
       if (note.id !== noteId) {
         return {
@@ -274,10 +362,17 @@ export const useAppStore = create<AppState>((set, get) => ({
           exploration: note.exploration,
           status: note.status,
           area: note.area,
+          areas: note.areas,
           reviewedAt: note.reviewedAt,
+          cognitiveStateProvenance: stateProvenance.get(note.id),
           links: note.links,
         }
       }
+      const nextAreas = 'areas' in patch
+        ? areasForNote({ areas: patch.areas ?? [] })
+        : 'area' in patch
+          ? areasForNote({ area: patch.area ?? undefined })
+          : areasForNote(note)
       return {
         id: note.id,
         title: patch.title ?? note.title,
@@ -292,8 +387,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         confidence: 'confidence' in patch ? patch.confidence ?? undefined : note.confidence,
         exploration: 'exploration' in patch ? patch.exploration ?? undefined : note.exploration,
         status: 'status' in patch ? patch.status ?? undefined : note.status,
-        area: 'area' in patch ? patch.area ?? undefined : note.area,
+        area: nextAreas[0],
+        areas: nextAreas.length ? nextAreas : undefined,
         reviewedAt: 'reviewedAt' in patch ? patch.reviewedAt ?? undefined : note.reviewedAt,
+        cognitiveStateProvenance: changesCognitiveState ? 'app' : stateProvenance.get(note.id),
         links: patch.content === undefined ? note.links : parseWikiLinks(patch.content),
       }
     })
@@ -302,7 +399,48 @@ export const useAppStore = create<AppState>((set, get) => ({
         | 'transformers'
         | 'deterministic',
     }
-    await get().startAnalysis(current.name, inputs, effective)
+    const changedFields = Object.keys(patch)
+    const eventType = eventTypeForNoteUpdate(changedFields)
+    const event = createInteractionEvent(noteId, eventType, new Date().toISOString(), { changedFields })
+    await get().startAnalysis(current.name, inputs, effective, { baseProject: current, events: [event] })
+  },
+  markNoteReviewed: async (noteId) => {
+    const current = get().project
+    const note = current.notes.find((candidate) => candidate.id === noteId)
+    if (!note) {
+      set({ error: '笔记不存在' })
+      return
+    }
+    const occurredAt = new Date().toISOString()
+    const event = createInteractionEvent(noteId, 'reviewed', occurredAt, { source: 'manual' })
+    const existingState = current.cognitiveStates.find((state) => state.itemId === noteId)
+    const cognitiveState = {
+      ...existingState,
+      itemId: noteId,
+      reviewedAt: occurredAt,
+      updatedAt: occurredAt,
+      provenance: 'app' as const,
+    }
+    const project: TerrainProject = {
+      ...current,
+      updatedAt: occurredAt,
+      notes: current.notes.map((candidate) => candidate.id === noteId
+        ? { ...candidate, reviewedAt: occurredAt, cognitiveStateProvenance: 'app' }
+        : candidate),
+      cognitiveStates: [
+        ...current.cognitiveStates.filter((state) => state.itemId !== noteId),
+        cognitiveState,
+      ],
+      interactionEvents: [...current.interactionEvents, event],
+    }
+    try {
+      await saveProject(project)
+      if (get().project.id !== current.id) return
+      set({ project })
+      await Promise.all([get().reloadProjects(), get().reloadBackups()])
+    } catch (error) {
+      set({ error: `复习记录保存失败：${error instanceof Error ? error.message : String(error)}` })
+    }
   },
   cancelAnalysis: () => {
     activeAnalysis?.cancel()
@@ -314,7 +452,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await saveProject(project)
       localStorage.setItem('cognitive-terrain:last-project', project.id)
-      await get().reloadProjects()
+      await Promise.all([get().reloadProjects(), get().reloadBackups()])
     } catch (error) {
       set({ error: `项目已打开，但本地保存失败：${error instanceof Error ? error.message : String(error)}` })
     }
@@ -353,7 +491,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ project: renamed })
     }
-    await get().reloadProjects()
+    await Promise.all([get().reloadProjects(), get().reloadBackups()])
   },
   deleteProjectInLibrary: async (id) => {
     await deleteProject(id)
@@ -362,11 +500,42 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStorage.removeItem('cognitive-terrain:last-project')
       setProjectState(set, createDemoProject())
     }
-    await get().reloadProjects()
+    await Promise.all([get().reloadProjects(), get().reloadBackups()])
   },
   reloadProjects: async () => {
     const projectSummaries = await listProjectSummaries()
     set({ projects: projectSummaries })
+  },
+  createBackup: async () => {
+    try {
+      await createProjectBackup(get().project)
+      await get().reloadBackups()
+      return true
+    } catch (error) {
+      set({ error: `创建恢复点失败：${error instanceof Error ? error.message : String(error)}` })
+      return false
+    }
+  },
+  restoreBackup: async (id) => {
+    try {
+      const project = await restoreProjectBackup(id)
+      if (!project) {
+        set({ error: '恢复点不存在或已被清理' })
+        await get().reloadBackups()
+        return false
+      }
+      localStorage.setItem('cognitive-terrain:last-project', project.id)
+      setProjectState(set, project)
+      await Promise.all([get().reloadProjects(), get().reloadBackups()])
+      return true
+    } catch (error) {
+      set({ error: `恢复项目失败：${error instanceof Error ? error.message : String(error)}` })
+      return false
+    }
+  },
+  reloadBackups: async () => {
+    const backups = await listProjectBackups()
+    set({ backups })
   },
 }))
 
@@ -385,10 +554,12 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
     timeline: Math.max(0, project.snapshots.length - 1),
     selectedNoteId: project.notes[0]?.id ?? null,
     activeTags: [],
+    activeAreas: [],
     search: '',
     detailsOpen: true,
     focusRequest: null,
     activePeakId: null,
+    activeCollisionId: null,
     compareRef: null,
     cameraRevision: Date.now(),
     cameraScale: 192,

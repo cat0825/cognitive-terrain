@@ -1,5 +1,5 @@
 import { contours } from 'd3-contour'
-import type { TerrainNote, TerrainPeak, TerrainSnapshot } from '../domain/types'
+import type { TerrainElevation, TerrainNote, TerrainPeak, TerrainSnapshot } from '../domain/types'
 
 export interface ContourPath {
   value: number
@@ -17,6 +17,7 @@ export function buildTerrainData(
   gridSize = chooseGridSize(notes.length),
   timeZone = 'Asia/Shanghai',
   bandwidthOverride?: number,
+  elevation: Extract<TerrainElevation, 'density' | 'mastery' | 'exploration'> = 'density',
 ): TerrainData {
   if (notes.length === 0) {
     return {
@@ -35,22 +36,44 @@ export function buildTerrainData(
     byBucket.set(bucket, bucketNotes)
   }
 
-  const impulses = new Float32Array(gridSize * gridSize)
-  const rawSnapshots: Array<{ bucket: string; values: Float32Array }> = []
+  const densityImpulses = new Float32Array(gridSize * gridSize)
+  const numeratorImpulses = elevation === 'density' ? undefined : new Float32Array(gridSize * gridSize)
+  const evidenceImpulses = elevation === 'density' ? undefined : new Float32Array(gridSize * gridSize)
+  const rawSnapshots: Array<{
+    bucket: string
+    density: Float32Array
+    numerator?: Float32Array
+    evidence?: Float32Array
+  }> = []
   for (const [bucket, bucketNotes] of [...byBucket.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    for (const note of bucketNotes) splat(impulses, gridSize, note.x, note.y, note.weight)
-    rawSnapshots.push({ bucket, values: gaussianBlur(impulses, gridSize, bandwidth) })
+    for (const note of bucketNotes) {
+      splat(densityImpulses, gridSize, note.x, note.y, note.weight)
+      if (!numeratorImpulses || !evidenceImpulses) continue
+      const value = elevation === 'mastery' ? note.mastery : note.exploration
+      if (value === undefined) continue
+      const confidence = elevation === 'mastery' ? note.confidence ?? 0.5 : 1
+      splat(numeratorImpulses, gridSize, note.x, note.y, note.weight * confidence * value)
+      splat(evidenceImpulses, gridSize, note.x, note.y, note.weight * confidence)
+    }
+    rawSnapshots.push({
+      bucket,
+      density: gaussianBlur(densityImpulses, gridSize, bandwidth),
+      numerator: numeratorImpulses ? gaussianBlur(numeratorImpulses, gridSize, bandwidth) : undefined,
+      evidence: evidenceImpulses ? gaussianBlur(evidenceImpulses, gridSize, bandwidth) : undefined,
+    })
   }
 
-  const finalValues = rawSnapshots.at(-1)?.values ?? new Float32Array(gridSize * gridSize)
+  const finalDensity = rawSnapshots.at(-1)?.density ?? new Float32Array(gridSize * gridSize)
   let globalMax = 0
-  for (const value of finalValues) globalMax = Math.max(globalMax, value)
-  const snapshots = rawSnapshots.map(({ bucket, values }) => ({
+  for (const value of finalDensity) globalMax = Math.max(globalMax, value)
+  const snapshots = rawSnapshots.map(({ bucket, density, numerator, evidence }) => ({
     bucket,
     label: formatBucket(bucket),
-    values: shapeHeights(values, gridSize, globalMax),
+    values: numerator && evidence
+      ? shapeCognitiveHeights(density, numerator, evidence, gridSize, globalMax)
+      : shapeHeights(density, gridSize, globalMax),
   }))
-  const peaks = detectPeaks(snapshots.at(-1)?.values ?? finalValues, gridSize, notes, bandwidth)
+  const peaks = detectPeaks(snapshots.at(-1)?.values ?? finalDensity, gridSize, notes, bandwidth)
   return { snapshots, peaks, bandwidth }
 }
 
@@ -184,6 +207,28 @@ function shapeHeights(values: Float32Array, size: number, globalMax: number): Fl
       const edgeDistance = Math.min(x, y, size - 1 - x, size - 1 - y) / (size * 0.12)
       const edge = smoothstep(0, 1, edgeDistance)
       output[y * size + x] = (Math.log1p(values[y * size + x]) / denominator) * edge
+    }
+  }
+  return output
+}
+
+function shapeCognitiveHeights(
+  density: Float32Array,
+  numerator: Float32Array,
+  evidence: Float32Array,
+  size: number,
+  globalDensityMax: number,
+): Float32Array {
+  const output = new Float32Array(density.length)
+  const denominator = Math.log1p(Math.max(globalDensityMax, 1e-8))
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = y * size + x
+      const edgeDistance = Math.min(x, y, size - 1 - x, size - 1 - y) / (size * 0.12)
+      const edge = smoothstep(0, 1, edgeDistance)
+      const normalizedDensity = Math.log1p(density[index]) / denominator
+      const weightedMean = evidence[index] > 1e-8 ? numerator[index] / evidence[index] : 0
+      output[index] = Math.pow(Math.max(0, normalizedDensity), 0.35) * clamp(weightedMean, 0, 1) * edge
     }
   }
   return output

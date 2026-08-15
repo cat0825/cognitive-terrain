@@ -1,6 +1,9 @@
-import { lazy, memo, Suspense, useEffect, useState } from 'react'
+import { lazy, memo, Suspense, useEffect, useMemo, useState } from 'react'
 import type { QualityLevel, TerrainNote, TerrainProject, ViewMode, VisualDimension } from '../domain/types'
+import { buildActivitySummaries } from '../domain/activity-temperature'
+import { profileIdForVisualDimension } from '../domain/terrain-profile'
 import { interpolateSnapshots, mixHeightValues } from '../pipeline/terrain'
+import { runTerrainProfile } from '../pipeline/worker-client'
 import { Terrain2D } from '../fallback/Terrain2D'
 import { useAppStore } from '../store/app-store'
 
@@ -33,6 +36,59 @@ export const TerrainCanvas = memo(function TerrainCanvas({
   const [webglReady, setWebglReady] = useState(false)
   const focusRequest = useAppStore((state) => state.focusRequest)
   const activePeakId = useAppStore((state) => state.activePeakId)
+  const activityByNote = useMemo(
+    () => buildActivitySummaries(project.notes, project.interactionEvents),
+    [project.interactionEvents, project.notes],
+  )
+  const [profileTerrain, setProfileTerrain] = useState<Pick<TerrainProject, 'snapshots' | 'peaks'> | null>(null)
+  const profileId = profileIdForVisualDimension(visualDimension)
+  useEffect(() => {
+    if (profileId === 'density') {
+      setProfileTerrain(null)
+      return
+    }
+    const cached = profileTerrainCache.get(project.notes)?.get(profileId)
+    if (cached) {
+      setProfileTerrain(cached)
+      return
+    }
+    setProfileTerrain(null)
+    const handle = runTerrainProfile({
+      type: 'build-terrain-profile',
+      notes: project.notes,
+      gridSize: project.gridSize,
+      timeZone: project.timeZone,
+      elevation: profileId === 'mastery' ? 'mastery' : 'exploration',
+    })
+    let active = true
+    void handle.promise.then((terrain) => {
+      if (!active) return
+      const result = { snapshots: terrain.snapshots, peaks: terrain.peaks }
+      let projectCache = profileTerrainCache.get(project.notes)
+      if (!projectCache) {
+        projectCache = new Map()
+        profileTerrainCache.set(project.notes, projectCache)
+      }
+      projectCache.set(profileId, result)
+      setProfileTerrain(result)
+    }).catch((error) => {
+      if (!active) return
+      setProfileTerrain(null)
+      const store = useAppStore.getState()
+      store.reportError(`地形图层计算失败：${error instanceof Error ? error.message : String(error)}`)
+      store.setVisualDimension('density')
+    })
+    return () => {
+      active = false
+      handle.cancel()
+    }
+  }, [profileId, project.gridSize, project.notes, project.timeZone])
+  const terrainProject = useMemo(
+    () => profileTerrain && profileId !== 'density'
+      ? { ...project, ...profileTerrain, activeTerrainProfileId: profileId }
+      : project,
+    [profileId, profileTerrain, project],
+  )
   useEffect(() => {
     if (use2d) return
     const timer = window.setTimeout(() => setWebglReady(true), 60)
@@ -42,10 +98,11 @@ export const TerrainCanvas = memo(function TerrainCanvas({
   if (use2d || !webglReady) {
     return (
       <AnimatedTerrain2D
-        project={project}
+        project={terrainProject}
         notes={notes}
         selectedNoteId={selectedNoteId}
         visualDimension={visualDimension}
+        activityByNote={activityByNote}
         onSelectNote={onSelectNote}
       />
     )
@@ -55,20 +112,22 @@ export const TerrainCanvas = memo(function TerrainCanvas({
     <Suspense
       fallback={
         <AnimatedTerrain2D
-          project={project}
+          project={terrainProject}
           notes={notes}
           selectedNoteId={selectedNoteId}
           visualDimension={visualDimension}
+          activityByNote={activityByNote}
           onSelectNote={onSelectNote}
         />
       }
     >
       <Terrain3D
-        project={project}
+        project={terrainProject}
         notes={notes}
         selectedNoteId={selectedNoteId}
         quality={quality}
         visualDimension={visualDimension}
+        activityByNote={activityByNote}
         cameraRevision={cameraRevision}
         cameraScale={cameraScale}
         focusRequest={focusRequest}
@@ -79,13 +138,18 @@ export const TerrainCanvas = memo(function TerrainCanvas({
   )
 })
 
+const profileTerrainCache = new WeakMap<TerrainNote[], Map<string, Pick<TerrainProject, 'snapshots' | 'peaks'>>>()
+
 function AnimatedTerrain2D({
   project,
   notes,
   selectedNoteId,
   visualDimension,
+  activityByNote,
   onSelectNote,
-}: Pick<TerrainCanvasProps, 'project' | 'notes' | 'selectedNoteId' | 'visualDimension' | 'onSelectNote'>) {
+}: Pick<TerrainCanvasProps, 'project' | 'notes' | 'selectedNoteId' | 'visualDimension' | 'onSelectNote'> & {
+  activityByNote: ReturnType<typeof buildActivitySummaries>
+}) {
   const timeline = useAppStore((state) => Math.round(state.timeline * 4) / 4)
   const pair = interpolateSnapshots(project.snapshots, timeline)
   const values = pair.mix === 0 ? pair.a.values : mixHeightValues(pair.a.values, pair.b.values, pair.mix)
@@ -97,6 +161,7 @@ function AnimatedTerrain2D({
       peaks={project.peaks}
       selectedNoteId={selectedNoteId}
       visualDimension={visualDimension}
+      activityByNote={activityByNote}
       onSelectNote={onSelectNote}
     />
   )

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoProject } from '../../src/domain/demo'
+import { buildPlateBridges, buildPlateCollisions } from '../../src/domain/knowledge-plates'
 
 describe('AI Infra demo project', () => {
   it('builds a deterministic dense knowledge terrain', () => {
@@ -16,6 +17,8 @@ describe('AI Infra demo project', () => {
     expect(Math.max(...first.notes.map((note) => note.weight))).toBeGreaterThan(1.6)
     expect(first.snapshots[0]?.bucket).toBe('2021-11')
     expect(first.snapshots.at(-1)?.bucket).toBe('2025-12')
+    expect(buildPlateBridges(first.notes).length).toBeGreaterThan(0)
+    expect(buildPlateCollisions(first.notes).filter((collision) => collision.mode === 'band').length).toBeGreaterThan(0)
     expect(second.notes.map(({ x, y }) => [x, y])).toEqual(first.notes.map(({ x, y }) => [x, y]))
     expect(second.notes.map((note) => note.weight)).toEqual(first.notes.map((note) => note.weight))
   })

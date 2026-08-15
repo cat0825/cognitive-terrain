@@ -2,6 +2,7 @@ import { AlertCircle, LoaderCircle, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { visibleNotesFor } from './domain/project-view'
+import { buildPlateCollisions } from './domain/knowledge-plates'
 import { downloadProjectBundle, downloadProjectReport, exportTerrainPng } from './export/project-files'
 import { TerrainCanvas } from './scene/TerrainCanvas'
 import { useAppStore } from './store/app-store'
@@ -17,6 +18,8 @@ function App() {
   const selectedNoteId = useAppStore((state) => state.selectedNoteId)
   const search = useAppStore((state) => state.search)
   const activeTags = useAppStore((state) => state.activeTags)
+  const activeAreas = useAppStore((state) => state.activeAreas)
+  const activeCollisionId = useAppStore((state) => state.activeCollisionId)
   const timelineBucket = useAppStore((state) => Math.ceil(state.timeline))
   const viewMode = useAppStore((state) => state.viewMode)
   const quality = useAppStore((state) => state.quality)
@@ -42,14 +45,16 @@ function App() {
   }, [initialize])
 
   const visibleNotes = useMemo(
-    () => visibleNotesFor(project, timelineBucket, search, activeTags),
-    [activeTags, project, search, timelineBucket],
+    () => visibleNotesFor(project, timelineBucket, search, activeTags, activeAreas),
+    [activeAreas, activeTags, project, search, timelineBucket],
   )
   const filteredNotes = useMemo(
-    () => visibleNotesFor(project, Math.max(0, project.snapshots.length - 1), search, activeTags),
-    [activeTags, project, search],
+    () => visibleNotesFor(project, Math.max(0, project.snapshots.length - 1), search, activeTags, activeAreas),
+    [activeAreas, activeTags, project, search],
   )
   const selectedNote = project.notes.find((note) => note.id === selectedNoteId)
+  const collisions = useMemo(() => buildPlateCollisions(filteredNotes), [filteredNotes])
+  const activeCollision = collisions.find((collision) => collision.id === activeCollisionId)
   const progressValue = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
   const [analysisToast, setAnalysisToast] = useState<typeof lastAnalysis>(null)
   const toastTimer = useRef<number | null>(null)
@@ -99,7 +104,7 @@ function App() {
               cameraScale={cameraScale}
               onSelectNote={selectNote}
             />
-            <NoteDetail project={project} note={selectedNote} visibleCount={visibleNotes.length} />
+            <NoteDetail project={project} note={selectedNote} collision={activeCollision} visibleCount={visibleNotes.length} />
             <CameraRail />
             <Timeline snapshots={project.snapshots} onExportImage={() => void exportImage()} />
             <FilterPanel />

@@ -1,7 +1,10 @@
 import { useMemo } from 'react'
 import type { TerrainNote, TerrainPeak, VisualDimension } from '../domain/types'
+import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
+import { buildPlateCollisions, plateColor, primaryAreaForNote } from '../domain/knowledge-plates'
 import { linkedNotes } from '../domain/knowledge-maintenance'
 import { buildContourPaths, sampleHeight } from '../pipeline/terrain'
+import { useAppStore } from '../store/app-store'
 
 interface Terrain2DProps {
   values: Float32Array
@@ -10,6 +13,7 @@ interface Terrain2DProps {
   peaks: TerrainPeak[]
   selectedNoteId: string | null
   visualDimension: VisualDimension
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>
   onSelectNote: (id: string | null) => void
 }
 
@@ -20,6 +24,7 @@ export function Terrain2D({
   peaks,
   selectedNoteId,
   visualDimension,
+  activityByNote,
   onSelectNote,
 }: Terrain2DProps) {
   const contours = useMemo(() => buildContourPaths(values, gridSize, 14), [gridSize, values])
@@ -42,6 +47,12 @@ export function Terrain2D({
   )
   const selected = notes.find((note) => note.id === selectedNoteId)
   const relations = selected ? linkedNotes(notes, selected.id) : []
+  const collisions = useMemo(() => buildPlateCollisions(notes), [notes])
+  const sparseBridges = collisions.filter((collision) => collision.mode === 'lines').flatMap((collision) => collision.bridges)
+  const collisionBands = collisions.filter((collision) => collision.mode === 'band')
+  const notesById = useMemo(() => new Map(notes.map((note) => [note.id, note])), [notes])
+  const activeCollisionId = useAppStore((state) => state.activeCollisionId)
+  const selectCollision = useAppStore((state) => state.selectCollision)
 
   return (
     <div className="terrain-2d" onClick={() => onSelectNote(null)}>
@@ -82,6 +93,51 @@ export function Terrain2D({
             />
           ))}
         </g>
+        {visualDimension === 'area' && sparseBridges.length > 0 && (
+          <g className="plate-bridge-lines" aria-hidden="true">
+            {sparseBridges.map((bridge) => {
+              const from = notesById.get(bridge.fromId)
+              const to = notesById.get(bridge.toId)
+              if (!from || !to) return null
+              return <line
+                key={bridge.id}
+                className={`plate-bridge plate-bridge--${bridge.kind}`}
+                x1={from.x * 2.8}
+                y1={-from.y * 2.8}
+                x2={to.x * 2.8}
+                y2={-to.y * 2.8}
+                opacity={0.32 + bridge.score * 0.5}
+              />
+            })}
+          </g>
+        )}
+        {visualDimension === 'area' && collisionBands.length > 0 && (
+          <g className="plate-collision-bands">
+            {collisionBands.map((collision) => (
+              <line
+                key={collision.id}
+                className={collision.id === activeCollisionId ? 'plate-collision-band is-active' : 'plate-collision-band'}
+                x1={collision.firstAnchor.x * 2.8}
+                y1={-collision.firstAnchor.y * 2.8}
+                x2={collision.secondAnchor.x * 2.8}
+                y2={-collision.secondAnchor.y * 2.8}
+                strokeWidth={0.014 + collision.strength * 0.045}
+                role="button"
+                tabIndex={0}
+                aria-label={`${collision.firstArea} 与 ${collision.secondArea} 碰撞带，${collision.relationCount} 条跨域 WikiLink`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  selectCollision(collision.id)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') selectCollision(collision.id)
+                }}
+              >
+                <title>{collision.firstArea} × {collision.secondArea} · {collision.relationCount} 条跨域 WikiLink</title>
+              </line>
+            ))}
+          </g>
+        )}
         {selected && relations.length > 0 && <g className="explicit-relation-lines" aria-hidden="true">{relations.map((target) => <line key={target.id} x1={selected.x * 2.8} y1={-selected.y * 2.8} x2={target.x * 2.8} y2={-target.y * 2.8} stroke="#9b8ad9" strokeWidth="0.012" opacity="0.7" />)}</g>}
         <g className="terrain-points">
           {notes.map((note) => {
@@ -93,8 +149,8 @@ export function Terrain2D({
                 cx={note.x * 2.8}
                 cy={-note.y * 2.8}
                 r={selected ? 0.07 : 0.024 + height * 0.022}
-                fill={selected ? '#fff2bd' : noteColor(note, height, visualDimension)}
-                opacity={selected ? 1 : noteOpacity(note, height, visualDimension)}
+                fill={selected ? '#fff2bd' : noteColor(note, height, visualDimension, activityByNote)}
+                opacity={selected ? 1 : noteOpacity(note, height, visualDimension, activityByNote)}
                 filter={selected ? 'url(#selected-glow)' : undefined}
                 role="button"
                 aria-label={note.title}
@@ -123,16 +179,31 @@ export function Terrain2D({
   )
 }
 
-function noteColor(note: TerrainNote, height: number, dimension: VisualDimension): string {
+function noteColor(
+  note: TerrainNote,
+  height: number,
+  dimension: VisualDimension,
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+): string {
   if (dimension === 'mastery') return colorRamp(note.mastery, '#665f7a', '#d7f0df')
   if (dimension === 'exploration') return colorRamp(note.exploration, '#647078', '#e3aa66')
-  if (dimension === 'area') return categoricalColor(note.area ?? note.tags[0] ?? note.id)
+  if (dimension === 'temperature') return temperatureColor(activityByNote.get(note.id)?.score ?? 0)
+  if (dimension === 'area') {
+    const area = primaryAreaForNote(note)
+    return area ? plateColor(area) : '#767673'
+  }
   return height > 0.55 ? '#c6bfa7' : '#888883'
 }
 
-function noteOpacity(note: TerrainNote, height: number, dimension: VisualDimension): number {
+function noteOpacity(
+  note: TerrainNote,
+  height: number,
+  dimension: VisualDimension,
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+): number {
   if (dimension === 'mastery') return 0.3 + (note.mastery ?? 0.5) * 0.7
   if (dimension === 'exploration') return 0.38 + (note.exploration ?? 0.5) * 0.62
+  if (dimension === 'temperature') return 0.32 + (activityByNote.get(note.id)?.score ?? 0) * 0.68
   return 0.36 + height * 0.4
 }
 
@@ -141,13 +212,6 @@ function colorRamp(value: number | undefined, low: string, high: string): string
   const a = hexRgb(low)
   const b = hexRgb(high)
   return `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`
-}
-
-function categoricalColor(value: string): string {
-  const palette = ['#76a6a0', '#9b8ad9', '#c49b67', '#7f9fc8', '#b67f8c', '#8da56d']
-  let hash = 0
-  for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619)
-  return palette[Math.abs(hash) % palette.length]
 }
 
 function hexRgb(value: string): [number, number, number] {

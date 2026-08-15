@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const dimensions = ['密度', '熟练度', '探索度', '领域'] as const
+const dimensions = ['密度', '熟练度', '探索度', '温度', '领域'] as const
 
-test('switches point cloud encoding across all four visual dimensions', async ({ page }) => {
+test('switches point cloud encoding across all five visual dimensions', async ({ page }) => {
+  test.setTimeout(45_000)
   const errors = collectErrors(page)
 
   await page.goto('/')
@@ -28,6 +29,22 @@ test('switches point cloud encoding across all four visual dimensions', async ({
     }
     await expect(panel.locator('.dimension-help')).not.toBeEmpty()
     await expect(page.locator('canvas').first()).toBeVisible()
+    if (label === '领域') {
+      const legend = panel.getByRole('group', { name: '知识板块图例' })
+      await expect(legend).toBeVisible()
+      const plateButtons = legend.locator('.plate-legend-list').getByRole('button')
+      const firstPlate = plateButtons.first()
+      const secondPlate = plateButtons.nth(1)
+      await firstPlate.click()
+      await secondPlate.click()
+      await expect(firstPlate).toHaveAttribute('aria-pressed', 'true')
+      await expect(secondPlate).toHaveAttribute('aria-pressed', 'true')
+      await legend.getByRole('button', { name: '显示全部' }).click()
+      await expect(firstPlate).toHaveAttribute('aria-pressed', 'false')
+      await expect(secondPlate).toHaveAttribute('aria-pressed', 'false')
+      await expect(panel.locator('.plate-legend-summary')).toContainText(/[1-9]\d* 条跨域 WikiLink/)
+      await expect(panel.locator('.plate-legend-summary')).toContainText(/[1-9]\d* 个碰撞带/)
+    }
   }
 
   await buttons[0].click()
@@ -36,6 +53,56 @@ test('switches point cloud encoding across all four visual dimensions', async ({
   await page.getByRole('button', { name: '关闭筛选' }).click()
   await expect(panel).toBeHidden()
 
+  expect(errors).toEqual([])
+})
+
+test('records note activity without moving its stable coordinates', async ({ page }) => {
+  const errors = collectErrors(page)
+
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '关闭欢迎提示' }).click()
+  await page.getByRole('button', { name: '关闭详情' }).click()
+  await page.getByRole('button', { name: '切换二维等高线' }).click()
+
+  const note = page.getByRole('button', { name: 'SM 与 Tensor Core', exact: true })
+  const originalX = await note.getAttribute('cx')
+  const originalY = await note.getAttribute('cy')
+  await note.click()
+  await expect(page.getByLabel('知识温度')).toContainText('打开 1')
+
+  await page.getByRole('button', { name: '打开地图筛选' }).click()
+  const panel = page.getByRole('complementary', { name: '地图筛选' })
+  await panel.locator('.visual-dimension-control').getByRole('button', { name: '温度', exact: true }).click()
+  await expect(panel.getByRole('group', { name: '知识温度图例' })).toContainText('1 个事件')
+  await expect(note).toHaveAttribute('cx', originalX ?? '')
+  await expect(note).toHaveAttribute('cy', originalY ?? '')
+  await page.getByRole('button', { name: '关闭筛选' }).click()
+
+  await page.getByRole('button', { name: '标记已复习' }).click()
+  await expect(page.getByLabel('知识温度')).toContainText('复习 1')
+  expect(errors).toEqual([])
+})
+
+test('opens an explainable collision band from the keyboard in 2D', async ({ page }) => {
+  const errors = collectErrors(page)
+
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '打开地图筛选' }).click()
+  const panel = page.getByRole('complementary', { name: '地图筛选' })
+  await panel.locator('.visual-dimension-control').getByRole('button', { name: '领域', exact: true }).click()
+  await page.getByRole('button', { name: '关闭筛选' }).click()
+  await page.getByRole('button', { name: '切换二维等高线' }).click()
+
+  const band = page.getByRole('button', { name: /碰撞带.*跨域 WikiLink/ }).first()
+  await expect(band).toBeVisible()
+  await band.focus()
+  await page.keyboard.press('Enter')
+
+  await expect(page.getByText('板块碰撞带', { exact: true })).toBeVisible()
+  await expect(page.locator('.collision-method')).toContainText('可解析的 WikiLink')
+  await expect(page.locator('.collision-pairs li').first()).toBeVisible()
   expect(errors).toEqual([])
 })
 

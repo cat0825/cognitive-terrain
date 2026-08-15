@@ -1,0 +1,381 @@
+import { cognitiveStateFromNote } from './cognitive-state'
+import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
+import { areasForNote, plateIdForArea } from './knowledge-plates'
+import type {
+  CognitiveState,
+  InteractionEvent,
+  TerrainProfile,
+  TerrainProject,
+} from './types'
+
+export interface WorkspaceV3 {
+  schemaVersion: 3
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+  timeZone: string
+  activeTerrainProfileId: string
+}
+
+export interface KnowledgeItemV3 {
+  id: string
+  workspaceId: string
+  title: string
+  content: string
+  contentHash: string
+  sourceIds: string[]
+  tags: string[]
+  area?: string
+  areas?: string[]
+  createdAt: string
+  updatedAt: string
+  status: 'draft' | 'active' | 'archived'
+}
+
+export interface SourceV3 {
+  id: string
+  workspaceId: string
+  kind: 'note' | 'web' | 'unknown'
+  title: string
+  sourcePath?: string
+  vault?: string
+  canonicalUrl?: string
+  contentHash: string
+  retrievedAt: string
+}
+
+export interface RelationV3 {
+  id: string
+  workspaceId: string
+  fromItemId: string
+  toItemId?: string
+  targetTitle: string
+  kind: 'wikilink'
+  resolved: boolean
+  provenance: 'import'
+}
+
+export interface PlateMembershipV3 {
+  itemId: string
+  taxonomyNodeId: string
+  weight: number
+  provenance: 'yaml' | 'migration'
+}
+
+export interface LayoutRecordV3 {
+  layoutId: string
+  itemId: string
+  x: number
+  y: number
+  algorithmVersion: string
+  anchorVersion: string
+}
+
+export interface CitationV3 {
+  id: string
+  workspaceId: string
+  itemId: string
+  sourceId: string
+  quote: string
+  locator: {
+    page?: number
+    section?: string
+    startOffset?: number
+    endOffset?: number
+    fragmentUrl?: string
+  }
+  capturedAt: string
+  contentHash: string
+}
+
+export interface RevisionV3 {
+  id: string
+  workspaceId: string
+  entityId: string
+  entityType: 'item'
+  patch: {
+    kind: 'migration-baseline'
+    entityHash: string
+    contentHash: string
+    sourceSchemaVersion: number
+  }
+  actorId: 'migration'
+  createdAt: string
+}
+
+export interface SchemaV3Bundle {
+  workspace: WorkspaceV3
+  items: KnowledgeItemV3[]
+  sources: SourceV3[]
+  relations: RelationV3[]
+  cognitiveStates: CognitiveState[]
+  interactionEvents: InteractionEvent[]
+  plateMemberships: PlateMembershipV3[]
+  layouts: LayoutRecordV3[]
+  terrainProfiles: TerrainProfile[]
+  citations: CitationV3[]
+  revisions: RevisionV3[]
+}
+
+export interface SchemaV3MigrationReport {
+  sourceSchemaVersion: number
+  sourceDigest: string
+  itemCount: number
+  sourceCount: number
+  relationCount: number
+  unresolvedRelationCount: number
+  cognitiveStateCount: number
+  layoutCount: number
+  citationCount: number
+  revisionCount: number
+  warnings: string[]
+}
+
+export interface SchemaV3MigrationOptions {
+  sourceSchemaVersion?: number
+}
+
+export function migrateTerrainProjectToV3(
+  project: TerrainProject,
+  options: SchemaV3MigrationOptions = {},
+): {
+  bundle: SchemaV3Bundle
+  report: SchemaV3MigrationReport
+} {
+  const sourceSchemaVersion = options.sourceSchemaVersion ?? project.schemaVersion
+  assertUniqueIds('item', project.notes.map((note) => note.id))
+  assertUniqueIds('cognitive state item', (project.cognitiveStates ?? []).map((state) => state.itemId))
+  assertUniqueIds('interaction event', (project.interactionEvents ?? []).map((event) => event.id))
+  assertUniqueIds('terrain profile', (project.terrainProfiles ?? []).map((profile) => profile.id))
+  const itemIds = new Set(project.notes.map((note) => note.id))
+  assertKnownItemReferences(
+    'cognitive state',
+    (project.cognitiveStates ?? []).map((state) => state.itemId),
+    itemIds,
+  )
+  assertKnownItemReferences(
+    'interaction event',
+    (project.interactionEvents ?? []).map((event) => event.itemId),
+    itemIds,
+  )
+  const titleIndex = buildTitleIndex(project)
+  const sources = project.notes.flatMap((note) => {
+    if (!hasSourceMetadata(note)) return []
+    const sourceIdentity = sourceIdentityForNote(note)
+    return [{
+      id: `source-${stableHash(sourceIdentity)}`,
+      workspaceId: project.id,
+      kind: sourceKind(note.source),
+      title: note.source ?? note.sourcePath ?? note.title,
+      sourcePath: note.sourcePath,
+      vault: note.vault,
+      canonicalUrl: isHttpUrl(note.source) ? note.source : undefined,
+      contentHash: stableHash(sourceIdentity),
+      retrievedAt: project.updatedAt,
+    } satisfies SourceV3]
+  })
+  const uniqueSources = dedupeById(sources)
+
+  const items = project.notes.map((note) => {
+    const sourceId = hasSourceMetadata(note)
+      ? `source-${stableHash(sourceIdentityForNote(note))}`
+      : undefined
+    return {
+      id: note.id,
+      workspaceId: project.id,
+      title: note.title,
+      content: note.content,
+      contentHash: stableHash(note.content),
+      sourceIds: sourceId ? [sourceId] : [],
+      tags: [...note.tags],
+      area: note.area,
+      areas: note.areas ? [...note.areas] : undefined,
+      createdAt: note.createdAt,
+      updatedAt: project.updatedAt,
+      status: note.status === 'archived' ? 'archived' : sourceId ? 'active' : 'draft',
+    } satisfies KnowledgeItemV3
+  })
+
+  const relations = dedupeById(project.notes.flatMap((note) => note.links.map((targetTitle) => {
+    const toItemId = titleIndex.get(normalizeTitle(targetTitle))
+    return {
+      id: `relation-${stableHash(`${note.id}\n${targetTitle}`)}`,
+      workspaceId: project.id,
+      fromItemId: note.id,
+      toItemId,
+      targetTitle,
+      kind: 'wikilink',
+      resolved: toItemId !== undefined,
+      provenance: 'import',
+    } satisfies RelationV3
+  })))
+
+  const cognitiveStatesByItem = new Map(
+    (project.cognitiveStates ?? []).map((state) => [state.itemId, state]),
+  )
+  const cognitiveStates = project.notes.flatMap((note) => {
+    const current = cognitiveStatesByItem.get(note.id)
+    if (current) return [current]
+    const migrated = cognitiveStateFromNote(note, 'migration', note.reviewedAt ?? project.updatedAt)
+    return migrated ? [migrated] : []
+  })
+  const interactionEvents = project.interactionEvents ?? []
+  const terrainProfiles = project.terrainProfiles
+    ?? DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile }))
+  const plateMemberships = project.notes.flatMap((note) => {
+    const areas = areasForNote(note)
+    const weight = areas.length ? 1 / areas.length : 0
+    return areas.map((area) => ({
+      itemId: note.id,
+      taxonomyNodeId: plateIdForArea(area),
+      weight,
+      provenance: note.cognitiveStateProvenance === 'yaml' ? 'yaml' as const : 'migration' as const,
+    }))
+  })
+  const layouts = project.notes.map((note) => ({
+    layoutId: `${project.id}:layout-v2-import`,
+    itemId: note.id,
+    x: note.x,
+    y: note.y,
+    algorithmVersion: project.modelId,
+    anchorVersion: 'unanchored-v2',
+  }))
+  const citations: CitationV3[] = []
+  const revisions = items.map((item) => {
+    const entityHash = stableHash(JSON.stringify({
+      title: item.title,
+      contentHash: item.contentHash,
+      sourceIds: item.sourceIds,
+      tags: item.tags,
+      area: item.area,
+      areas: item.areas,
+      status: item.status,
+    }))
+    return {
+      id: `revision-${stableHash(`${item.id}\n${entityHash}`)}`,
+      workspaceId: project.id,
+      entityId: item.id,
+      entityType: 'item',
+      patch: {
+        kind: 'migration-baseline',
+        entityHash,
+        contentHash: item.contentHash,
+        sourceSchemaVersion,
+      },
+      actorId: 'migration',
+      createdAt: item.updatedAt,
+    } satisfies RevisionV3
+  })
+  const warnings = [
+    ...(uniqueSources.length === 0 ? ['项目没有可迁移的来源；所有条目均标记为 draft'] : []),
+    ...(relations.some((relation) => !relation.resolved) ? ['部分 WikiLink 无法解析，已保留目标标题'] : []),
+  ]
+  const bundle: SchemaV3Bundle = {
+    workspace: {
+      schemaVersion: 3,
+      id: project.id,
+      name: project.name,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      timeZone: project.timeZone,
+      activeTerrainProfileId: project.activeTerrainProfileId ?? DEFAULT_TERRAIN_PROFILE_ID,
+    },
+    items,
+    sources: uniqueSources,
+    relations,
+    cognitiveStates,
+    interactionEvents,
+    plateMemberships,
+    layouts,
+    terrainProfiles,
+    citations,
+    revisions,
+  }
+  return {
+    bundle,
+    report: {
+      sourceSchemaVersion,
+      sourceDigest: project.sourceDigest,
+      itemCount: items.length,
+      sourceCount: uniqueSources.length,
+      relationCount: relations.length,
+      unresolvedRelationCount: relations.filter((relation) => !relation.resolved).length,
+      cognitiveStateCount: cognitiveStates.length,
+      layoutCount: layouts.length,
+      citationCount: citations.length,
+      revisionCount: revisions.length,
+      warnings,
+    },
+  }
+}
+
+function buildTitleIndex(project: TerrainProject): Map<string, string> {
+  const index = new Map<string, string>()
+  for (const note of project.notes) {
+    const title = normalizeTitle(note.title)
+    if (!index.has(title)) index.set(title, note.id)
+  }
+  return index
+}
+
+function normalizeTitle(value: string): string {
+  return value.trim().toLocaleLowerCase()
+}
+
+function sourceKind(source: string | undefined): SourceV3['kind'] {
+  if (isHttpUrl(source)) return 'web'
+  return source ? 'note' : 'unknown'
+}
+
+function hasSourceMetadata(note: TerrainProject['notes'][number]): boolean {
+  return Boolean(note.source || note.sourcePath || note.vault)
+}
+
+function sourceIdentityForNote(note: TerrainProject['notes'][number]): string {
+  return `${note.vault ?? ''}\n${note.sourcePath ?? ''}\n${note.source ?? ''}`
+}
+
+function isHttpUrl(value: string | undefined): value is string {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function dedupeById<T extends { id: string }>(values: T[]): T[] {
+  return [...new Map(values.map((value) => [value.id, value])).values()]
+}
+
+function assertUniqueIds(label: string, ids: string[]): void {
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (typeof id !== 'string' || !id.trim()) {
+      throw new Error(`Schema v3 migration rejected an empty ${label} id`)
+    }
+    if (seen.has(id)) {
+      throw new Error(`Schema v3 migration rejected duplicate ${label} id: ${id}`)
+    }
+    seen.add(id)
+  }
+}
+
+function assertKnownItemReferences(label: string, itemIds: string[], knownItemIds: ReadonlySet<string>): void {
+  for (const itemId of itemIds) {
+    if (!knownItemIds.has(itemId)) {
+      throw new Error(`Schema v3 migration rejected ${label} reference to missing item: ${itemId}`)
+    }
+  }
+}
+
+function stableHash(value: string): string {
+  let result = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index)
+    result = Math.imul(result, 16777619)
+  }
+  return (result >>> 0).toString(16).padStart(8, '0')
+}

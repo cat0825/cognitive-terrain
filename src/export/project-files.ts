@@ -1,10 +1,11 @@
 import { z } from 'zod'
 import type { TerrainProject, TerrainSnapshot } from '../domain/types'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
+import { migrateProject } from '../storage/db'
 import { renderShareCard } from './share-card'
 
 const projectBundleSchema = z.object({
-  schemaVersion: z.union([z.literal(1), z.literal(2)]),
+  schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   id: z.string(),
   name: z.string(),
   createdAt: z.string(),
@@ -32,7 +33,9 @@ const projectBundleSchema = z.object({
       exploration: z.number().min(0).max(1).optional(),
       status: z.enum(['seed', 'growing', 'stable', 'gap', 'archived']).optional(),
       area: z.string().optional(),
+      areas: z.array(z.string()).optional(),
       reviewedAt: z.string().optional(),
+      cognitiveStateProvenance: z.enum(['yaml', 'app', 'migration']).optional(),
       links: z.array(z.string()).optional(),
       x: z.number(),
       y: z.number(),
@@ -56,6 +59,32 @@ const projectBundleSchema = z.object({
     }),
   ),
   noteNeighbors: z.array(z.array(z.string())).optional(),
+  cognitiveStates: z.array(z.object({
+    itemId: z.string(),
+    mastery: z.number().min(0).max(1).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    exploration: z.number().min(0).max(1).optional(),
+    status: z.enum(['seed', 'growing', 'stable', 'gap', 'archived']).optional(),
+    reviewedAt: z.string().optional(),
+    updatedAt: z.string(),
+    provenance: z.enum(['yaml', 'app', 'migration']),
+  })).optional(),
+  interactionEvents: z.array(z.object({
+    id: z.string(),
+    itemId: z.string(),
+    type: z.enum(['created', 'edited', 'opened', 'reviewed', 'linked', 'classified']),
+    occurredAt: z.string(),
+    payload: z.record(z.string(), z.unknown()).optional(),
+  })).optional(),
+  terrainProfiles: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    elevation: z.enum(['density', 'mastery', 'exploration', 'activity', 'structure']),
+    color: z.enum(['area', 'source-kind', 'trust']),
+    overlay: z.enum(['temperature', 'confidence', 'staleness', 'gaps']).optional(),
+    formulaVersion: z.string(),
+  })).optional(),
+  activeTerrainProfileId: z.string().optional(),
 })
 
 export function downloadProjectBundle(project: TerrainProject): void {
@@ -72,9 +101,8 @@ export function downloadProjectBundle(project: TerrainProject): void {
 export async function parseProjectBundle(file: File): Promise<TerrainProject> {
   const value: unknown = JSON.parse(await file.text())
   const parsed = projectBundleSchema.parse(value)
-  const migrated: TerrainProject = {
+  const serialized = {
     ...parsed,
-    schemaVersion: 2,
     embeddingMode: parsed.embeddingMode ?? 'fallback',
     noteNeighbors: parsed.noteNeighbors ?? [],
     notes: parsed.notes.map((note) => ({
@@ -85,8 +113,8 @@ export async function parseProjectBundle(file: File): Promise<TerrainProject> {
       ...snapshot,
       values: new Float32Array(snapshot.values),
     })),
-  }
-  return migrated
+  } as unknown as TerrainProject
+  return migrateProject(serialized)
 }
 
 export async function exportTerrainPng(

@@ -1,8 +1,14 @@
 import type { AnalysisOptions, NoteInput, ProcessingProgress, TerrainProject } from '../domain/types'
 import type { AnalysisWorkerRequest, AnalysisWorkerResponse } from './worker-protocol'
+import type { TerrainData } from './terrain'
 
 export interface AnalysisHandle {
   promise: Promise<TerrainProject>
+  cancel: () => void
+}
+
+export interface TerrainProfileHandle {
+  promise: Promise<TerrainData>
   cancel: () => void
 }
 
@@ -53,6 +59,53 @@ export function runAnalysis(
       } finally {
         worker.terminate()
         rejectPromise?.(new DOMException('分析已取消', 'AbortError'))
+      }
+    },
+  }
+}
+
+export function runTerrainProfile(
+  request: Omit<Extract<AnalysisWorkerRequest, { type: 'build-terrain-profile' }>, 'requestId'>,
+): TerrainProfileHandle {
+  const worker = new Worker(new URL('./analysis.worker.ts', import.meta.url), { type: 'module' })
+  const requestId = `terrain-profile-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  let settled = false
+  let rejectPromise: ((reason?: unknown) => void) | undefined
+  const promise = new Promise<TerrainData>((resolve, reject) => {
+    rejectPromise = reject
+    worker.onmessage = (event: MessageEvent<AnalysisWorkerResponse>) => {
+      const message = event.data
+      if (message.requestId !== requestId || settled) return
+      if (message.type === 'terrain-profile-complete') {
+        settled = true
+        worker.terminate()
+        resolve(message.terrain)
+      }
+      if (message.type === 'error') {
+        settled = true
+        worker.terminate()
+        reject(new Error(message.message))
+      }
+    }
+    worker.onerror = (event) => {
+      if (settled) return
+      settled = true
+      worker.terminate()
+      reject(new Error(event.message || '地形图层 Worker 启动失败'))
+    }
+    worker.postMessage({ ...request, requestId } satisfies AnalysisWorkerRequest)
+  })
+  return {
+    promise,
+    cancel: () => {
+      if (settled) return
+      settled = true
+      const cancelRequest: AnalysisWorkerRequest = { type: 'cancel', requestId }
+      try {
+        worker.postMessage(cancelRequest)
+      } finally {
+        worker.terminate()
+        rejectPromise?.(new DOMException('地形图层计算已取消', 'AbortError'))
       }
     },
   }

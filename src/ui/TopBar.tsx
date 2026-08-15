@@ -1,4 +1,4 @@
-import { BookOpen, Download, FileText, Filter, FolderOpen, ImageDown, ListTodo, Pencil, RotateCcw, Save, Search, Trash2, Upload } from 'lucide-react'
+import { ArchiveRestore, BookOpen, Download, FileText, Filter, FolderOpen, ImageDown, ListTodo, Pencil, RotateCcw, Save, Search, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { useAppStore } from '../store/app-store'
 
@@ -22,10 +22,15 @@ export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportIma
   const openProject = useAppStore((state) => state.openProject)
   const renameCurrentProject = useAppStore((state) => state.renameCurrentProject)
   const deleteProjectInLibrary = useAppStore((state) => state.deleteProjectInLibrary)
+  const backups = useAppStore((state) => state.backups)
+  const createBackup = useAppStore((state) => state.createBackup)
+  const restoreBackup = useAppStore((state) => state.restoreBackup)
   const [filesOpen, setFilesOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState('')
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupStatus, setBackupStatus] = useState('')
 
   return (
     <>
@@ -145,6 +150,19 @@ export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportIma
                   <ImageDown size={14} />
                   导出图片
                 </button>
+                <button
+                  type="button"
+                  disabled={backupBusy}
+                  onClick={async () => {
+                    setBackupBusy(true)
+                    const created = await createBackup()
+                    setBackupBusy(false)
+                    setBackupStatus(created ? '已创建本地恢复点' : '')
+                  }}
+                >
+                  <Save size={14} />
+                  {backupBusy ? '正在创建恢复点' : '创建恢复点'}
+                </button>
               </>
             )}
 
@@ -200,6 +218,39 @@ export function TopBar({ onImport, onLoadStudyPack, onExportProject, onExportIma
                 </p>
               </>
             )}
+
+            {!renaming && backups.length > 0 && (
+              <>
+                <div className="menu-separator" />
+                <div className="project-list-heading">最近恢复点</div>
+                <ul className="backup-list">
+                  {backups.slice(0, 6).map((backup) => (
+                    <li key={backup.id}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!window.confirm(`恢复项目「${backup.projectName}」到 ${formatShortDate(backup.createdAt)}？当前版本会先自动备份。`)) return
+                          setFilesOpen(false)
+                          setBackupBusy(true)
+                          const restored = await restoreBackup(backup.id)
+                          setBackupBusy(false)
+                          if (restored) {
+                            setBackupStatus('项目已恢复')
+                          }
+                        }}
+                      >
+                        <ArchiveRestore size={14} />
+                        <span>
+                          <strong>{backup.projectName}</strong>
+                          <small>{formatBackupReason(backup.reason)} · {formatShortDate(backup.createdAt)} · {backup.noteCount} 条</small>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {backupStatus && <p className="backup-status" role="status">{backupStatus}</p>}
           </div>
         )}
 
@@ -231,4 +282,11 @@ function formatShortDate(value: string): string {
     minute: '2-digit',
     hourCycle: 'h23',
   }).format(date)
+}
+
+function formatBackupReason(reason: 'manual' | 'before-save' | 'before-delete' | 'before-restore'): string {
+  if (reason === 'manual') return '手动'
+  if (reason === 'before-delete') return '删除前'
+  if (reason === 'before-restore') return '恢复前'
+  return '修改前'
 }

@@ -56,6 +56,51 @@ describe('terrain pipeline', () => {
     expect(terrain.peaks.every((peak) => peak.noteIds.length > 0)).toBe(true)
   })
 
+  it('uses confidence-weighted mastery to change elevation without moving notes', () => {
+    const low = {
+      ...note('low-mastery', '2026-01-10T00:00:00.000Z', -0.45, 0, 'low'),
+      mastery: 0.15,
+      confidence: 1,
+    }
+    const high = {
+      ...note('high-mastery', '2026-01-10T00:00:00.000Z', 0.45, 0, 'high'),
+      mastery: 0.9,
+      confidence: 1,
+    }
+    const terrain = buildTerrainData([low, high], 48, 'UTC', 0.06, 'mastery')
+    const values = terrain.snapshots[0].values
+
+    expect(sampleHeight(values, 48, high.x, high.y)).toBeGreaterThan(
+      sampleHeight(values, 48, low.x, low.y) * 3,
+    )
+    expect([low.x, low.y, high.x, high.y]).toEqual([-0.45, 0, 0.45, 0])
+  })
+
+  it('does not invent mastery elevation for unassessed notes', () => {
+    const assessed = {
+      ...note('assessed', '2026-01-10T00:00:00.000Z', -0.45, 0, 'assessed'),
+      mastery: 0.8,
+      confidence: 0.9,
+    }
+    const unassessed = note('unassessed', '2026-01-10T00:00:00.000Z', 0.45, 0, 'unassessed')
+    const terrain = buildTerrainData([assessed, unassessed], 48, 'UTC', 0.05, 'mastery')
+    const values = terrain.snapshots[0].values
+
+    expect(sampleHeight(values, 48, assessed.x, assessed.y)).toBeGreaterThan(0.4)
+    expect(sampleHeight(values, 48, unassessed.x, unassessed.y)).toBeLessThan(0.05)
+  })
+
+  it('uses exploration as a separate elevation profile', () => {
+    const cold = { ...note('cold', '2026-01-10T00:00:00.000Z', -0.45, 0, 'cold'), exploration: 0.1 }
+    const hot = { ...note('hot', '2026-01-10T00:00:00.000Z', 0.45, 0, 'hot'), exploration: 0.95 }
+    const terrain = buildTerrainData([cold, hot], 48, 'UTC', 0.06, 'exploration')
+    const values = terrain.snapshots[0].values
+
+    expect(sampleHeight(values, 48, hot.x, hot.y)).toBeGreaterThan(
+      sampleHeight(values, 48, cold.x, cold.y) * 4,
+    )
+  })
+
   it('interpolates and samples height values at timeline boundaries', () => {
     const snapshots = [
       { bucket: 'a', label: 'A', values: new Float32Array([0, 0, 0, 0]) },

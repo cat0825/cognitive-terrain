@@ -28,6 +28,8 @@ import {
 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot, VisualDimension } from '../domain/types'
+import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
+import { buildPlateCollisions, plateColor, primaryAreaForNote, type PlateBridge, type PlateCollision } from '../domain/knowledge-plates'
 import { sampleHeight } from '../pipeline/terrain'
 import { linkedNotes } from '../domain/knowledge-maintenance'
 import { getLiveTimeline } from '../store/app-store'
@@ -52,6 +54,7 @@ interface TerrainSceneProps {
   cameraScale: number
   cameraInteractionMode: 'rotate' | 'pan'
   visualDimension: VisualDimension
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
   onSelectNote: (id: string | null) => void
@@ -321,6 +324,7 @@ function TerrainSurface({
   onSelectNote,
   reducedMotion,
   visualDimension,
+  activityByNote,
 }: TerrainSceneProps & { compactLabels: boolean; peakLabelLimit: number; reducedMotion: boolean }) {
   const heightAtlas = useMemo(() => buildHeightAtlas(snapshots, gridSize), [gridSize, snapshots])
   const heightAtlasSize = useMemo(
@@ -367,12 +371,14 @@ function TerrainSurface({
         selectedNoteId={selectedNoteId}
         onSelectNote={onSelectNote}
         visualDimension={visualDimension}
+        activityByNote={activityByNote}
       />
       <SelectedMarker
         snapshots={snapshots}
         gridSize={gridSize}
         note={notes.find((note) => note.id === selectedNoteId)}
       />
+      {visualDimension === 'area' && <PlateBridgeLines snapshots={snapshots} gridSize={gridSize} notes={notes} />}
       <SelectedRelationLines snapshots={snapshots} gridSize={gridSize} notes={notes} selectedNoteId={selectedNoteId} />
       {quality !== 'low' && (
         <PeakField
@@ -387,6 +393,166 @@ function TerrainSurface({
       )}
     </group>
   )
+}
+
+function PlateBridgeLines({ snapshots, gridSize, notes }: { snapshots: TerrainSnapshot[]; gridSize: number; notes: TerrainNote[] }) {
+  const collisions = useMemo(() => buildPlateCollisions(notes), [notes])
+  const bridges = collisions.filter((collision) => collision.mode === 'lines').flatMap((collision) => collision.bridges)
+  const bands = collisions.filter((collision) => collision.mode === 'band')
+  const activeCollisionId = useAppStore((state) => state.activeCollisionId)
+  const selectCollision = useAppStore((state) => state.selectCollision)
+  return <>
+    <PlateBridgeLayer bridges={bridges} snapshots={snapshots} gridSize={gridSize} notes={notes} />
+    {bands.map((collision) => (
+      <PlateCollisionBand
+        key={collision.id}
+        collision={collision}
+        snapshots={snapshots}
+        gridSize={gridSize}
+        active={collision.id === activeCollisionId}
+        onSelect={() => selectCollision(collision.id)}
+      />
+    ))}
+  </>
+}
+
+const COLLISION_BAND_SEGMENTS = 12
+
+function PlateCollisionBand({
+  collision,
+  snapshots,
+  gridSize,
+  active,
+  onSelect,
+}: {
+  collision: PlateCollision
+  snapshots: TerrainSnapshot[]
+  gridSize: number
+  active: boolean
+  onSelect: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const tooltip = useRef<Group>(null)
+  const geometry = useMemo(() => {
+    const value = new BufferGeometry()
+    value.setAttribute('position', new BufferAttribute(new Float32Array((COLLISION_BAND_SEGMENTS + 1) * 6), 3))
+    const indices: number[] = []
+    for (let index = 0; index < COLLISION_BAND_SEGMENTS; index += 1) {
+      const offset = index * 2
+      indices.push(offset, offset + 1, offset + 2, offset + 2, offset + 1, offset + 3)
+    }
+    value.setIndex(indices)
+    return value
+  }, [])
+  useFrame(() => {
+    const frame = resolveSnapshotFrame(snapshots, getLiveTimeline())
+    const attribute = geometry.getAttribute('position') as BufferAttribute
+    const positions = attribute.array as Float32Array
+    const fromX = collision.firstAnchor.x * (TERRAIN_WIDTH / 2)
+    const fromZ = -collision.firstAnchor.y * (TERRAIN_DEPTH / 2)
+    const toX = collision.secondAnchor.x * (TERRAIN_WIDTH / 2)
+    const toZ = -collision.secondAnchor.y * (TERRAIN_DEPTH / 2)
+    const length = Math.max(0.001, Math.hypot(toX - fromX, toZ - fromZ))
+    const halfWidth = 0.005 + collision.strength * 0.012
+    const perpendicularX = (-(toZ - fromZ) / length) * halfWidth
+    const perpendicularZ = ((toX - fromX) / length) * halfWidth
+    for (let index = 0; index <= COLLISION_BAND_SEGMENTS; index += 1) {
+      const ratio = index / COLLISION_BAND_SEGMENTS
+      const normalizedX = MathUtils.lerp(collision.firstAnchor.x, collision.secondAnchor.x, ratio)
+      const normalizedY = MathUtils.lerp(collision.firstAnchor.y, collision.secondAnchor.y, ratio)
+      const height = MathUtils.lerp(
+        sampleHeight(frame.a.values, gridSize, normalizedX, normalizedY),
+        sampleHeight(frame.b.values, gridSize, normalizedX, normalizedY),
+        frame.mix,
+      ) * TERRAIN_HEIGHT + 0.018
+      const centerX = MathUtils.lerp(fromX, toX, ratio)
+      const centerZ = MathUtils.lerp(fromZ, toZ, ratio)
+      const offset = index * 6
+      positions[offset] = centerX + perpendicularX
+      positions[offset + 1] = height
+      positions[offset + 2] = centerZ + perpendicularZ
+      positions[offset + 3] = centerX - perpendicularX
+      positions[offset + 4] = height
+      positions[offset + 5] = centerZ - perpendicularZ
+      if (index === Math.floor(COLLISION_BAND_SEGMENTS / 2) && tooltip.current) {
+        tooltip.current.position.set(centerX, height + 0.08, centerZ)
+      }
+    }
+    attribute.needsUpdate = true
+    geometry.computeBoundingSphere()
+  })
+  useEffect(() => () => {
+    geometry.dispose()
+    document.body.style.cursor = ''
+  }, [geometry])
+  return <>
+    <mesh
+      geometry={geometry}
+      renderOrder={4}
+      onPointerOver={(event) => {
+        event.stopPropagation()
+        setHovered(true)
+        document.body.style.cursor = 'pointer'
+      }}
+      onPointerOut={() => {
+        setHovered(false)
+        document.body.style.cursor = ''
+      }}
+      onClick={(event) => {
+        event.stopPropagation()
+        onSelect()
+      }}
+    >
+      <meshBasicMaterial color={active ? '#fff0a8' : '#d7c27e'} transparent opacity={active ? 0.56 : hovered ? 0.42 : 0.22} side={DoubleSide} depthWrite={false} />
+    </mesh>
+    <group ref={tooltip}>
+      {hovered && <Html center className="collision-tooltip"><strong>{collision.firstArea} × {collision.secondArea}</strong><span>{collision.relationCount} 条跨域 WikiLink</span></Html>}
+    </group>
+  </>
+}
+
+function PlateBridgeLayer({
+  bridges,
+  snapshots,
+  gridSize,
+  notes,
+}: {
+  bridges: PlateBridge[]
+  snapshots: TerrainSnapshot[]
+  gridSize: number
+  notes: TerrainNote[]
+}) {
+  const geometry = useMemo(() => new BufferGeometry(), [])
+  const notesById = useMemo(() => new Map(notes.map((note) => [note.id, note])), [notes])
+  const positions = useMemo(() => new Float32Array(bridges.length * 6), [bridges.length])
+  useFrame(() => {
+    const attribute = geometry.getAttribute('position') as BufferAttribute | undefined
+    if (!attribute) {
+      geometry.setAttribute('position', new BufferAttribute(positions, 3))
+      return
+    }
+    const frame = resolveSnapshotFrame(snapshots, getLiveTimeline())
+    for (let index = 0; index < bridges.length; index += 1) {
+      const bridge = bridges[index]
+      const from = notesById.get(bridge.fromId)
+      const to = notesById.get(bridge.toId)
+      if (!from || !to) continue
+      const fromHeight = MathUtils.lerp(sampleHeight(frame.a.values, gridSize, from.x, from.y), sampleHeight(frame.b.values, gridSize, from.x, from.y), frame.mix)
+      const toHeight = MathUtils.lerp(sampleHeight(frame.a.values, gridSize, to.x, to.y), sampleHeight(frame.b.values, gridSize, to.x, to.y), frame.mix)
+      const offset = index * 6
+      positions[offset] = from.x * (TERRAIN_WIDTH / 2)
+      positions[offset + 1] = fromHeight * TERRAIN_HEIGHT + 0.012
+      positions[offset + 2] = -from.y * (TERRAIN_DEPTH / 2)
+      positions[offset + 3] = to.x * (TERRAIN_WIDTH / 2)
+      positions[offset + 4] = toHeight * TERRAIN_HEIGHT + 0.012
+      positions[offset + 5] = -to.y * (TERRAIN_DEPTH / 2)
+    }
+    attribute.needsUpdate = true
+    geometry.computeBoundingSphere()
+  })
+  useEffect(() => () => geometry.dispose(), [geometry])
+  if (!bridges.length) return null
+  return <lineSegments geometry={geometry}><lineBasicMaterial color="#d7c27e" transparent opacity={0.72} depthWrite={false} /></lineSegments>
 }
 
 function SelectedRelationLines({ snapshots, gridSize, notes, selectedNoteId }: { snapshots: TerrainSnapshot[]; gridSize: number; notes: TerrainNote[]; selectedNoteId: string | null }) {
@@ -433,7 +599,8 @@ function NotePoints({
   selectedNoteId,
   onSelectNote,
   visualDimension,
-}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension'> & {
+  activityByNote,
+}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'activityByNote'> & {
   heightAtlas: HeightAtlas
   peaks: TerrainPeak[]
   reducedMotion: boolean
@@ -457,8 +624,9 @@ function NotePoints({
         birthFrames,
         peaks,
         visualDimension,
+        activityByNote,
       ),
-    [birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, visualDimension],
+    [activityByNote, birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, visualDimension],
   )
   const material = useMemo(() => makeNoteMaterial(heightAtlas, quality), [heightAtlas, quality])
   const lastRaycastBucket = useRef(Number.NaN)
@@ -1045,6 +1213,7 @@ function buildNoteGeometry(
   birthFrames: Float32Array,
   peaks: TerrainPeak[],
   visualDimension: VisualDimension,
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>,
 ): BufferGeometry {
   const geometry = new BufferGeometry()
   const positions = new Float32Array(notes.length * 3)
@@ -1075,9 +1244,9 @@ function buildNoteGeometry(
     )
     peakAffinity[index] = resolvePeakAffinity(note, peaks)
     mastery[index] = note.mastery ?? 0.5
-    visualValue[index] = dimensionValue(note, visualDimension)
+    visualValue[index] = dimensionValue(note, visualDimension, activityByNote)
     visualMode[index] = dimensionMode(visualDimension)
-    const color = dimensionColor(note, visualDimension)
+    const color = dimensionColor(note, visualDimension, activityByNote)
     visualColor[offset] = color.r
     visualColor[offset + 1] = color.g
     visualColor[offset + 2] = color.b
@@ -1407,9 +1576,14 @@ function normalizeRange(value: number, min: number, max: number, fallback: numbe
   return MathUtils.clamp((value - min) / (max - min), 0, 1)
 }
 
-function dimensionValue(note: TerrainNote, dimension: VisualDimension): number {
+function dimensionValue(
+  note: TerrainNote,
+  dimension: VisualDimension,
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+): number {
   if (dimension === 'mastery') return note.mastery ?? 0.5
   if (dimension === 'exploration') return note.exploration ?? 0.5
+  if (dimension === 'temperature') return activityByNote.get(note.id)?.score ?? 0
   return 0.5
 }
 
@@ -1417,16 +1591,21 @@ function dimensionMode(dimension: VisualDimension): number {
   if (dimension === 'mastery') return 1
   if (dimension === 'exploration') return 2
   if (dimension === 'area') return 3
+  if (dimension === 'temperature') return 4
   return 0
 }
 
-function dimensionColor(note: TerrainNote, dimension: VisualDimension): Color {
-  if (dimension !== 'area') return new Color('#8a918f')
-  const palette = ['#76a6a0', '#9b8ad9', '#c49b67', '#7f9fc8', '#b67f8c', '#8da56d']
-  const value = note.area ?? note.tags[0] ?? note.id
-  let hash = 0
-  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619)
-  return new Color(palette[Math.abs(hash) % palette.length])
+function dimensionColor(
+  note: TerrainNote,
+  dimension: VisualDimension,
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+): Color {
+  if (dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
+  if (dimension === 'area') {
+    const area = primaryAreaForNote(note)
+    return new Color(area ? plateColor(area) : '#767673')
+  }
+  return new Color('#8a918f')
 }
 
 function resolvePeakAffinity(note: TerrainNote, peaks: TerrainPeak[]): number {

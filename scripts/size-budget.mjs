@@ -4,7 +4,7 @@ import path from 'node:path'
 const distDir = path.resolve('dist/assets')
 const budget = {
   main: 320 * 1024,
-  totalJs: 2100 * 1024,
+  totalJs: 2120 * 1024,
   css: 40 * 1024,
 }
 

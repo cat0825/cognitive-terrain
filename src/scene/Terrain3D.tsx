@@ -1,6 +1,7 @@
 import { Canvas } from '@react-three/fiber'
 import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
 import type { QualityLevel, TerrainNote, TerrainProject, VisualDimension } from '../domain/types'
+import type { NoteActivitySummary } from '../domain/activity-temperature'
 import { useAppStore } from '../store/app-store'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from './terrain-events'
 import { TerrainScene } from './TerrainScene'
@@ -12,6 +13,7 @@ interface Terrain3DProps {
   selectedNoteId: string | null
   quality: QualityLevel
   visualDimension: VisualDimension
+  activityByNote: ReadonlyMap<string, NoteActivitySummary>
   cameraRevision: number
   cameraScale: number
   focusRequest: { noteId: string; revision: number } | null
@@ -25,6 +27,7 @@ export default function Terrain3D({
   selectedNoteId,
   quality,
   visualDimension,
+  activityByNote,
   cameraRevision,
   cameraScale,
   focusRequest,
@@ -66,6 +69,7 @@ export default function Terrain3D({
         selectedNoteId={selectedNoteId}
         quality={quality}
         visualDimension={visualDimension}
+        activityByNote={activityByNote}
         cameraRevision={cameraRevision}
         cameraScale={cameraScale}
         focusRequest={focusRequest}

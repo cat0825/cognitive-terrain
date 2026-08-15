@@ -28,3 +28,21 @@ test('import dialog is accessible', async ({ page }) => {
 
   expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
 })
+
+test('project recovery menu is accessible', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('cognitive-terrain:first-run', 'seen')
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开项目菜单' }).click()
+  await page.getByRole('button', { name: '创建恢复点' }).click()
+  await expect(page.getByText('已创建本地恢复点', { exact: true })).toBeVisible()
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa'])
+    .include('.project-menu')
+    .disableRules(['color-contrast'])
+    .analyze()
+
+  expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
+})
