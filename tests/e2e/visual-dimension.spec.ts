@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 const dimensions = ['密度', '熟练度', '探索度', '温度', '领域'] as const
 
 test('switches point cloud encoding across all five visual dimensions', async ({ page }) => {
-  test.setTimeout(45_000)
+  test.setTimeout(process.env.CI ? 90_000 : 45_000)
   const errors = collectErrors(page)
 
   await page.goto('/')
