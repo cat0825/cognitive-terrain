@@ -1,18 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { buildActivitySummaries, shouldRecordOpenedEvent, temperatureColor } from '../../src/domain/activity-temperature'
 import { commitAnalyzedProject, createInteractionEvent, eventTypeForNoteUpdate } from '../../src/domain/cognitive-state'
-import { createDemoProject } from '../../src/domain/demo'
+import type { TerrainProject } from '../../src/domain/types'
 
 describe('cognitive state events', () => {
   it('commits a reanalysis without changing project identity or losing event history', () => {
-    const base = createDemoProject()
-    base.id = 'stable-project-id'
-    base.createdAt = '2026-01-01T00:00:00.000Z'
+    const base = createProjectFixture('stable-project-id')
     base.activeTerrainProfileId = 'mastery'
     const previous = createInteractionEvent('note-a', 'opened', '2026-08-14T01:00:00.000Z')
     base.interactionEvents = [previous]
-    const analyzed = createDemoProject()
-    analyzed.id = 'new-analysis-id'
+    const analyzed = createProjectFixture('new-analysis-id')
     const edited = createInteractionEvent('note-a', 'edited', '2026-08-14T02:00:00.000Z', {
       changedFields: ['content'],
     })
@@ -59,3 +56,41 @@ describe('cognitive state events', () => {
     expect(eventTypeForNoteUpdate(['areas'])).toBe('classified')
   })
 })
+
+function createProjectFixture(id: string): TerrainProject {
+  return {
+    schemaVersion: 3,
+    id,
+    name: 'Test project',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    timeZone: 'UTC',
+    modelId: 'test-model',
+    embeddingMode: 'fallback',
+    sourceDigest: 'test-digest',
+    gridSize: 2,
+    notes: [],
+    snapshots: [],
+    peaks: [],
+    noteNeighbors: [],
+    cognitiveStates: [],
+    interactionEvents: [],
+    terrainProfiles: [
+      {
+        id: 'density',
+        label: 'Density',
+        elevation: 'density',
+        color: 'area',
+        formulaVersion: 'test-v1',
+      },
+      {
+        id: 'mastery',
+        label: 'Mastery',
+        elevation: 'mastery',
+        color: 'area',
+        formulaVersion: 'test-v1',
+      },
+    ],
+    activeTerrainProfileId: 'density',
+  }
+}
