@@ -18,8 +18,12 @@ async function compareScreenshot(page: import('@playwright/test').Page, name: st
     writeFileSync(baselinePath, shot)
     return
   }
-  expect(existsSync(baselinePath), `Missing ${platform} visual baseline: ${baselineName}`).toBe(true)
-  if (!existsSync(baselinePath)) return
+  if (!existsSync(baselinePath)) {
+    mkdirSync(diffDir, { recursive: true })
+    writeFileSync(path.join(diffDir, `${name}-${platform}-current.png`), shot)
+    expect(existsSync(baselinePath), `Missing ${platform} visual baseline: ${baselineName}`).toBe(true)
+    return
+  }
 
   const baseline = PNG.sync.read(readFileSync(baselinePath))
   const current = PNG.sync.read(shot)
@@ -61,4 +65,25 @@ test('note details panel renders stably', async ({ page }) => {
   await expect(page.locator('.note-detail')).toBeVisible()
   await page.locator('.note-detail').hover()
   await compareScreenshot(page, 'desktop-note-details')
+})
+
+test('peak labels render stably in desktop and mobile camera states', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
+  for (const scenario of [
+    { name: 'desktop', width: 1280, height: 720, zoomButton: '放大地图' },
+    { name: 'mobile', width: 390, height: 844, zoomButton: '缩小地图' },
+  ]) {
+    await page.setViewportSize({ width: scenario.width, height: scenario.height })
+    await page.goto('/')
+    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 20_000 })
+    await expect.poll(
+      () => page.locator('.peak-label-anchor[data-peak-visible="true"]').count(),
+      { timeout: 15_000 },
+    ).toBeGreaterThan(0)
+    await page.getByRole('button', { name: scenario.zoomButton }).click()
+    await page.getByRole('button', { name: scenario.zoomButton }).click()
+    await page.waitForTimeout(900)
+    await compareScreenshot(page, `peak-labels-${scenario.name}`)
+  }
 })

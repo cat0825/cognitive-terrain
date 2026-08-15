@@ -42,6 +42,17 @@ import {
 } from './terrain-config'
 import { TerrainMist } from './TerrainMist'
 import { getTerrainQualityProfile, TERRAIN_VISUAL_PROFILE } from './terrain-visual-profile'
+import {
+  DESKTOP_PEAK_LABEL_LIMIT,
+  layoutPeakLabels,
+  MOBILE_PEAK_LABEL_LIMIT,
+  peakLabelImportance,
+  peakLabelLimitForZoom,
+  peakLabelSafeArea,
+  resolvePeakLabelZoomTier,
+  type PeakLabelCandidate,
+  type PeakLabelZoomTier,
+} from './peak-label-layout'
 
 interface TerrainSceneProps {
   snapshots: TerrainSnapshot[]
@@ -151,7 +162,11 @@ export function TerrainScene(props: TerrainSceneProps) {
     const baseOffset = new Vector3(...TERRAIN_CAMERA_POSITION).sub(new Vector3(...TERRAIN_CAMERA_TARGET))
     return baseOffset.multiplyScalar(viewportScale).add(cameraTarget)
   }, [cameraTarget, viewportScale])
-  const peakLabelLimit = quality === 'high' ? (compactLabels ? 18 : 30) : quality === 'medium' ? 18 : 0
+  const peakLabelLimit = quality === 'high'
+    ? (compactLabels ? MOBILE_PEAK_LABEL_LIMIT : DESKTOP_PEAK_LABEL_LIMIT)
+    : quality === 'medium'
+      ? (compactLabels ? MOBILE_PEAK_LABEL_LIMIT : 14)
+      : 0
   const mouseButtons = useMemo(
     () => cameraInteractionMode === 'pan'
       ? { LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }
@@ -333,8 +348,6 @@ function TerrainSurface({
   )
   const geometry = useMemo(() => buildSurfaceGeometry(gridSize), [gridSize])
   const material = useMemo(() => makeTerrainMaterial(quality, heightAtlas), [heightAtlas, quality])
-  const visiblePeaks = selectVisiblePeaks(peaks, peakLabelLimit, compactLabels)
-
   useFrame(({ clock }) => {
     material.uniforms.uTimeline.value = getLiveTimeline()
     material.uniforms.uTime.value = reducedMotion ? 0 : clock.elapsedTime
@@ -385,7 +398,9 @@ function TerrainSurface({
           snapshots={snapshots}
           gridSize={gridSize}
           notes={notes}
-          peaks={visiblePeaks}
+          peaks={peaks}
+          selectedNoteId={selectedNoteId}
+          labelLimit={peakLabelLimit}
           compact={compactLabels}
           reducedMotion={reducedMotion}
           onSelectNote={onSelectNote}
@@ -812,6 +827,8 @@ function PeakField({
   gridSize,
   notes,
   peaks,
+  selectedNoteId,
+  labelLimit,
   compact,
   reducedMotion,
   onSelectNote,
@@ -820,15 +837,19 @@ function PeakField({
   gridSize: number
   notes: TerrainNote[]
   peaks: TerrainPeak[]
+  selectedNoteId: string | null
+  labelLimit: number
   compact: boolean
   reducedMotion: boolean
   onSelectNote: (id: string | null) => void
 }) {
   const labels = useRef<Array<HTMLDivElement | null>>([])
+  const labelLayer = useRef<HTMLDivElement | null>(null)
   const projected = useMemo(() => new Vector3(), [])
   const setActivePeak = useAppStore((state) => state.setActivePeak)
   const activePeakId = useAppStore((state) => state.activePeakId)
   const geometry = useMemo(() => buildPeakGeometry(peaks, notes), [notes, peaks])
+  const peakIndexById = useMemo(() => new Map(peaks.map((peak, index) => [peak.id, index])), [peaks])
   const coreMaterial = useMemo(() => makePeakMaterial(false), [])
   const glowMaterial = useMemo(() => makePeakMaterial(true), [])
   const peakPositions = useMemo(
@@ -837,6 +858,7 @@ function PeakField({
   )
   const lastTimeline = useRef(Number.NaN)
   const nextLabelUpdate = useRef(0)
+  const zoomTier = useRef<PeakLabelZoomTier>('medium')
   const projectedView = useRef({
     cameraX: Number.NaN,
     cameraY: Number.NaN,
@@ -848,6 +870,9 @@ function PeakField({
     width: 0,
     height: 0,
     timeline: Number.NaN,
+    activePeakId: '',
+    selectedNoteId: '',
+    zoomTier: 'medium' as PeakLabelZoomTier,
   })
   useFrame(({ camera, clock, gl, size }) => {
     const timeline = getLiveTimeline()
@@ -875,6 +900,9 @@ function PeakField({
     coreMaterial.uniforms.uTime.value = reducedMotion ? 0 : clock.elapsedTime
     glowMaterial.uniforms.uTime.value = reducedMotion ? 0 : clock.elapsedTime
 
+    const nextZoomTier = resolvePeakLabelZoomTier(camera.position.length(), zoomTier.current)
+    zoomTier.current = nextZoomTier
+
     const previousView = projectedView.current
     const projectionChanged =
       previousView.timeline !== timeline ||
@@ -886,25 +914,68 @@ function PeakField({
       previousView.quaternionZ !== camera.quaternion.z ||
       previousView.quaternionW !== camera.quaternion.w ||
       previousView.width !== size.width ||
-      previousView.height !== size.height
+      previousView.height !== size.height ||
+      previousView.activePeakId !== (activePeakId ?? '') ||
+      previousView.selectedNoteId !== (selectedNoteId ?? '') ||
+      previousView.zoomTier !== nextZoomTier
     const hasUnpositionedLabel = labels.current.some(
       (label) => label !== null && label.style.transform.length === 0,
     )
     if ((!projectionChanged && !hasUnpositionedLabel) || clock.elapsedTime < nextLabelUpdate.current) return
 
+    const candidates: PeakLabelCandidate[] = []
     for (let index = 0; index < peaks.length; index += 1) {
+      const peak = peaks[index]
       const offset = index * 3
       const label = labels.current[index]
       if (!label) continue
       projected
         .set(peakPositions[offset], peakPositions[offset + 1] + 0.22, peakPositions[offset + 2])
         .project(camera)
-      const visible = projected.z >= -1 && projected.z <= 1
-      const display = visible ? 'block' : 'none'
-      if (label.style.display !== display) label.style.display = display
-      if (!visible) continue
-      const transform = `translate3d(${(projected.x * 0.5 + 0.5) * size.width}px, ${(-projected.y * 0.5 + 0.5) * size.height}px, 0) translate(-50%, -50%)`
-      if (label.style.transform !== transform) label.style.transform = transform
+      const button = label.firstElementChild as HTMLElement | null
+      const highlighted = peak.id === activePeakId
+        || (selectedNoteId !== null && peak.noteIds.includes(selectedNoteId))
+      candidates.push({
+        id: peak.id,
+        anchorX: (projected.x * 0.5 + 0.5) * size.width,
+        anchorY: (-projected.y * 0.5 + 0.5) * size.height,
+        width: button?.offsetWidth ?? 0,
+        height: button?.offsetHeight ?? 0,
+        importance: peakLabelImportance(peak.height, peak.noteIds.length),
+        selected: highlighted,
+        depthVisible: projected.z >= -1 && projected.z <= 1,
+      })
+    }
+
+    const placements = layoutPeakLabels(candidates, {
+      viewportWidth: size.width,
+      viewportHeight: size.height,
+      safeArea: peakLabelSafeArea(compact),
+      limit: peakLabelLimitForZoom(labelLimit, nextZoomTier),
+    })
+    const canvasRect = gl.domElement.getBoundingClientRect()
+    const layerRect = labelLayer.current?.getBoundingClientRect()
+    const layerOffsetX = (layerRect?.left ?? canvasRect.left) - canvasRect.left
+    const layerOffsetY = (layerRect?.top ?? canvasRect.top) - canvasRect.top
+    let visibleCount = 0
+    for (const placement of placements) {
+      const index = peakIndexById.get(placement.id)
+      if (index === undefined) continue
+      const label = labels.current[index]
+      if (!label) continue
+      const visibility = placement.visible ? 'visible' : 'hidden'
+      if (label.style.visibility !== visibility) label.style.visibility = visibility
+      label.dataset.peakVisible = String(placement.visible)
+      label.setAttribute('aria-hidden', String(!placement.visible))
+      if (Number.isFinite(placement.x) && Number.isFinite(placement.y)) {
+        const transform = `translate3d(${placement.x - layerOffsetX}px, ${placement.y - layerOffsetY}px, 0) translate(-50%, -50%)`
+        if (label.style.transform !== transform) label.style.transform = transform
+      }
+      if (placement.visible) visibleCount += 1
+    }
+    if (labelLayer.current) {
+      labelLayer.current.dataset.visibleCount = String(visibleCount)
+      labelLayer.current.dataset.zoomTier = nextZoomTier
     }
     projectedView.current = {
       cameraX: camera.position.x,
@@ -917,6 +988,9 @@ function PeakField({
       width: size.width,
       height: size.height,
       timeline,
+      activePeakId: activePeakId ?? '',
+      selectedNoteId: selectedNoteId ?? '',
+      zoomTier: nextZoomTier,
     }
     nextLabelUpdate.current = clock.elapsedTime + 1 / 30
   })
@@ -935,40 +1009,51 @@ function PeakField({
     glowMaterial.dispose()
   }, [coreMaterial, glowMaterial])
 
-  const edgeThreshold = compact ? 0.3 : 0.55
   return (
     <>
       <points geometry={geometry} material={glowMaterial} renderOrder={2} />
       <points geometry={geometry} material={coreMaterial} renderOrder={3} />
       <Html fullscreen zIndexRange={[24, 0]} style={{ pointerEvents: 'none' }}>
-        <div className="peak-label-layer">
-          {peaks.map((peak, index) => (
-            <div
-              key={peak.id}
-              className="peak-label-anchor"
-              ref={(element) => {
-                labels.current[index] = element
-              }}
-            >
-              <button
-                type="button"
-                className={`peak-label${activePeakId === peak.id ? ' peak-label--active' : ''}${compact ? ' peak-label--compact' : ''}${peak.x < -edgeThreshold ? ' peak-label--left' : peak.x > edgeThreshold ? ' peak-label--right' : ''}`}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (activePeakId === peak.id) {
-                    setActivePeak(null)
-                    onSelectNote(null)
-                    return
-                  }
-                  setActivePeak(peak.id)
-                  onSelectNote(peak.noteIds[0] ?? null)
+        <div
+          ref={labelLayer}
+          className="peak-label-layer"
+          data-mobile-limit={compact ? MOBILE_PEAK_LABEL_LIMIT : undefined}
+        >
+          {peaks.map((peak, index) => {
+            const highlighted = peak.id === activePeakId
+              || (selectedNoteId !== null && peak.noteIds.includes(selectedNoteId))
+            return (
+              <div
+                key={peak.id}
+                className="peak-label-anchor"
+                data-peak-id={peak.id}
+                data-peak-visible="false"
+                aria-hidden="true"
+                ref={(element) => {
+                  labels.current[index] = element
                 }}
               >
-                <span>{peak.label}</span>
-                <small>{peak.noteIds.length}</small>
-              </button>
-            </div>
-          ))}
+                <button
+                  type="button"
+                  aria-pressed={highlighted}
+                  className={`peak-label${highlighted ? ' peak-label--active' : ''}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    if (activePeakId === peak.id) {
+                      setActivePeak(null)
+                      onSelectNote(null)
+                      return
+                    }
+                    setActivePeak(peak.id)
+                    onSelectNote(peak.noteIds[0] ?? null)
+                  }}
+                >
+                  <span>{peak.label}</span>
+                  <small>{peak.noteIds.length}</small>
+                </button>
+              </div>
+            )
+          })}
         </div>
       </Html>
     </>
@@ -1624,15 +1709,6 @@ function stableUnitHash(value: string): number {
     hash = Math.imul(hash, 16777619)
   }
   return (hash >>> 0) / 4294967295
-}
-
-function selectVisiblePeaks(peaks: TerrainPeak[], limit: number, compact: boolean): TerrainPeak[] {
-  const candidates = compact ? peaks.filter((peak) => Math.abs(peak.x) <= 0.58) : peaks
-  if (candidates.length <= limit) return candidates
-  return Array.from({ length: limit }, (_, index) => {
-    const candidateIndex = Math.round((index * (candidates.length - 1)) / (limit - 1))
-    return candidates[candidateIndex]
-  })
 }
 
 function buildCrossFieldGeometry(): BufferGeometry {
