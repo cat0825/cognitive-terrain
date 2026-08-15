@@ -88,14 +88,17 @@ const projectBundleSchema = z.object({
 })
 
 export function downloadProjectBundle(project: TerrainProject): void {
-  const serializable = {
-    ...project,
-    snapshots: project.snapshots.map((snapshot) => ({ ...snapshot, values: Array.from(snapshot.values) })),
-  }
   downloadBlob(
-    new Blob([JSON.stringify(serializable)], { type: 'application/json' }),
+    new Blob([serializeProjectBundle(project)], { type: 'application/json' }),
     `${safeFileName(project.name)}.terrain.json`,
   )
+}
+
+export function serializeProjectBundle(project: TerrainProject): string {
+  return JSON.stringify({
+    ...project,
+    snapshots: project.snapshots.map((snapshot) => ({ ...snapshot, values: Array.from(snapshot.values) })),
+  })
 }
 
 export async function parseProjectBundle(file: File): Promise<TerrainProject> {
