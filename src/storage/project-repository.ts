@@ -6,6 +6,7 @@ import type {
   ProjectSummary,
   TerrainProject,
 } from '../domain/types'
+import { compactActivityHistory } from '../domain/activity-history'
 import {
   clearProjectMaterialization,
   getDatabase,
@@ -70,13 +71,26 @@ export async function appendProjectInteractionEvent(
       return true
     }
 
-    await transaction.objectStore('interactionEvents').put({
-      ...event,
+    const activityHistory = compactActivityHistory(
+      [...project.interactionEvents, event],
+      {
+        timeZone: project.timeZone,
+        now: event.occurredAt,
+        aggregates: project.activityHistory?.aggregates,
+      },
+    )
+    const eventStore = transaction.objectStore('interactionEvents')
+    const existingKeys = await eventStore.index('by-workspace').getAllKeys(projectId)
+    await Promise.all(existingKeys.map((key) => eventStore.delete(key)))
+    await Promise.all(activityHistory.rawEvents.map((storedEvent) => eventStore.put({
+      ...storedEvent,
       workspaceId: projectId,
-    })
+    })))
     await projects.put({
       ...project,
-      interactionEvents: [...project.interactionEvents, event],
+      updatedAt: new Date(Math.max(Date.parse(project.updatedAt), Date.parse(event.occurredAt))).toISOString(),
+      interactionEvents: activityHistory.rawEvents,
+      activityHistory,
     })
     await transaction.done
     return true

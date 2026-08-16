@@ -62,6 +62,7 @@ beforeEach(async () => {
 describe('project repository', () => {
   it('persists v1 to v3 migrations during the IndexedDB upgrade', async () => {
     const legacy = oldV1Project('legacy-1', '旧项目')
+    legacy.notes[0] = { ...legacy.notes[0], reviewedAt: '2025-08-15T00:00:00.000Z' }
     const versionOne = await openDB('cognitive-terrain', 1, {
       upgrade(database) {
         const store = database.createObjectStore('projects', { keyPath: 'id' })
@@ -82,6 +83,7 @@ describe('project repository', () => {
     expect(stored?.noteNeighbors).toEqual([])
     expect(stored?.cognitiveStates).toHaveLength(2)
     expect(stored?.cognitiveStates[0]?.provenance).toBe('migration')
+    expect(stored?.notes[0]?.reviewedAt).toBe('2025-08-15T00:00:00.000Z')
     expect(stored?.interactionEvents).toEqual([])
     expect(stored?.terrainProfiles.map((profile) => profile.id)).toEqual([
       'density',
@@ -96,6 +98,37 @@ describe('project repository', () => {
     expect(bundle?.citations).toEqual([])
     expect(bundle?.revisions).toHaveLength(2)
     expect(bundle?.revisions.every((revision) => revision.patch.sourceSchemaVersion === 1)).toBe(true)
+  })
+
+  it('preserves review timestamps when migrating a legacy note into cognitive state and materialization', async () => {
+    const reviewedAt = '2026-07-31T23:45:00.000Z'
+    const legacy = oldV1Project('legacy-reviewed-at', '带复习时间的旧项目')
+    legacy.notes[0] = {
+      ...legacy.notes[0],
+      mastery: 0.8,
+      reviewedAt,
+    }
+
+    const versionOne = await openDB(DATABASE_NAME, 1, {
+      upgrade(database) {
+        const store = database.createObjectStore('projects', { keyPath: 'id' })
+        store.createIndex('by-updated-at', 'updatedAt')
+      },
+    })
+    await versionOne.put('projects', legacy)
+    versionOne.close()
+
+    const upgraded = await getDatabase()
+    const stored = await upgraded.get('projects', legacy.id)
+    const bundle = await getProjectObjectBundle(legacy.id)
+    expect(stored?.cognitiveStates).toEqual([
+      expect.objectContaining({ itemId: legacy.notes[0].id, reviewedAt, provenance: 'migration' }),
+      ...stored!.cognitiveStates.slice(1),
+    ])
+    expect(bundle?.cognitiveStates).toEqual([
+      expect.objectContaining({ itemId: legacy.notes[0].id, reviewedAt, provenance: 'migration' }),
+      ...bundle!.cognitiveStates.slice(1),
+    ])
   })
 
   it('repairs an empty or missing active terrain profile during migration', async () => {
@@ -133,6 +166,44 @@ describe('project repository', () => {
     expect((await getProject(project.id))?.interactionEvents).toEqual([event])
     expect((await getProjectObjectBundle(project.id))?.interactionEvents).toEqual([event])
     expect(await listProjectBackups(project.id)).toEqual([])
+  })
+
+  it('compacts high-volume interaction events while preserving review timestamps', async () => {
+    const project = smallProject('p-activity-retention', '活动压缩')
+    const reviewedAt = '2025-08-15T00:00:00.000Z'
+    project.notes = project.notes.map((note, index) => index === 0 ? { ...note, reviewedAt } : note)
+    project.updatedAt = '2026-08-15T00:00:00.000Z'
+    project.interactionEvents = Array.from({ length: 365 * 24 }, (_, index) => createInteractionEvent(
+      project.notes[0].id,
+      'opened',
+      new Date(Date.parse(project.updatedAt) - index * 60 * 60 * 1000).toISOString(),
+      { index },
+    ))
+
+    await saveProject(project)
+
+    const stored = await getProject(project.id)
+    expect(stored?.notes[0]?.reviewedAt).toBe(reviewedAt)
+    expect(stored?.interactionEvents.length).toBeLessThanOrEqual(500)
+    expect(stored?.activityHistory?.aggregates.length).toBeGreaterThan(0)
+    const database = await getDatabase()
+    expect(await database.countFromIndex('interactionEvents', 'by-workspace', project.id)).toBeLessThanOrEqual(500)
+  })
+
+  it('keeps appended review events identical in the compatibility record and materialized store', async () => {
+    const project = smallProject('p-review-event', '复习事件')
+    await saveProject(project)
+    const event = createInteractionEvent(project.notes[0].id, 'reviewed', '2026-08-15T00:00:00.000Z', {
+      reviewedAt: '2026-08-15T00:00:00.000Z',
+    })
+
+    expect(await appendProjectInteractionEvent(project.id, event)).toBe(true)
+
+    const stored = await getProject(project.id)
+    const bundle = await getProjectObjectBundle(project.id)
+    expect(stored?.interactionEvents).toEqual([event])
+    expect(bundle?.interactionEvents).toEqual([event])
+    expect(bundle?.interactionEvents[0]?.payload).toEqual({ reviewedAt: event.occurredAt })
   })
 
   it('renames a project in place', async () => {

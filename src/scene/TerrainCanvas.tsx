@@ -37,8 +37,8 @@ export const TerrainCanvas = memo(function TerrainCanvas({
   const focusRequest = useAppStore((state) => state.focusRequest)
   const activePeakId = useAppStore((state) => state.activePeakId)
   const activityByNote = useMemo(
-    () => buildActivitySummaries(project.notes, project.interactionEvents),
-    [project.interactionEvents, project.notes],
+    () => buildActivitySummaries(project.notes, project.interactionEvents, Date.now(), project.activityHistory?.aggregates),
+    [project.activityHistory?.aggregates, project.interactionEvents, project.notes],
   )
   const [profileTerrain, setProfileTerrain] = useState<Pick<TerrainProject, 'snapshots' | 'peaks'> | null>(null)
   const profileId = profileIdForVisualDimension(visualDimension)

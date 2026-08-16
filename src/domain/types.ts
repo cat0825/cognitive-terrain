@@ -1,3 +1,5 @@
+import type { ActivityHistoryState } from './activity-history'
+
 export type NoteStatus = 'seed' | 'growing' | 'stable' | 'gap' | 'archived'
 
 export type CognitiveStateProvenance = 'yaml' | 'app' | 'migration'
@@ -120,6 +122,7 @@ export interface TerrainProject {
   noteNeighbors: string[][]
   cognitiveStates: CognitiveState[]
   interactionEvents: InteractionEvent[]
+  activityHistory?: ActivityHistoryState
   terrainProfiles: TerrainProfile[]
   activeTerrainProfileId: string
 }

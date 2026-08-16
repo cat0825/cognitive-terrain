@@ -1,6 +1,7 @@
 import { cognitiveStateFromNote } from './cognitive-state'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 import { areasForNote, plateIdForArea } from './knowledge-plates'
+import type { ActivityHistoryState } from './activity-history'
 import type {
   CognitiveState,
   InteractionEvent,
@@ -16,6 +17,7 @@ export interface WorkspaceV3 {
   updatedAt: string
   timeZone: string
   activeTerrainProfileId: string
+  activityHistory?: ActivityHistoryState
 }
 
 export interface KnowledgeItemV3 {
@@ -280,6 +282,7 @@ export function migrateTerrainProjectToV3(
       updatedAt: project.updatedAt,
       timeZone: project.timeZone,
       activeTerrainProfileId: project.activeTerrainProfileId ?? DEFAULT_TERRAIN_PROFILE_ID,
+      activityHistory: project.activityHistory,
     },
     items,
     sources: uniqueSources,

@@ -27,7 +27,7 @@ export function FilterPanel() {
   const bandCount = collisions.filter((collision) => collision.mode === 'band').length
   const unassignedCount = useMemo(() => project.notes.filter((note) => !note.area && !note.areas?.length).length, [project.notes])
   const activitySummary = useMemo(() => {
-    const summaries = [...buildActivitySummaries(project.notes, project.interactionEvents).values()]
+    const summaries = [...buildActivitySummaries(project.notes, project.interactionEvents, Date.now(), project.activityHistory?.aggregates).values()]
     return summaries.reduce((result, summary) => ({
       activeNotes: result.activeNotes + (summary.totalCount > 0 ? 1 : 0),
       eventCount: result.eventCount + summary.totalCount,
@@ -35,7 +35,7 @@ export function FilterPanel() {
       editedCount: result.editedCount + summary.editedCount,
       reviewedCount: result.reviewedCount + summary.reviewedCount,
     }), { activeNotes: 0, eventCount: 0, openedCount: 0, editedCount: 0, reviewedCount: 0 })
-  }, [project.interactionEvents, project.notes])
+  }, [project.activityHistory?.aggregates, project.interactionEvents, project.notes])
 
   if (!filtersOpen) return null
   return (

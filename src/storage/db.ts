@@ -6,6 +6,7 @@ import {
   type StoreNames,
 } from 'idb'
 import { cognitiveStateFromNote } from '../domain/cognitive-state'
+import { compactActivityHistory } from '../domain/activity-history'
 import { areasForNote } from '../domain/knowledge-plates'
 import {
   migrateTerrainProjectToV3,
@@ -238,6 +239,12 @@ export function migrateProject(project: TerrainProject): TerrainProject {
   const activeTerrainProfileId = terrainProfiles.some((profile) => profile.id === project.activeTerrainProfileId)
     ? project.activeTerrainProfileId
     : terrainProfiles[0]?.id ?? DEFAULT_TERRAIN_PROFILE_ID
+  const interactionEvents = project.interactionEvents ?? project.activityHistory?.rawEvents ?? []
+  const activityHistory = compactActivityHistory(interactionEvents, {
+    timeZone: project.timeZone,
+    now: project.updatedAt,
+    aggregates: project.activityHistory?.aggregates,
+  })
   return {
     ...project,
     schemaVersion: 3,
@@ -245,7 +252,8 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     noteNeighbors: legacyV1 ? [] : project.noteNeighbors ?? [],
     notes: migratedNotes,
     cognitiveStates,
-    interactionEvents: project.interactionEvents ?? [],
+    interactionEvents: activityHistory.rawEvents,
+    activityHistory,
     terrainProfiles,
     activeTerrainProfileId,
   }
