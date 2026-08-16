@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { PNG } from 'pngjs'
 import pixelmatch from 'pixelmatch'
+import { importVaultFixture, openFixtureCollision } from '../helpers/import-vault-fixture'
 
 const baselineDir = path.resolve('tests/visual/baselines')
 const diffDir = path.resolve('tests/visual/diffs')
@@ -85,5 +86,24 @@ test('peak labels render stably in desktop and mobile camera states', async ({ p
     await page.getByRole('button', { name: scenario.zoomButton }).click()
     await page.waitForTimeout(900)
     await compareScreenshot(page, `peak-labels-${scenario.name}`)
+  }
+})
+
+test('dense vault collision details render stably on desktop and mobile', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.goto('/')
+  await importVaultFixture(page)
+
+  for (const scenario of [
+    { name: 'desktop', width: 1280, height: 720 },
+    { name: 'mobile', width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize({ width: scenario.width, height: scenario.height })
+    await page.goto('/')
+    await openFixtureCollision(page)
+    await page.locator('.note-detail').hover()
+    await compareScreenshot(page, `vault-collision-${scenario.name}`)
   }
 })

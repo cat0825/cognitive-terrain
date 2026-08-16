@@ -138,7 +138,7 @@ export function ImportPanel() {
             {parsed.issues.length > 0 && (
               <div className="import-issues">
                 <AlertTriangle size={15} />
-                <span>{parsed.issues.length} 条记录未导入</span>
+                <span>{parsed.issues.length} 条导入问题</span>
               </div>
             )}
             <button
