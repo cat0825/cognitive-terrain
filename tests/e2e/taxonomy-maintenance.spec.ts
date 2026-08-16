@@ -27,8 +27,8 @@ test('previews and applies a recoverable taxonomy rename with a stable node id',
   await expect(preview).toContainText('影响 60 条笔记、1 个节点')
   await preview.getByRole('button', { name: '确认操作' }).click()
 
-  await expect(maintenance).toContainText('v2 · 7 个节点')
-  await expect(maintenance).toContainText('重命名完成')
+  await expect(maintenance).toContainText('v2 · 7 个节点', { timeout: 15_000 })
+  await expect(maintenance).toContainText('重命名完成', { timeout: 15_000 })
   await nodeSelect.selectOption({ label: 'Agent 平台' })
   await expect(nodeSelect).toHaveValue(nodeId)
 

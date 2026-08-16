@@ -123,8 +123,10 @@ test('keeps the visual dimension selection while switching to the 2D fallback', 
   await mastery.click()
   await expect(mastery).toHaveAttribute('aria-pressed', 'true')
 
+  await page.getByRole('button', { name: '关闭筛选' }).click()
   await page.getByRole('button', { name: '切换二维等高线' }).click()
   await expect(page.locator('.terrain-2d')).toBeVisible()
+  await page.getByRole('button', { name: '打开地图筛选' }).click()
   await expect(mastery).toHaveAttribute('aria-pressed', 'true')
 
   expect(errors).toEqual([])
