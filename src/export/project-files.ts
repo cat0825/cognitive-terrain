@@ -34,6 +34,7 @@ const projectBundleSchema = z.object({
       status: z.enum(['seed', 'growing', 'stable', 'gap', 'archived']).optional(),
       area: z.string().optional(),
       areas: z.array(z.string()).optional(),
+      declaredAreas: z.array(z.string()).optional(),
       reviewedAt: z.string().optional(),
       cognitiveStateProvenance: z.enum(['yaml', 'app', 'migration']).optional(),
       links: z.array(z.string()).optional(),
@@ -110,6 +111,28 @@ const projectBundleSchema = z.object({
     formulaVersion: z.string(),
   })).optional(),
   activeTerrainProfileId: z.string().optional(),
+  taxonomyNodes: z.array(z.object({
+    id: z.string(),
+    workspaceId: z.string(),
+    label: z.string(),
+    parentId: z.string().optional(),
+    aliases: z.array(z.string()),
+    description: z.string().optional(),
+    version: z.number().int().positive(),
+    status: z.enum(['active', 'archived']),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })).optional(),
+  taxonomyVersion: z.number().int().nonnegative().optional(),
+  referenceAtlases: z.array(z.object({
+    id: z.string(),
+    workspaceId: z.string(),
+    label: z.string(),
+    taxonomyVersion: z.number().int().nonnegative(),
+    taxonomyNodeIds: z.array(z.string()),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })).optional(),
 })
 
 export function downloadProjectBundle(project: TerrainProject): void {

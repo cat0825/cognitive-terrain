@@ -4,7 +4,7 @@ import { areasForNote } from '../domain/knowledge-plates'
 
 const scoreSchema = z.number().finite().min(0).max(1)
 const statusSchema = z.enum(['seed', 'growing', 'stable', 'gap', 'archived'])
-const areaSchema = z.string().trim().min(1)
+const areaSchema = z.string().refine((value) => value.trim().length > 0)
 const areaListSchema = z.array(areaSchema).min(1)
 const reviewedAtSchema = z.string().trim().min(1).refine((value) => !Number.isNaN(Date.parse(value)), {
   message: '必须是有效日期',
@@ -17,6 +17,7 @@ export interface ObsidianCognitiveFields {
   status?: NoteStatus
   area?: string
   areas?: string[]
+  declaredAreas?: string[]
   reviewedAt?: string
 }
 
@@ -61,6 +62,7 @@ function parseAreaFields(
   if (areas.length) {
     target.area = areas[0]
     target.areas = areas
+    target.declaredAreas = labels
   }
 }
 

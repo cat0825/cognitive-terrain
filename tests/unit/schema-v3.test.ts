@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createDemoProject } from '../../src/domain/demo'
 import { plateIdForArea } from '../../src/domain/knowledge-plates'
 import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
+import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { DEFAULT_TERRAIN_PROFILES, profileIdForVisualDimension } from '../../src/domain/terrain-profile'
 import type { TerrainProject } from '../../src/domain/types'
 
@@ -108,6 +109,40 @@ describe('Schema v3 dry-run migration', () => {
       taxonomyNodeId: plateIdForArea('math.linear-algebra'),
       provenance: 'yaml',
     })
+  })
+
+  it('preserves the declared area label while resolving an alias to a versioned taxonomy node', () => {
+    const project = migrationFixture()
+    const declaredLabel = '  ＳＴＡＴＳ  '
+    const taxonomyNode = createTaxonomyNode({
+      id: 'taxonomy-statistics',
+      workspaceId: project.id,
+      label: 'Statistics',
+      aliases: ['stats'],
+      version: 4,
+    }, project.updatedAt)
+    project.notes[0] = {
+      ...project.notes[0],
+      area: 'Statistics',
+      areas: ['Statistics'],
+      declaredAreas: [declaredLabel],
+    }
+    project.taxonomyNodes = [taxonomyNode]
+    project.taxonomyVersion = 4
+
+    const { bundle } = migrateTerrainProjectToV3(project)
+
+    expect(bundle.items[0]).toMatchObject({ declaredAreas: [declaredLabel] })
+    expect(bundle.plateMemberships).toContainEqual(expect.objectContaining({
+      itemId: project.notes[0].id,
+      taxonomyNodeId: taxonomyNode.id,
+      declaredLabel,
+      resolved: true,
+      resolution: 'alias',
+      taxonomyVersion: 4,
+    }))
+    expect(bundle.workspace.taxonomyVersion).toBe(4)
+    expect(bundle.taxonomyNodes).toEqual([taxonomyNode])
   })
 
   it('links local Obsidian source paths to their items without inventing citations', () => {

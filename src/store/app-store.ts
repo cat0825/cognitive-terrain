@@ -15,6 +15,15 @@ import { createDemoProject } from '../domain/demo'
 import { commitAnalyzedProject, createInteractionEvent, eventTypeForNoteUpdate } from '../domain/cognitive-state'
 import { shouldRecordOpenedEvent } from '../domain/activity-temperature'
 import { areasForNote } from '../domain/knowledge-plates'
+import {
+  createTaxonomyNode,
+  mergeTaxonomyNodes,
+  renameTaxonomyNode,
+  reparentTaxonomyNode,
+  resolveTaxonomyAlias,
+  validateTaxonomy,
+} from '../domain/taxonomy'
+import { migrateTerrainProjectToV3 } from '../domain/schema-v3'
 import { TODAY_STUDY_PACK_NAME, todayStudyPack } from '../domain/study-pack'
 import { runAnalysis, type AnalysisHandle } from '../pipeline/worker-client'
 import { parseWikiLinks } from '../import/parse'
@@ -29,6 +38,7 @@ import {
   restoreProjectBackup,
   saveProject,
 } from '../storage/project-repository'
+import { migrateProject } from '../storage/db'
 
 export type CameraInteractionMode = 'rotate' | 'pan'
 
@@ -105,6 +115,10 @@ interface AppState {
   createBackup: () => Promise<boolean>
   restoreBackup: (id: string) => Promise<boolean>
   reloadBackups: () => Promise<void>
+  createTaxonomy: (input: { label: string; parentId?: string; aliases?: string[]; description?: string; assignItemIds?: string[] }) => Promise<void>
+  renameTaxonomy: (nodeId: string, label: string) => Promise<void>
+  reparentTaxonomy: (nodeId: string, parentId?: string) => Promise<void>
+  mergeTaxonomy: (sourceNodeId: string, targetNodeId: string) => Promise<void>
 }
 
 interface AnalysisCommitContext {
@@ -125,7 +139,7 @@ declare global {
 }
 
 let activeAnalysis: AnalysisHandle | null = null
-const initialProject = createDemoProject()
+const initialProject = migrateProject(createDemoProject())
 let liveTimeline = Math.max(0, initialProject.snapshots.length - 1)
 
 export function getLiveTimeline(): number {
@@ -316,6 +330,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       status: note.status,
       area: note.area,
       areas: note.areas,
+      declaredAreas: note.declaredAreas,
       reviewedAt: note.reviewedAt,
       cognitiveStateProvenance: stateProvenance.get(note.id),
       links: note.links,
@@ -363,6 +378,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           status: note.status,
           area: note.area,
           areas: note.areas,
+          declaredAreas: note.declaredAreas,
           reviewedAt: note.reviewedAt,
           cognitiveStateProvenance: stateProvenance.get(note.id),
           links: note.links,
@@ -389,6 +405,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         status: 'status' in patch ? patch.status ?? undefined : note.status,
         area: nextAreas[0],
         areas: nextAreas.length ? nextAreas : undefined,
+        declaredAreas: 'areas' in patch || 'area' in patch ? [...nextAreas] : note.declaredAreas,
         reviewedAt: 'reviewedAt' in patch ? patch.reviewedAt ?? undefined : note.reviewedAt,
         cognitiveStateProvenance: changesCognitiveState ? 'app' : stateProvenance.get(note.id),
         links: patch.content === undefined ? note.links : parseWikiLinks(patch.content),
@@ -448,17 +465,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isAnalyzing: false, progress: null })
   },
   replaceProject: async (project) => {
-    setProjectState(set, project)
+    const normalized = migrateProject(project)
+    setProjectState(set, normalized)
     try {
-      await saveProject(project)
-      localStorage.setItem('cognitive-terrain:last-project', project.id)
+      await saveProject(normalized)
+      localStorage.setItem('cognitive-terrain:last-project', normalized.id)
       await Promise.all([get().reloadProjects(), get().reloadBackups()])
     } catch (error) {
       set({ error: `项目已打开，但本地保存失败：${error instanceof Error ? error.message : String(error)}` })
     }
   },
   resetDemo: () => {
-    const project = createDemoProject()
+    const project = migrateProject(createDemoProject())
     localStorage.removeItem('cognitive-terrain:last-project')
     setProjectState(set, project)
     void get().reloadProjects()
@@ -498,7 +516,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get()
     if (state.project.id === id) {
       localStorage.removeItem('cognitive-terrain:last-project')
-      setProjectState(set, createDemoProject())
+      setProjectState(set, migrateProject(createDemoProject()))
     }
     await Promise.all([get().reloadProjects(), get().reloadBackups()])
   },
@@ -537,6 +555,86 @@ export const useAppStore = create<AppState>((set, get) => ({
     const backups = await listProjectBackups()
     set({ backups })
   },
+  createTaxonomy: async (input) => {
+    const current = get().project
+    const now = taxonomyMutationTimestamp(current)
+    const node = createTaxonomyNode({
+      workspaceId: current.id,
+      label: input.label,
+      parentId: input.parentId,
+      aliases: input.aliases,
+      description: input.description,
+      version: nextTaxonomyVersion(current),
+    }, now)
+    const taxonomyNodes = [...(current.taxonomyNodes ?? []), node]
+    validateTaxonomy(taxonomyNodes)
+    const assignItemIds = new Set(input.assignItemIds ?? [])
+    const notes = current.notes.map((note) => {
+      if (!assignItemIds.has(note.id)) return note
+      const areas = areasForNote(note)
+      const nextAreas = areasForNote({ areas: [...areas, node.label] })
+      const declaredAreas = note.declaredAreas ?? areas
+      return {
+        ...note,
+        area: nextAreas[0],
+        areas: nextAreas,
+        declaredAreas: declaredAreas.some((area) => resolveTaxonomyAlias([node], current.id, area))
+          ? [...declaredAreas]
+          : [...declaredAreas, node.label],
+      }
+    })
+    await persistTaxonomyProject({
+      ...current,
+      updatedAt: now,
+      notes,
+      taxonomyNodes,
+      taxonomyVersion: nextTaxonomyVersion(current),
+    }, set, get)
+  },
+  renameTaxonomy: async (nodeId, label) => {
+    const current = get().project
+    const now = taxonomyMutationTimestamp(current)
+    const memberships = migrateTerrainProjectToV3(current).bundle.plateMemberships
+    const result = renameTaxonomyNode(current.taxonomyNodes ?? [], nodeId, label, memberships, now)
+    const renamed = result.nodes.find((node) => node.id === nodeId)
+    if (!renamed) throw new Error(`taxonomy node not found after rename: ${nodeId}`)
+    const notes = rewriteResolvedAreas(current, nodeId, renamed.label)
+    await persistTaxonomyProject({
+      ...current,
+      updatedAt: now,
+      notes,
+      taxonomyNodes: result.nodes,
+      taxonomyVersion: nextTaxonomyVersion(current),
+    }, set, get)
+  },
+  reparentTaxonomy: async (nodeId, parentId) => {
+    const current = get().project
+    const now = taxonomyMutationTimestamp(current)
+    const memberships = migrateTerrainProjectToV3(current).bundle.plateMemberships
+    const result = reparentTaxonomyNode(current.taxonomyNodes ?? [], nodeId, parentId, memberships, now)
+    await persistTaxonomyProject({
+      ...current,
+      updatedAt: now,
+      taxonomyNodes: result.nodes,
+      taxonomyVersion: nextTaxonomyVersion(current),
+    }, set, get)
+  },
+  mergeTaxonomy: async (sourceNodeId, targetNodeId) => {
+    const current = get().project
+    const now = taxonomyMutationTimestamp(current)
+    const memberships = migrateTerrainProjectToV3(current).bundle.plateMemberships
+    const target = current.taxonomyNodes?.find((node) => node.id === targetNodeId)
+    if (!target) throw new Error(`unknown taxonomy node: ${targetNodeId}`)
+    const notes = rewriteResolvedAreas(current, sourceNodeId, target.label)
+    const result = mergeTaxonomyNodes(current.taxonomyNodes ?? [], sourceNodeId, targetNodeId, memberships, now)
+    await persistTaxonomyProject({
+      ...current,
+      updatedAt: now,
+      notes,
+      taxonomyNodes: result.nodes,
+      taxonomyVersion: nextTaxonomyVersion(current),
+    }, set, get)
+  },
 }))
 
 if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf')) {
@@ -564,4 +662,49 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
     cameraRevision: Date.now(),
     cameraScale: 192,
   })
+}
+
+function nextTaxonomyVersion(project: TerrainProject): number {
+  return Math.max(0, project.taxonomyVersion ?? 0) + 1
+}
+
+function taxonomyMutationTimestamp(project: TerrainProject): string {
+  const timestamps = [project.updatedAt, ...(project.taxonomyNodes ?? []).map((node) => node.updatedAt)]
+    .map((value) => Date.parse(value))
+    .filter(Number.isFinite)
+  return new Date(Math.max(Date.now(), ...timestamps)).toISOString()
+}
+
+function rewriteResolvedAreas(project: TerrainProject, nodeId: string, targetLabel: string): TerrainProject['notes'] {
+  const nodes = project.taxonomyNodes ?? []
+  return project.notes.map((note) => {
+    const currentAreas = areasForNote(note)
+    const nextAreas = areasForNote({
+      areas: currentAreas.map((area) => resolveTaxonomyAlias(nodes, project.id, area)?.id === nodeId ? targetLabel : area),
+    })
+    if (nextAreas.join('\n') === currentAreas.join('\n')) return note
+    return {
+      ...note,
+      area: nextAreas[0],
+      areas: nextAreas,
+      declaredAreas: note.declaredAreas ?? currentAreas,
+    }
+  })
+}
+
+async function persistTaxonomyProject(
+  project: TerrainProject,
+  set: (partial: Partial<AppState>) => void,
+  get: () => AppState,
+): Promise<void> {
+  try {
+    await createProjectBackup(get().project)
+    await saveProject(project, { createBackup: false })
+    set({ project, activeAreas: [] })
+    await Promise.all([get().reloadProjects(), get().reloadBackups()])
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    set({ error: `领域维护失败：${message}` })
+    throw error
+  }
 }

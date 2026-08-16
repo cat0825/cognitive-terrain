@@ -1,10 +1,15 @@
 import { Check, RotateCcw, X } from 'lucide-react'
-import { useMemo } from 'react'
+import { lazy, Suspense, useMemo } from 'react'
 import { buildPlateCollisions, normalizeArea, summarizeKnowledgePlates } from '../domain/knowledge-plates'
 import { buildActivitySummaries, TEMPERATURE_COLORS } from '../domain/activity-temperature'
 import { projectTagCounts } from '../domain/project-view'
 import type { QualityLevel, VisualDimension } from '../domain/types'
 import { useAppStore } from '../store/app-store'
+
+const TaxonomyMaintenance = lazy(async () => {
+  const module = await import('./TaxonomyMaintenance')
+  return { default: module.TaxonomyMaintenance }
+})
 
 export function FilterPanel() {
   const project = useAppStore((state) => state.project)
@@ -20,6 +25,10 @@ export function FilterPanel() {
   const setQuality = useAppStore((state) => state.setQuality)
   const setVisualDimension = useAppStore((state) => state.setVisualDimension)
   const setFiltersOpen = useAppStore((state) => state.setFiltersOpen)
+  const createTaxonomy = useAppStore((state) => state.createTaxonomy)
+  const renameTaxonomy = useAppStore((state) => state.renameTaxonomy)
+  const reparentTaxonomy = useAppStore((state) => state.reparentTaxonomy)
+  const mergeTaxonomy = useAppStore((state) => state.mergeTaxonomy)
   const tags = projectTagCounts(project).slice(0, 18)
   const plates = useMemo(() => summarizeKnowledgePlates(project.notes), [project.notes])
   const collisions = useMemo(() => buildPlateCollisions(project.notes), [project.notes])
@@ -154,6 +163,15 @@ export function FilterPanel() {
           ))}
         </div>
       </section>
+      <Suspense fallback={<div className="taxonomy-loading" role="status">正在加载领域维护</div>}>
+        <TaxonomyMaintenance
+          project={project}
+          onCreateNode={createTaxonomy}
+          onRenameNode={renameTaxonomy}
+          onReparentNode={reparentTaxonomy}
+          onMergeNodes={mergeTaxonomy}
+        />
+      </Suspense>
     </aside>
   )
 }
