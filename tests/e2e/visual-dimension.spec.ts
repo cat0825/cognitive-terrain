@@ -96,14 +96,18 @@ test('opens an explainable collision band from the keyboard in 2D', async ({ pag
   await page.getByRole('button', { name: '关闭筛选' }).click()
   await page.getByRole('button', { name: '切换二维等高线' }).click()
 
-  const band = page.getByRole('button', { name: /碰撞带.*跨域 WikiLink/ }).first()
+  const band = page.locator('.plate-collision-band[marker-end]').first()
   await expect(band).toBeVisible()
+  await expect(band).toHaveAttribute('aria-label', /碰撞带.*指向.*跨域 WikiLink/)
   await band.focus()
   await page.keyboard.press('Enter')
 
   await expect(page.getByText('板块碰撞带', { exact: true })).toBeVisible()
-  await expect(page.locator('.collision-method')).toContainText('可解析的 WikiLink')
-  await expect(page.locator('.collision-pairs li').first()).toBeVisible()
+  await expect(page.locator('.collision-method').last()).toContainText('可解析的源笔记')
+  const evidence = page.locator('.collision-pairs button').first()
+  await expect(evidence).toBeVisible()
+  await expect(evidence).toHaveAttribute('data-source-note-id', /.+/)
+  await expect(evidence).toHaveAttribute('data-target-note-id', /.+/)
   expect(errors).toEqual([])
 })
 
