@@ -25,7 +25,7 @@ export async function openFixtureCollision(page: Page): Promise<void> {
   await expect(panel.locator('.plate-legend-summary')).toContainText('6 个板块 · 13 条跨域 WikiLink · 1 个碰撞带 · 1 条未分类')
   await page.getByRole('button', { name: '关闭筛选' }).click()
   await page.getByRole('button', { name: '切换二维等高线' }).click()
-  const band = page.getByRole('button', { name: /碰撞带，3 条跨域 WikiLink/ }).first()
+  const band = page.getByRole('button', { name: /碰撞带.*3 条跨域 WikiLink/ }).first()
   await expect(band).toBeVisible()
   await band.click()
   await expect(page.getByRole('complementary', { name: '板块碰撞详情' })).toBeVisible()

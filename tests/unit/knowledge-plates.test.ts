@@ -102,6 +102,86 @@ describe('knowledge plates', () => {
     expect(sparse).toMatchObject({ relationCount: 1, mode: 'lines' })
   })
 
+  it('keeps resolved link direction evidence while retaining unique-pair relation counts', () => {
+    const notes = [
+      note('a', 'A', 'alpha', { links: ['B', 'B'] }),
+      note('b', 'B', 'beta', { links: ['A'] }),
+    ]
+
+    const bridges = buildPlateBridges(notes)
+    const collision = buildPlateCollisions(notes)[0]
+
+    expect(bridges.map(({ id }) => id)).toEqual(['bridge-a-b'])
+    expect(bridges[0]?.evidence.map(({ fromId, toId }) => `${fromId}->${toId}`)).toEqual(['a->b', 'a->b', 'b->a'])
+    expect(collision).toMatchObject({
+      relationCount: 1,
+      firstToSecondCount: 2,
+      secondToFirstCount: 1,
+      bidirectionalCount: 1,
+      direction: 'neutral',
+    })
+    expect(collision?.directionConfidence).toBeCloseTo(1 / 3)
+  })
+
+  it('exposes a deterministic direction only with enough one-way evidence', () => {
+    const forward = [
+      note('a1', 'A1', 'alpha', { links: ['B1'] }),
+      note('a2', 'A2', 'alpha', { links: ['B2'] }),
+      note('a3', 'A3', 'alpha', { links: ['B3'] }),
+      note('b1', 'B1', 'beta'),
+      note('b2', 'B2', 'beta'),
+      note('b3', 'B3', 'beta'),
+    ]
+    const reverse = [
+      note('a1', 'A1', 'alpha'),
+      note('a2', 'A2', 'alpha'),
+      note('a3', 'A3', 'alpha'),
+      note('b1', 'B1', 'beta', { links: ['A1'] }),
+      note('b2', 'B2', 'beta', { links: ['A2'] }),
+      note('b3', 'B3', 'beta', { links: ['A3'] }),
+    ]
+
+    const forwardCollision = buildPlateCollisions(forward)[0]
+    const reverseCollision = buildPlateCollisions(reverse)[0]
+
+    expect(forwardCollision).toMatchObject({
+      firstArea: 'alpha',
+      secondArea: 'beta',
+      firstToSecondCount: 3,
+      secondToFirstCount: 0,
+      bidirectionalCount: 0,
+      direction: 'first-to-second',
+      directionConfidence: 1,
+    })
+    expect(reverseCollision).toMatchObject({
+      firstToSecondCount: 0,
+      secondToFirstCount: 3,
+      bidirectionalCount: 0,
+      direction: 'second-to-first',
+      directionConfidence: 1,
+    })
+  })
+
+  it('keeps mixed direction evidence neutral', () => {
+    const notes = [
+      note('a1', 'A1', 'alpha', { links: ['B1'] }),
+      note('a2', 'A2', 'alpha', { links: ['B2'] }),
+      note('b1', 'B1', 'beta'),
+      note('b2', 'B2', 'beta'),
+      note('b3', 'B3', 'beta', { links: ['A3'] }),
+      note('a3', 'A3', 'alpha'),
+    ]
+
+    const collision = buildPlateCollisions(notes)[0]
+    expect(collision).toMatchObject({
+      relationCount: 3,
+      firstToSecondCount: 2,
+      secondToFirstCount: 1,
+      bidirectionalCount: 0,
+      direction: 'neutral',
+    })
+  })
+
   it('explains neighborhood with evidence instead of a bare distance', () => {
     const notes = [
       note('a', 'A', '数学', { links: ['B'], tags: ['线性代数', '证明'] }),

@@ -16,9 +16,17 @@ test('imports, reloads, and inspects the anonymized vault without overflow', asy
 
   await openFixtureCollision(page)
   const detail = page.getByRole('complementary', { name: '板块碰撞详情' })
-  await expect(detail.locator('.collision-method')).toContainText('可解析的 WikiLink')
-  await expect(detail.locator('.collision-pairs li')).toHaveCount(3)
+  const band = page.locator('.plate-collision-band').first()
+  await expect(band).toHaveAttribute('aria-label', /无稳定方向/)
+  await expect(band).not.toHaveAttribute('marker-end', /.+/)
+  await expect(detail.locator('.collision-method').last()).toContainText('可解析的源笔记')
+  await expect(detail.locator('.collision-pairs li')).toHaveCount(5)
   await expect(detail.locator('.collision-metric')).toContainText(/3\s*条跨域 WikiLink/)
+  const directionCounts = detail.getByLabel('链接方向计数')
+  await expect(directionCounts.locator('span')).toHaveCount(3)
+  await expect(directionCounts).toContainText(': 3')
+  await expect(directionCounts).toContainText(': 2')
+  await expect(directionCounts).toContainText('双向配对: 2')
 
   const overflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth - document.documentElement.clientWidth,

@@ -18,6 +18,14 @@ export interface PlateBridge {
   distance: number
   score: number
   sharedTags: string[]
+  evidence: PlateBridgeEvidence[]
+}
+
+export interface PlateBridgeEvidence {
+  fromId: string
+  toId: string
+  fromArea: string
+  toArea: string
 }
 
 export interface PlateCollision {
@@ -25,6 +33,11 @@ export interface PlateCollision {
   firstArea: string
   secondArea: string
   relationCount: number
+  firstToSecondCount: number
+  secondToFirstCount: number
+  bidirectionalCount: number
+  direction: 'first-to-second' | 'second-to-first' | 'neutral'
+  directionConfidence: number
   strength: number
   mode: 'lines' | 'band'
   firstAnchor: { x: number; y: number }
@@ -39,6 +52,10 @@ export interface SimilarityReason {
 
 const PLATE_PALETTE = ['#76a6a0', '#9b8ad9', '#c49b67', '#7f9fc8', '#b67f8c', '#8da56d', '#c27f5e', '#6f9aa8']
 export const COLLISION_BAND_THRESHOLD = 3
+/** A single relation is too sparse to expose a directional cue. */
+export const COLLISION_DIRECTION_MIN_RELATIONS = 2
+/** Direction must have a clear enough imbalance to be rendered. */
+export const COLLISION_DIRECTION_MIN_CONFIDENCE = 0.6
 
 export function normalizeArea(value: string | undefined): string | undefined {
   if (!value) return undefined
@@ -97,11 +114,8 @@ export function summarizeKnowledgePlates(notes: TerrainNote[]): KnowledgePlate[]
     }
   }
 
-  for (const edge of explicitEdges(notes)) {
-    const fromAreas = normalizedAreasForNote(edge.from)
-    const toAreas = normalizedAreasForNote(edge.to)
-    if (!fromAreas.length || !toAreas.length || sharesArea(fromAreas, toAreas)) continue
-    for (const area of [...fromAreas, ...toAreas]) {
+  for (const bridge of buildPlateBridges(notes)) {
+    for (const area of [bridge.fromArea, bridge.toArea]) {
       const plate = summaries.get(plateIdForArea(area))
       if (plate) plate.crossLinkCount += 1
     }
@@ -111,8 +125,7 @@ export function summarizeKnowledgePlates(notes: TerrainNote[]): KnowledgePlate[]
 
 export function buildPlateBridges(notes: TerrainNote[]): PlateBridge[] {
   const edges = explicitEdges(notes)
-  const bridges: PlateBridge[] = []
-  const seen = new Set<string>()
+  const bridges = new Map<string, PlateBridge>()
   for (const { from, to } of edges) {
     const fromAreas = normalizedAreasForNote(from)
     const toAreas = normalizedAreasForNote(to)
@@ -121,14 +134,29 @@ export function buildPlateBridges(notes: TerrainNote[]): PlateBridge[] {
     const toArea = toAreas[0]
     const [firstId, secondId] = [from.id, to.id].sort()
     const id = `bridge-${firstId}-${secondId}`
-    if (seen.has(id)) continue
-    seen.add(id)
+    const evidence = { fromId: from.id, toId: to.id, fromArea, toArea }
+    const current = bridges.get(id)
+    if (current) {
+      current.evidence.push(evidence)
+      continue
+    }
     const distance = Math.hypot(from.x - to.x, from.y - to.y)
     const sharedTags = sharedTagsOf(from, to)
     const score = Math.min(1, 0.82 + sharedTags.length * 0.04)
-    bridges.push({ id, fromId: from.id, toId: to.id, fromArea, toArea, kind: 'wikilink', distance, score, sharedTags })
+    bridges.set(id, {
+      id,
+      fromId: from.id,
+      toId: to.id,
+      fromArea,
+      toArea,
+      kind: 'wikilink',
+      distance,
+      score,
+      sharedTags,
+      evidence: [evidence],
+    })
   }
-  return bridges.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+  return [...bridges.values()].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
 }
 
 export function buildPlateCollisions(
@@ -147,33 +175,79 @@ export function buildPlateCollisions(
     firstArea: string
     secondArea: string
     bridges: PlateBridge[]
+    relationPairs: Set<string>
+    firstToSecondCount: number
+    secondToFirstCount: number
+    bidirectionalPairs: Set<string>
     firstPoints: Array<{ x: number; y: number }>
     secondPoints: Array<{ x: number; y: number }>
   }>()
   for (const bridge of buildPlateBridges(notes)) {
     const [firstArea, secondArea] = [bridge.fromArea, bridge.toArea].sort()
     const id = collisionId(firstArea, secondArea)
-    const group = groups.get(id) ?? { firstArea, secondArea, bridges: [], firstPoints: [], secondPoints: [] }
+    const group = groups.get(id) ?? {
+      firstArea,
+      secondArea,
+      bridges: [],
+      relationPairs: new Set<string>(),
+      firstToSecondCount: 0,
+      secondToFirstCount: 0,
+      bidirectionalPairs: new Set<string>(),
+      firstPoints: [],
+      secondPoints: [],
+    }
     const from = notesById.get(bridge.fromId)
     const to = notesById.get(bridge.toId)
     if (!from || !to) continue
     const fromBelongsToFirst = bridge.fromArea === firstArea
+    const relationPair = [from.id, to.id].sort().join('|')
+    group.relationPairs.add(relationPair)
+    let directions = 0
+    for (const evidence of bridge.evidence) {
+      if (evidence.fromArea === firstArea) {
+        group.firstToSecondCount += 1
+        directions |= 1
+      } else {
+        group.secondToFirstCount += 1
+        directions |= 2
+      }
+    }
+    if (directions === 3) group.bidirectionalPairs.add(relationPair)
     group.bridges.push(bridge)
     group.firstPoints.push(fromBelongsToFirst ? from : to)
     group.secondPoints.push(fromBelongsToFirst ? to : from)
     groups.set(id, group)
   }
-  return [...groups.entries()].map(([id, group]) => ({
-    id,
-    firstArea: areaLabels.get(group.firstArea) ?? group.firstArea,
-    secondArea: areaLabels.get(group.secondArea) ?? group.secondArea,
-    relationCount: group.bridges.length,
-    strength: Math.min(1, Math.log2(group.bridges.length + 1) / 3),
-    mode: group.bridges.length >= Math.max(2, bandThreshold) ? 'band' : 'lines',
-    firstAnchor: averagePoint(group.firstPoints),
-    secondAnchor: averagePoint(group.secondPoints),
-    bridges: group.bridges,
-  } satisfies PlateCollision)).sort((a, b) => b.relationCount - a.relationCount || a.id.localeCompare(b.id))
+  return [...groups.entries()].map(([id, group]) => {
+    const relationCount = group.relationPairs.size
+    const directionalTotal = group.firstToSecondCount + group.secondToFirstCount
+    const directionConfidence = directionalTotal
+      ? Math.abs(group.firstToSecondCount - group.secondToFirstCount) / directionalTotal
+      : 0
+    const direction = relationCount < COLLISION_DIRECTION_MIN_RELATIONS || directionConfidence < COLLISION_DIRECTION_MIN_CONFIDENCE
+      ? 'neutral'
+      : group.firstToSecondCount > group.secondToFirstCount
+        ? 'first-to-second'
+        : group.secondToFirstCount > group.firstToSecondCount
+          ? 'second-to-first'
+          : 'neutral'
+    return {
+      id,
+      firstArea: areaLabels.get(group.firstArea) ?? group.firstArea,
+      secondArea: areaLabels.get(group.secondArea) ?? group.secondArea,
+      relationCount,
+      firstToSecondCount: group.firstToSecondCount,
+      secondToFirstCount: group.secondToFirstCount,
+      bidirectionalCount: group.bidirectionalPairs.size,
+      direction,
+      directionConfidence,
+      strength: Math.min(1, Math.log2(relationCount + 1) / 3),
+      mode: relationCount >= Math.max(2, bandThreshold) ? 'band' : 'lines',
+      firstAnchor: averagePoint(group.firstPoints),
+      secondAnchor: averagePoint(group.secondPoints),
+      bridges: group.bridges,
+    } satisfies PlateCollision
+  }).sort((a, b) => b.relationCount - a.relationCount || a.id.localeCompare(b.id))
 }
 
 export function similarityReasons(notes: TerrainNote[], originId: string, targetId: string): SimilarityReason[] {
@@ -231,15 +305,10 @@ interface ExplicitEdge {
 function explicitEdges(notes: TerrainNote[]): ExplicitEdge[] {
   const index = buildNoteIndex(notes)
   const edges: ExplicitEdge[] = []
-  const seen = new Set<string>()
   for (const from of notes) {
     for (const link of from.links) {
       const to = index.get(normalizeRelationKey(link))
       if (!to || to.id === from.id) continue
-      const [firstId, secondId] = [from.id, to.id].sort()
-      const key = `${firstId}|${secondId}`
-      if (seen.has(key)) continue
-      seen.add(key)
       edges.push({ from, to })
     }
   }

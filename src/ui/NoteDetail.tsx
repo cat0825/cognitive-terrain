@@ -3,7 +3,14 @@ import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, Chev
 import type { TerrainNote, TerrainProject } from '../domain/types'
 import { buildActivitySummaries, temperatureColor } from '../domain/activity-temperature'
 import { aggregateActivityHistoryCounts } from '../domain/activity-history'
-import { areasForNote, plateColor, similarityReasons, type PlateCollision } from '../domain/knowledge-plates'
+import {
+  areasForNote,
+  COLLISION_DIRECTION_MIN_CONFIDENCE,
+  COLLISION_DIRECTION_MIN_RELATIONS,
+  plateColor,
+  similarityReasons,
+  type PlateCollision,
+} from '../domain/knowledge-plates'
 import { findNeighbors } from '../pipeline/neighbors'
 import { maintenanceCandidates, resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
 import { useAppStore } from '../store/app-store'
@@ -102,32 +109,58 @@ export function NoteDetail({ project, note, collision, visibleCount }: NoteDetai
 function CollisionContent({ collision, project }: { collision: PlateCollision; project: TerrainProject }) {
   const selectNote = useAppStore((state) => state.selectNote)
   const notesById = new Map(project.notes.map((note) => [note.id, note]))
-  const pairs = collision.bridges.flatMap((bridge) => {
-    const from = notesById.get(bridge.fromId)
-    const to = notesById.get(bridge.toId)
-    return from && to ? [{ from, to }] : []
-  })
+  const pairs = collision.bridges.flatMap((bridge) => bridge.evidence.flatMap((evidence, evidenceIndex) => {
+    const from = notesById.get(evidence.fromId)
+    const to = notesById.get(evidence.toId)
+    return from && to ? [{ from, to, key: `${bridge.id}-${evidenceIndex}` }] : []
+  }))
+  const routeSymbol = collision.direction === 'first-to-second'
+    ? '→'
+    : collision.direction === 'second-to-first'
+      ? '←'
+      : '×'
+  const directionLabel = collision.direction === 'first-to-second'
+    ? `${collision.firstArea} → ${collision.secondArea}`
+    : collision.direction === 'second-to-first'
+      ? `${collision.secondArea} → ${collision.firstArea}`
+      : '方向证据不足，保持无向'
+  const confidence = Math.round(collision.directionConfidence * 100)
+  const confidenceThreshold = Math.round(COLLISION_DIRECTION_MIN_CONFIDENCE * 100)
   return (
     <div className="collision-content">
       <span className="panel-kicker">板块碰撞带</span>
       <h2>{collision.firstArea} × {collision.secondArea}</h2>
       <div className="collision-route" aria-label={`${collision.firstArea} 与 ${collision.secondArea}`}>
         <span><i style={{ backgroundColor: plateColor(collision.firstArea) }} aria-hidden="true" />{collision.firstArea}</span>
-        <b>×</b>
+        <b aria-label={collision.direction === 'neutral' ? '无向' : '主要链接方向'}>{routeSymbol}</b>
         <span><i style={{ backgroundColor: plateColor(collision.secondArea) }} aria-hidden="true" />{collision.secondArea}</span>
       </div>
       <div className="collision-metric"><strong>{collision.relationCount}</strong><span>条跨域 WikiLink</span></div>
-      <p className="collision-method">仅统计当前可见笔记中可解析的 WikiLink，按无向板块对聚合；共享任一领域时不计为跨域，完全不相交时按双方主领域计入一次。带宽表示关系数量，不代表因果强度。</p>
+      <div className="collision-route" aria-label="链接方向计数">
+        <span>{collision.firstArea} → {collision.secondArea}: {collision.firstToSecondCount}</span>
+        <span>{collision.secondArea} → {collision.firstArea}: {collision.secondToFirstCount}</span>
+        <span>双向配对: {collision.bidirectionalCount}</span>
+      </div>
+      <p className="collision-method">当前判定：{directionLabel}（方向置信度 {confidence}%）。至少需要 {COLLISION_DIRECTION_MIN_RELATIONS} 组跨域关系且置信度达到 {confidenceThreshold}% 才显示方向标记；未达阈值时 2D/3D 均保持无向。</p>
+      <p className="collision-method">仅统计当前可见笔记中可解析的源笔记 → 目标笔记 WikiLink。共享任一领域时不计为跨域，完全不相交时按双方主领域聚合。方向只描述链接证据，带宽只表示唯一笔记对数量；不推断因果、先修顺序或语义方向。</p>
       <section className="collision-pairs">
-        <span className="panel-kicker">代表关系</span>
+        <span className="panel-kicker">方向证据</span>
         <ul>
-          {pairs.slice(0, 6).map(({ from, to }) => (
-            <li key={`${from.id}-${to.id}`}>
-              <button type="button" onClick={() => selectNote(from.id)}><span>{from.title}</span><small>↔ {to.title}</small></button>
+          {pairs.slice(0, 6).map(({ from, to, key }) => (
+            <li key={key}>
+              <button
+                type="button"
+                data-source-note-id={from.id}
+                data-target-note-id={to.id}
+                aria-label={`${from.title} 指向 ${to.title}`}
+                onClick={() => selectNote(from.id)}
+              >
+                <span>{from.title}</span><small>→ {to.title}</small>
+              </button>
             </li>
           ))}
         </ul>
-        {pairs.length > 6 && <small>另有 {pairs.length - 6} 条关系</small>}
+        {pairs.length > 6 && <small>另有 {pairs.length - 6} 条方向证据</small>}
       </section>
     </div>
   )

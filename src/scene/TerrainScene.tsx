@@ -15,6 +15,7 @@ import {
   Group,
   LinearFilter,
   MathUtils,
+  Mesh,
   MOUSE,
   NormalBlending,
   RedFormat,
@@ -412,12 +413,22 @@ function TerrainSurface({
 
 function PlateBridgeLines({ snapshots, gridSize, notes }: { snapshots: TerrainSnapshot[]; gridSize: number; notes: TerrainNote[] }) {
   const collisions = useMemo(() => buildPlateCollisions(notes), [notes])
-  const bridges = collisions.filter((collision) => collision.mode === 'lines').flatMap((collision) => collision.bridges)
+  const lineCollisions = collisions.filter((collision) => collision.mode === 'lines')
+  const bridges = lineCollisions.flatMap((collision) => collision.bridges)
   const bands = collisions.filter((collision) => collision.mode === 'band')
   const activeCollisionId = useAppStore((state) => state.activeCollisionId)
   const selectCollision = useAppStore((state) => state.selectCollision)
   return <>
     <PlateBridgeLayer bridges={bridges} snapshots={snapshots} gridSize={gridSize} notes={notes} />
+    {lineCollisions.filter((collision) => collision.direction !== 'neutral').map((collision) => (
+      <PlateCollisionDirectionCue
+        key={`${collision.id}-direction`}
+        collision={collision}
+        snapshots={snapshots}
+        gridSize={gridSize}
+        active={collision.id === activeCollisionId}
+      />
+    ))}
     {bands.map((collision) => (
       <PlateCollisionBand
         key={collision.id}
@@ -520,10 +531,75 @@ function PlateCollisionBand({
     >
       <meshBasicMaterial color={active ? '#fff0a8' : '#d7c27e'} transparent opacity={active ? 0.56 : hovered ? 0.42 : 0.22} side={DoubleSide} depthWrite={false} />
     </mesh>
+    {collision.direction !== 'neutral' && (
+      <PlateCollisionDirectionCue
+        collision={collision}
+        snapshots={snapshots}
+        gridSize={gridSize}
+        active={active}
+      />
+    )}
     <group ref={tooltip}>
-      {hovered && <Html center className="collision-tooltip"><strong>{collision.firstArea} × {collision.secondArea}</strong><span>{collision.relationCount} 条跨域 WikiLink</span></Html>}
+      {hovered && (
+        <Html center className="collision-tooltip">
+          <strong>{collision.firstArea} × {collision.secondArea}</strong>
+          <span>{collision.relationCount} 条跨域 WikiLink</span>
+          {collision.direction !== 'neutral' && <span>{collisionDirectionLabel(collision)} · 置信度 {Math.round(collision.directionConfidence * 100)}%</span>}
+        </Html>
+      )}
     </group>
   </>
+}
+
+function PlateCollisionDirectionCue({
+  collision,
+  snapshots,
+  gridSize,
+  active,
+}: {
+  collision: PlateCollision
+  snapshots: TerrainSnapshot[]
+  gridSize: number
+  active: boolean
+}) {
+  const cue = useRef<Mesh>(null)
+  useFrame(() => {
+    if (!cue.current) return
+    const firstToSecond = collision.direction === 'first-to-second'
+    const from = firstToSecond ? collision.firstAnchor : collision.secondAnchor
+    const to = firstToSecond ? collision.secondAnchor : collision.firstAnchor
+    const ratio = 0.56
+    const normalizedX = MathUtils.lerp(from.x, to.x, ratio)
+    const normalizedY = MathUtils.lerp(from.y, to.y, ratio)
+    const frame = resolveSnapshotFrame(snapshots, getLiveTimeline())
+    const height = MathUtils.lerp(
+      sampleHeight(frame.a.values, gridSize, normalizedX, normalizedY),
+      sampleHeight(frame.b.values, gridSize, normalizedX, normalizedY),
+      frame.mix,
+    ) * TERRAIN_HEIGHT + 0.036
+    const fromX = from.x * (TERRAIN_WIDTH / 2)
+    const fromZ = -from.y * (TERRAIN_DEPTH / 2)
+    const toX = to.x * (TERRAIN_WIDTH / 2)
+    const toZ = -to.y * (TERRAIN_DEPTH / 2)
+    cue.current.position.set(
+      MathUtils.lerp(fromX, toX, ratio),
+      height,
+      MathUtils.lerp(fromZ, toZ, ratio),
+    )
+    cue.current.rotation.y = Math.atan2(-(toZ - fromZ), toX - fromX)
+  })
+  return (
+    <mesh ref={cue} renderOrder={5} rotation={[0, 0, -Math.PI / 2]}>
+      <coneGeometry args={[0.032, 0.1, 4]} />
+      <meshBasicMaterial color={active ? '#fff0a8' : '#d7c27e'} transparent opacity={active ? 0.92 : 0.76} depthWrite={false} />
+    </mesh>
+  )
+}
+
+function collisionDirectionLabel(collision: PlateCollision): string {
+  if (collision.direction === 'first-to-second') return `${collision.firstArea} → ${collision.secondArea}`
+  if (collision.direction === 'second-to-first') return `${collision.secondArea} → ${collision.firstArea}`
+  return ''
 }
 
 function PlateBridgeLayer({
