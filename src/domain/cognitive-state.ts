@@ -66,6 +66,7 @@ export function commitAnalyzedProject(
     createdAt: baseProject.createdAt,
     updatedAt,
     interactionEvents: [...baseProject.interactionEvents, ...events],
+    activityHistory: baseProject.activityHistory,
     terrainProfiles: baseProject.terrainProfiles,
     activeTerrainProfileId: baseProject.activeTerrainProfileId,
   }

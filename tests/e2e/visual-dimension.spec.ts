@@ -69,6 +69,8 @@ test('records note activity without moving its stable coordinates', async ({ pag
   const originalY = await note.getAttribute('cy')
   await note.click()
   await expect(page.getByLabel('知识温度')).toContainText('打开 1')
+  await expect(page.getByRole('region', { name: '活动历史' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '活动历史' }).getByRole('button', { name: '日' })).toHaveAttribute('aria-pressed', 'true')
 
   await page.getByRole('button', { name: '打开地图筛选' }).click()
   const panel = page.getByRole('complementary', { name: '地图筛选' })

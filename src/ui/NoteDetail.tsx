@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
 import type { TerrainNote, TerrainProject } from '../domain/types'
 import { buildActivitySummaries, temperatureColor } from '../domain/activity-temperature'
+import { aggregateActivityHistoryCounts } from '../domain/activity-history'
 import { areasForNote, plateColor, similarityReasons, type PlateCollision } from '../domain/knowledge-plates'
 import { findNeighbors } from '../pipeline/neighbors'
 import { maintenanceCandidates, resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
 import { useAppStore } from '../store/app-store'
+import { ActivityHistory, type ActivityHistoryBucket } from './ActivityHistory'
 
 interface NoteDetailProps {
   project: TerrainProject
@@ -141,9 +143,29 @@ function NoteContent({ note }: { note: TerrainNote }) {
   const semanticCandidates = semanticLinkCandidates(project.notes, note.id, 3)
   const noteAreas = areasForNote(note)
   const activity = useMemo(
-    () => buildActivitySummaries([note], project.interactionEvents).get(note.id),
-    [note, project.interactionEvents],
+    () => buildActivitySummaries([note], project.interactionEvents, Date.now(), project.activityHistory?.aggregates).get(note.id),
+    [note, project.activityHistory?.aggregates, project.interactionEvents],
   )
+  const activityHistory = useMemo(() => {
+    const state = project.activityHistory ?? {
+      policyVersion: 1 as const,
+      timeZone: project.timeZone,
+      rawEvents: project.interactionEvents,
+      aggregates: [],
+    }
+    const toBucket = (bucket: ReturnType<typeof aggregateActivityHistoryCounts>[number]): ActivityHistoryBucket => ({
+      key: `${bucket.granularity}:${bucket.bucket}`,
+      label: bucket.granularity === 'day' ? bucket.bucket.slice(5) : `周 ${bucket.bucket.slice(5)}`,
+      openedCount: bucket.counts.opened ?? 0,
+      editedCount: bucket.counts.edited ?? 0,
+      reviewedCount: bucket.counts.reviewed ?? 0,
+      totalCount: bucket.totalCount,
+    })
+    return {
+      daily: aggregateActivityHistoryCounts({ ...state, rawEvents: state.rawEvents.filter((event) => event.itemId === note.id), aggregates: state.aggregates.filter((aggregate) => aggregate.itemId === note.id) }, 'day').map(toBucket),
+      weekly: aggregateActivityHistoryCounts({ ...state, rawEvents: state.rawEvents.filter((event) => event.itemId === note.id), aggregates: state.aggregates.filter((aggregate) => aggregate.itemId === note.id) }, 'week').map(toBucket),
+    }
+  }, [note.id, project.activityHistory, project.interactionEvents, project.timeZone])
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(note.title)
   const [draftContent, setDraftContent] = useState(note.content)
@@ -241,6 +263,7 @@ function NoteContent({ note }: { note: TerrainNote }) {
           <div><span>知识温度</span><strong style={{ color: temperatureColor(activity?.score ?? 0) }}>{Math.round((activity?.score ?? 0) * 100)}%</strong></div>
           <small>打开 {activity?.openedCount ?? 0} · 编辑 {activity?.editedCount ?? 0} · 复习 {activity?.reviewedCount ?? 0}</small>
           <small>{activity?.lastActivityAt ? `最近活动：${relativeActivityTime(activity.lastActivityAt)}` : '尚无活动记录'}</small>
+          <ActivityHistory daily={activityHistory.daily} weekly={activityHistory.weekly} />
         </div>
       </section>
       <div className="note-actions">

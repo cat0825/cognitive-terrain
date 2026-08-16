@@ -1,4 +1,5 @@
 import type { InteractionEvent, TerrainNote } from './types'
+import type { ActivityHistoryAggregate } from './activity-history'
 
 export interface NoteActivitySummary {
   itemId: string
@@ -30,6 +31,7 @@ export function buildActivitySummaries(
   notes: readonly Pick<TerrainNote, 'id'>[],
   events: readonly InteractionEvent[],
   nowMs = Date.now(),
+  aggregates: readonly ActivityHistoryAggregate[] = [],
 ): Map<string, NoteActivitySummary> {
   const summaries = new Map(notes.map((note) => [note.id, emptySummary(note.id)]))
 
@@ -47,6 +49,23 @@ export function buildActivitySummaries(
     if (event.type === 'reviewed') summary.reviewedCount += 1
     if (!summary.lastActivityAt || occurredAtMs > Date.parse(summary.lastActivityAt)) {
       summary.lastActivityAt = event.occurredAt
+    }
+  }
+
+  for (const aggregate of aggregates) {
+    const model = activityModelForType(aggregate.type)
+    const summary = summaries.get(aggregate.itemId)
+    const compactedAtMs = Date.parse(aggregate.compactedAt)
+    if (!model || !summary || !Number.isFinite(compactedAtMs)) continue
+    const ageDays = Math.max(0, nowMs - compactedAtMs) / DAY_MS
+    summary.rawHeat += aggregate.heatAtCompactedAt * Math.pow(0.5, ageDays / model.halfLifeDays)
+    summary.totalCount += aggregate.count
+    if (aggregate.type === 'opened') summary.openedCount += aggregate.count
+    if (aggregate.type === 'edited') summary.editedCount += aggregate.count
+    if (aggregate.type === 'reviewed') summary.reviewedCount += aggregate.count
+    const lastOccurredAtMs = Date.parse(aggregate.lastOccurredAt)
+    if (!summary.lastActivityAt || (Number.isFinite(lastOccurredAtMs) && lastOccurredAtMs > Date.parse(summary.lastActivityAt))) {
+      summary.lastActivityAt = aggregate.lastOccurredAt
     }
   }
 
@@ -93,9 +112,13 @@ function emptySummary(itemId: string): NoteActivitySummary {
 }
 
 function activityModelFor(event: InteractionEvent) {
-  if (event.type === 'opened') return ACTIVITY_MODEL.opened
-  if (event.type === 'edited') return ACTIVITY_MODEL.edited
-  if (event.type === 'reviewed') return ACTIVITY_MODEL.reviewed
+  return activityModelForType(event.type)
+}
+
+function activityModelForType(type: InteractionEvent['type']) {
+  if (type === 'opened') return ACTIVITY_MODEL.opened
+  if (type === 'edited') return ACTIVITY_MODEL.edited
+  if (type === 'reviewed') return ACTIVITY_MODEL.reviewed
   return undefined
 }
 
