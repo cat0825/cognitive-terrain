@@ -2,6 +2,7 @@ import type { TerrainNote, TerrainProject } from './types'
 import { buildTerrainData } from '../pipeline/terrain'
 import { computeNeighbors } from '../pipeline/neighbors'
 import { cognitiveStateFromNote } from './cognitive-state'
+import { createCognitiveObservation } from './learning-progression'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 
 interface DemoTopic {
@@ -365,6 +366,7 @@ export function createDemoProject(): TerrainProject {
     })),
     noteNeighbors: computeNeighbors(notes, 6),
     cognitiveStates: buildCognitiveStates(notes, timestamp),
+    cognitiveObservations: [],
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
@@ -401,6 +403,7 @@ export function createProjectFromNotes(name: string, notes: TerrainNote[], model
     peaks: terrain.peaks,
     noteNeighbors: computeNeighbors(notes, 6),
     cognitiveStates: buildCognitiveStates(notes, timestamp),
+    cognitiveObservations: buildYamlObservations(notes),
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
@@ -415,6 +418,28 @@ function buildCognitiveStates(notes: TerrainNote[], updatedAt: string): TerrainP
       note.reviewedAt ?? updatedAt,
     )
     return state ? [state] : []
+  })
+}
+
+function buildYamlObservations(notes: TerrainNote[]): TerrainProject['cognitiveObservations'] {
+  return notes.flatMap((note) => {
+    if (note.cognitiveStateProvenance !== 'yaml') return []
+    const fields: Array<{ field: 'mastery' | 'confidence' | 'exploration' | 'status' | 'reviewedAt'; value: unknown }> = [
+      { field: 'mastery', value: note.mastery },
+      { field: 'confidence', value: note.confidence },
+      { field: 'exploration', value: note.exploration },
+      { field: 'status', value: note.status },
+      { field: 'reviewedAt', value: note.reviewedAt },
+    ]
+    return fields.flatMap(({ field, value }) => value === undefined ? [] : [createCognitiveObservation({
+      id: `observation:${note.id}:yaml:${field}:${String(value)}`,
+      itemId: note.id,
+      field,
+      value: value as never,
+      observedAt: note.createdAt,
+      provenance: 'yaml-import',
+      reason: 'Obsidian YAML frontmatter 导入',
+    })])
   })
 }
 

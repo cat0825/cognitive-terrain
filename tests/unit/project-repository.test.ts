@@ -135,6 +135,7 @@ describe('project repository', () => {
       'mastery',
       'exploration',
       'activity',
+      'progression',
       'structure',
     ])
     expect(bundle?.items).toHaveLength(2)

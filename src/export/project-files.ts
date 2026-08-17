@@ -142,7 +142,7 @@ const projectBundleSchema = z.object({
   terrainProfiles: z.array(z.object({
     id: z.string(),
     label: z.string(),
-    elevation: z.enum(['density', 'mastery', 'exploration', 'activity', 'structure']),
+    elevation: z.enum(['density', 'mastery', 'exploration', 'activity', 'progression', 'structure']),
     color: z.enum(['area', 'source-kind', 'trust']),
     overlay: z.enum(['temperature', 'confidence', 'staleness', 'gaps']).optional(),
     formulaVersion: z.string(),

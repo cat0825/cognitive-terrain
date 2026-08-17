@@ -9,6 +9,7 @@ import type {
 } from '../domain/types'
 import type { ActivityHistoryAggregate } from '../domain/activity-history'
 import type { TerrainData } from './terrain'
+import type { CognitiveObservation, CognitiveState, LearningProgressionProfileVersion } from '../domain/types'
 
 export type AnalysisWorkerRequest =
   | {
@@ -27,7 +28,10 @@ export type AnalysisWorkerRequest =
       gridSize: number
       timeZone: string
       nowMs: number
-      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'activity'>
+      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'activity' | 'progression'>
+      cognitiveObservations?: CognitiveObservation[]
+      cognitiveStates?: CognitiveState[]
+      learningProgressionProfileVersion?: LearningProgressionProfileVersion
     }
   | {
       type: 'cancel'

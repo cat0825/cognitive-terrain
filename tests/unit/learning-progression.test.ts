@@ -69,7 +69,7 @@ describe('learning progression', () => {
       observations: migrated.cognitiveObservations ?? [],
       snapshot,
       evaluatedAt,
-    })).toMatchObject({ historyState: 'snapshot-only', elevation: snapshot.mastery, observationCount: 0 })
+    })).toMatchObject({ historyState: 'snapshot-only', value: snapshot.mastery, elevation: 0.5, uncertainty: 1, observationCount: 0 })
     expect(calculateLearningProgression({
       itemId: snapshot.itemId,
       observations: migrated.cognitiveObservations ?? [],
@@ -98,7 +98,7 @@ describe('learning progression', () => {
       evaluatedAt,
     })
 
-    expect(withoutReviewOutcome).toMatchObject({ elevation: 0.4, historyState: 'snapshot-only' })
+    expect(withoutReviewOutcome).toMatchObject({ elevation: 0.5, value: 0.4, historyState: 'snapshot-only' })
     expect(withReviewOutcome).toMatchObject({ elevation: 0.7, historyState: 'sparse' })
 
     const demo = createDemoProject()
@@ -132,7 +132,7 @@ describe('learning progression', () => {
     })
 
     expect(missing).toMatchObject({ elevation: 0.5, uncertainty: 1, historyState: 'missing' })
-    expect(conflicting).toMatchObject({ elevation: 0.75, historyState: 'conflicting' })
+    expect(conflicting).toMatchObject({ elevation: 0.5, value: undefined, uncertainty: 1, historyState: 'conflicting' })
     expect(stale).toMatchObject({ elevation: 0.6, historyState: 'stale' })
   })
 
@@ -178,6 +178,7 @@ describe('learning progression', () => {
 
     expect(normalized).toHaveLength(MAX_COGNITIVE_OBSERVATIONS_PER_ITEM_FIELD)
     expect(normalized.at(-1)?.id).toBe(`observation-${String(observations.length - 1).padStart(4, '0')}`)
+    expect(calculateLearningProgression({ itemId: 'note-a', observations, evaluatedAt }).observationsTruncated).toBe(true)
   })
 })
 

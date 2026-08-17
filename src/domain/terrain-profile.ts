@@ -35,6 +35,14 @@ export const DEFAULT_TERRAIN_PROFILES = [
     formulaVersion: ACTIVITY_ELEVATION_FORMULA_VERSION,
   },
   {
+    id: 'progression',
+    label: '学习进程',
+    elevation: 'progression',
+    color: 'area',
+    overlay: 'confidence',
+    formulaVersion: 'learning-progression-v1',
+  },
+  {
     id: 'structure',
     label: '结构桥接',
     elevation: 'structure',

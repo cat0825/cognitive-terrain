@@ -6,6 +6,7 @@ import type {
   ProjectBackupSummary,
   ProjectSummary,
   QualityLevel,
+  CognitiveObservationProvenance,
   InteractionEvent,
   TerrainProject,
   ViewMode,
@@ -18,6 +19,7 @@ import {
   eventTypeForNoteUpdate,
   normalizeActiveReferenceAtlasId,
 } from '../domain/cognitive-state'
+import { createCognitiveObservation } from '../domain/learning-progression'
 import { shouldRecordOpenedEvent } from '../domain/activity-temperature'
 import { areasForNote } from '../domain/knowledge-plates'
 import {
@@ -47,6 +49,19 @@ import {
 import { migrateProject } from '../storage/db'
 
 export type CameraInteractionMode = 'rotate' | 'pan'
+
+type NoteUpdatePatch = {
+  title?: string
+  content?: string
+  tags?: string[]
+  mastery?: number | null
+  confidence?: number | null
+  exploration?: number | null
+  status?: TerrainProject['notes'][number]['status'] | null
+  area?: string | null
+  areas?: string[] | null
+  reviewedAt?: string | null
+}
 
 interface AppState {
   project: TerrainProject
@@ -110,7 +125,7 @@ interface AppState {
   ) => Promise<void>
   loadStudyPack: () => Promise<void>
   mergeNotes: (newNotes: NoteInput[], options?: AnalysisOptions) => Promise<void>
-  updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[]; mastery?: number | null; confidence?: number | null; exploration?: number | null; status?: TerrainProject['notes'][number]['status'] | null; area?: string | null; areas?: string[] | null; reviewedAt?: string | null }) => Promise<void>
+  updateNote: (noteId: string, patch: NoteUpdatePatch, observation?: CognitiveObservationOptions) => Promise<void>
   markNoteReviewed: (noteId: string) => Promise<void>
   cancelAnalysis: () => void
   replaceProject: (project: TerrainProject) => Promise<void>
@@ -131,6 +146,11 @@ interface AppState {
 interface AnalysisCommitContext {
   baseProject: TerrainProject
   events?: InteractionEvent[]
+}
+
+interface CognitiveObservationOptions {
+  provenance?: Extract<CognitiveObservationProvenance, 'self-assessment' | 'review-outcome'>
+  reason?: string
 }
 
 interface PerformanceControls {
@@ -386,7 +406,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     await get().startAnalysis(current.name, merged, effective, { baseProject: current })
   },
-  updateNote: async (noteId, patch) => {
+  updateNote: async (noteId, patch, observationOptions = {}) => {
     const current = get().project
     const target = current.notes.find((note) => note.id === noteId)
     if (!target) {
@@ -454,8 +474,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const changedFields = Object.keys(patch)
     const eventType = eventTypeForNoteUpdate(changedFields)
-    const event = createInteractionEvent(noteId, eventType, new Date().toISOString(), { changedFields })
-    await get().startAnalysis(current.name, inputs, effective, { baseProject: current, events: [event] })
+    const occurredAt = new Date().toISOString()
+    const event = createInteractionEvent(noteId, eventType, occurredAt, { changedFields })
+    const observations = cognitiveObservationsForUpdate(target, patch, observationOptions, occurredAt, event.id)
+    const baseProject = observations.length > 0
+      ? { ...current, cognitiveObservations: [...(current.cognitiveObservations ?? []), ...observations] }
+      : current
+    await get().startAnalysis(current.name, inputs, effective, { baseProject, events: [event] })
   },
   markNoteReviewed: async (noteId) => {
     const current = get().project
@@ -466,6 +491,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const occurredAt = new Date().toISOString()
     const event = createInteractionEvent(noteId, 'reviewed', occurredAt, { source: 'manual' })
+    const observation = createCognitiveObservation({
+      id: `${event.id}:reviewedAt`,
+      itemId: noteId,
+      field: 'reviewedAt',
+      value: occurredAt,
+      observedAt: occurredAt,
+      provenance: 'review-outcome',
+      reason: '手动标记已复习',
+    })
     const existingState = current.cognitiveStates.find((state) => state.itemId === noteId)
     const cognitiveState = {
       ...existingState,
@@ -484,6 +518,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...current.cognitiveStates.filter((state) => state.itemId !== noteId),
         cognitiveState,
       ],
+      cognitiveObservations: [...(current.cognitiveObservations ?? []), observation],
       interactionEvents: [...current.interactionEvents, event],
     }
     try {
@@ -733,6 +768,40 @@ function rewriteResolvedAreas(project: TerrainProject, nodeId: string, targetLab
       areas: nextAreas,
       declaredAreas: note.declaredAreas ?? currentAreas,
     }
+  })
+}
+
+function cognitiveObservationsForUpdate(
+  target: TerrainProject['notes'][number],
+  patch: NoteUpdatePatch,
+  options: CognitiveObservationOptions,
+  observedAt: string,
+  eventId: string,
+): ReturnType<typeof createCognitiveObservation>[] {
+  const provenance = options.provenance ?? 'self-assessment'
+  const reason = options.reason?.trim() || (provenance === 'review-outcome' ? '显式复习结果' : '手动自评')
+  const candidates: Array<{
+    field: 'mastery' | 'confidence' | 'exploration' | 'status' | 'reviewedAt'
+    previous: unknown
+    next: unknown
+  }> = [
+    { field: 'mastery', previous: target.mastery, next: 'mastery' in patch ? patch.mastery ?? undefined : target.mastery },
+    { field: 'confidence', previous: target.confidence, next: 'confidence' in patch ? patch.confidence ?? undefined : target.confidence },
+    { field: 'exploration', previous: target.exploration, next: 'exploration' in patch ? patch.exploration ?? undefined : target.exploration },
+    { field: 'status', previous: target.status, next: 'status' in patch ? patch.status ?? undefined : target.status },
+    { field: 'reviewedAt', previous: target.reviewedAt, next: 'reviewedAt' in patch ? patch.reviewedAt ?? undefined : target.reviewedAt },
+  ]
+  return candidates.flatMap(({ field, previous, next }) => {
+    if (!(field in patch) || previous === next || next === undefined || next === null) return []
+    return [createCognitiveObservation({
+      id: `${eventId}:${field}`,
+      itemId: target.id,
+      field,
+      value: next as never,
+      observedAt,
+      provenance,
+      reason,
+    })]
   })
 }
 

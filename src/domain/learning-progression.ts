@@ -32,6 +32,7 @@ export interface LearningProgressionResult {
   uncertainty: number
   historyState: LearningProgressionHistoryState
   observationCount: number
+  observationsTruncated: boolean
   latestObservationAt?: string
   evidence: CognitiveObservation[]
 }
@@ -79,6 +80,9 @@ export function calculateLearningProgression(input: LearningProgressionInput): L
   if (!profile) throw new RangeError(`Unsupported learning progression profile: ${String(profileVersion)}`)
   const evaluatedAtMs = parseTimestamp(input.evaluatedAt)
   const evaluatedAt = new Date(evaluatedAtMs).toISOString()
+  const candidateObservationCount = input.observations.filter(
+    (observation) => observation.itemId === input.itemId && observation.field === field,
+  ).length
   const evidence = numericEvidence(input.observations, input.itemId, field, evaluatedAtMs)
 
   if (evidence.length === 0) {
@@ -88,11 +92,14 @@ export function calculateLearningProgression(input: LearningProgressionInput): L
       field,
       profileVersion,
       evaluatedAt,
-      elevation: snapshotValue ?? profile.neutralElevation,
+      // A snapshot preserves the current field value but cannot support a
+      // progression claim without an observation history.
+      elevation: profile.neutralElevation,
       value: snapshotValue,
       uncertainty: 1,
       historyState: snapshotValue === undefined ? 'missing' : 'snapshot-only',
       observationCount: 0,
+      observationsTruncated: candidateObservationCount > MAX_COGNITIVE_OBSERVATIONS_PER_ITEM_FIELD,
       evidence: [],
     }
   }
@@ -100,12 +107,12 @@ export function calculateLearningProgression(input: LearningProgressionInput): L
   const latest = evidence.at(-1)!
   const latestAtMs = Date.parse(latest.observedAt)
   const ageDays = Math.max(0, (evaluatedAtMs - latestAtMs) / 86_400_000)
-  const value = applyDecay(latest.value as number, ageDays, profile.decay)
   const conflict = evidence.some((observation, index) => {
     if (index === 0) return false
     const previous = evidence[index - 1]
     return previous.observedAt === observation.observedAt && previous.value !== observation.value
   })
+  const value = conflict ? undefined : applyDecay(latest.value as number, ageDays, profile.decay)
   const historyState: LearningProgressionHistoryState = conflict
     ? 'conflicting'
     : ageDays > profile.staleAfterDays
@@ -119,11 +126,12 @@ export function calculateLearningProgression(input: LearningProgressionInput): L
     field,
     profileVersion,
     evaluatedAt,
-    elevation: value,
+    elevation: value ?? profile.neutralElevation,
     value,
-    uncertainty: uncertaintyFor(latest.provenance, ageDays, profile.staleAfterDays, conflict),
+    uncertainty: conflict ? 1 : uncertaintyFor(latest.provenance, ageDays, profile.staleAfterDays, false),
     historyState,
     observationCount: evidence.length,
+    observationsTruncated: candidateObservationCount > MAX_COGNITIVE_OBSERVATIONS_PER_ITEM_FIELD,
     latestObservationAt: latest.observedAt,
     evidence,
   }

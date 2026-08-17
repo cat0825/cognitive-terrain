@@ -30,6 +30,7 @@ import {
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot, VisualDimension } from '../domain/types'
 import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
+import type { LearningProgressionResult } from '../domain/learning-progression'
 import { buildPlateCollisions, plateColor, primaryAreaForNote, type PlateBridge, type PlateCollision } from '../domain/knowledge-plates'
 import { sampleHeight } from '../pipeline/terrain'
 import { linkedNotes } from '../domain/knowledge-maintenance'
@@ -67,6 +68,7 @@ interface TerrainSceneProps {
   cameraInteractionMode: 'rotate' | 'pan'
   visualDimension: VisualDimension
   activityByNote: ReadonlyMap<string, NoteActivitySummary>
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
   onSelectNote: (id: string | null) => void
@@ -341,6 +343,7 @@ function TerrainSurface({
   reducedMotion,
   visualDimension,
   activityByNote,
+  progressionByNote,
 }: TerrainSceneProps & { compactLabels: boolean; peakLabelLimit: number; reducedMotion: boolean }) {
   const heightAtlas = useMemo(() => buildHeightAtlas(snapshots, gridSize), [gridSize, snapshots])
   const heightAtlasSize = useMemo(
@@ -386,6 +389,7 @@ function TerrainSurface({
         onSelectNote={onSelectNote}
         visualDimension={visualDimension}
         activityByNote={activityByNote}
+        progressionByNote={progressionByNote}
       />
       <SelectedMarker
         snapshots={snapshots}
@@ -691,7 +695,8 @@ function NotePoints({
   onSelectNote,
   visualDimension,
   activityByNote,
-}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'activityByNote'> & {
+  progressionByNote,
+}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'activityByNote' | 'progressionByNote'> & {
   heightAtlas: HeightAtlas
   peaks: TerrainPeak[]
   reducedMotion: boolean
@@ -716,8 +721,9 @@ function NotePoints({
         peaks,
         visualDimension,
         activityByNote,
+        progressionByNote,
       ),
-    [activityByNote, birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, visualDimension],
+    [activityByNote, birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, progressionByNote, visualDimension],
   )
   const material = useMemo(() => makeNoteMaterial(heightAtlas, quality), [heightAtlas, quality])
   const lastRaycastBucket = useRef(Number.NaN)
@@ -1375,6 +1381,7 @@ function buildNoteGeometry(
   peaks: TerrainPeak[],
   visualDimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
 ): BufferGeometry {
   const geometry = new BufferGeometry()
   const positions = new Float32Array(notes.length * 3)
@@ -1405,7 +1412,7 @@ function buildNoteGeometry(
     )
     peakAffinity[index] = resolvePeakAffinity(note, peaks)
     mastery[index] = note.mastery ?? 0.5
-    visualValue[index] = dimensionValue(note, visualDimension, activityByNote)
+    visualValue[index] = dimensionValue(note, visualDimension, activityByNote, progressionByNote)
     visualMode[index] = dimensionMode(visualDimension)
     const color = dimensionColor(note, visualDimension, activityByNote)
     visualColor[offset] = color.r
@@ -1741,15 +1748,17 @@ function dimensionValue(
   note: TerrainNote,
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
 ): number {
   if (dimension === 'mastery') return note.mastery ?? 0.5
   if (dimension === 'exploration') return note.exploration ?? 0.5
+  if (dimension === 'progression') return progressionByNote.get(note.id)?.elevation ?? 0.5
   if (dimension === 'activity' || dimension === 'temperature') return activityByNote.get(note.id)?.score ?? 0
   return 0.5
 }
 
 function dimensionMode(dimension: VisualDimension): number {
-  if (dimension === 'mastery') return 1
+  if (dimension === 'mastery' || dimension === 'progression') return 1
   if (dimension === 'exploration') return 2
   if (dimension === 'area') return 3
   if (dimension === 'activity' || dimension === 'temperature') return 4

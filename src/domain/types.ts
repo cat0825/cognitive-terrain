@@ -89,7 +89,7 @@ export interface InteractionEvent {
   payload?: Record<string, unknown>
 }
 
-export type TerrainElevation = 'density' | 'mastery' | 'exploration' | 'activity' | 'structure'
+export type TerrainElevation = 'density' | 'mastery' | 'exploration' | 'activity' | 'progression' | 'structure'
 export type TerrainColor = 'area' | 'source-kind' | 'trust'
 export type TerrainOverlay = 'temperature' | 'confidence' | 'staleness' | 'gaps'
 
@@ -230,7 +230,7 @@ export interface ParsedImport {
 
 export type ViewMode = '3d' | '2d'
 export type QualityLevel = 'high' | 'medium' | 'low'
-export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'activity' | 'temperature' | 'area'
+export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'activity' | 'progression' | 'temperature' | 'area'
 
 export interface ProjectSummary {
   id: string

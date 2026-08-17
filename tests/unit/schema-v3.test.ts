@@ -217,6 +217,7 @@ describe('terrain profiles', () => {
       'mastery',
       'exploration',
       'activity',
+      'progression',
       'structure',
     ])
     expect(profileIdForVisualDimension('area')).toBe('density')

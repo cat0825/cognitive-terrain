@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { TerrainNote, TerrainPeak, VisualDimension } from '../domain/types'
 import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
+import type { LearningProgressionResult } from '../domain/learning-progression'
 import { buildPlateCollisions, plateColor, primaryAreaForNote } from '../domain/knowledge-plates'
 import { linkedNotes } from '../domain/knowledge-maintenance'
 import { buildContourPaths, sampleHeight } from '../pipeline/terrain'
@@ -14,6 +15,7 @@ interface Terrain2DProps {
   selectedNoteId: string | null
   visualDimension: VisualDimension
   activityByNote: ReadonlyMap<string, NoteActivitySummary>
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>
   onSelectNote: (id: string | null) => void
 }
 
@@ -25,6 +27,7 @@ export function Terrain2D({
   selectedNoteId,
   visualDimension,
   activityByNote,
+  progressionByNote,
   onSelectNote,
 }: Terrain2DProps) {
   const contours = useMemo(() => buildContourPaths(values, gridSize, 14), [gridSize, values])
@@ -169,8 +172,8 @@ export function Terrain2D({
                 cx={note.x * 2.8}
                 cy={-note.y * 2.8}
                 r={selected ? 0.07 : 0.024 + height * 0.022}
-                fill={selected ? '#fff2bd' : noteColor(note, height, visualDimension, activityByNote)}
-                opacity={selected ? 1 : noteOpacity(note, height, visualDimension, activityByNote)}
+                fill={selected ? '#fff2bd' : noteColor(note, height, visualDimension, activityByNote, progressionByNote)}
+                opacity={selected ? 1 : noteOpacity(note, height, visualDimension, activityByNote, progressionByNote)}
                 filter={selected ? 'url(#selected-glow)' : undefined}
                 role="button"
                 aria-label={note.title}
@@ -219,9 +222,11 @@ function noteColor(
   height: number,
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
 ): string {
   if (dimension === 'mastery') return colorRamp(note.mastery, '#665f7a', '#d7f0df')
   if (dimension === 'exploration') return colorRamp(note.exploration, '#647078', '#e3aa66')
+  if (dimension === 'progression') return colorRamp(progressionByNote.get(note.id)?.elevation, '#655f72', '#9cc8a3')
   if (dimension === 'activity' || dimension === 'temperature') return temperatureColor(activityByNote.get(note.id)?.score ?? 0)
   if (dimension === 'area') {
     const area = primaryAreaForNote(note)
@@ -235,9 +240,11 @@ function noteOpacity(
   height: number,
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
 ): number {
   if (dimension === 'mastery') return 0.3 + (note.mastery ?? 0.5) * 0.7
   if (dimension === 'exploration') return 0.38 + (note.exploration ?? 0.5) * 0.62
+  if (dimension === 'progression') return 0.4 + (1 - (progressionByNote.get(note.id)?.uncertainty ?? 1)) * 0.6
   if (dimension === 'activity' || dimension === 'temperature') return 0.32 + (activityByNote.get(note.id)?.score ?? 0) * 0.68
   return 0.36 + height * 0.4
 }
