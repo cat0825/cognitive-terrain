@@ -1,4 +1,4 @@
-# Handoff 2026-08-17 07:40 CST
+# Handoff 2026-08-17 08:10 CST
 
 ## 目标
 
@@ -7,7 +7,7 @@
 ## 进度
 
 - Issue #5 已由 [PR #20](https://github.com/cat0825/cognitive-terrain/pull/20) 合并。
-- Issue #7 实现已完成，分支 `codex/taxonomy-hierarchy`，等待提交 PR 与 GitHub CI。
+- Issue #7 已通过 PR #21 合并，合并提交 `cdb28d2`，Issue #7 已自动关闭。
 - 路线图：[Issue #9](https://github.com/cat0825/cognitive-terrain/issues/9)。
 
 ## 已完成
@@ -28,15 +28,16 @@
 - Focused E2E：desktop/mobile 2/2；重命名预览影响 60 条，node ID 保持 `plate-6ad5051c`，恢复点 1 个。
 - 浏览器实测：桌面/移动 body、panel 横向溢出均为 0，console error 0。
 - 截图：`output/playwright/issue-7-taxonomy-rename-desktop.png`、`output/playwright/issue-7-taxonomy-mobile.png`（忽略目录，不入库）。
+- GitHub CI run `31980534856`：quality、a11y、e2e、visual 全部通过；visual 首次失败为 `npm ci` 环境故障，重跑后通过。
 
 ## 未完成
 
-1. 创建 PR、等待 GitHub quality/E2E/visual/a11y CI，通过后合并并关闭 Issue #7。
-2. Issue #6：activity elevation 与 reference-atlas gap/ocean 语义。
-3. Issue #8：exploration feedback loop。
+1. Issue #6：activity elevation 与 reference-atlas gap/ocean 语义；从 `main` 创建 `codex/activity-elevation-gaps`。
+2. Issue #8：exploration feedback loop，等待 #6 + #7。
 
 ## 风险 / 红线
 
 - Taxonomy 只来自用户标签与人工维护，不把模型聚类冒充权威分类。
 - 同一 IndexedDB 内恢复点不是站点外灾难备份。
 - 不直接推 `main`；一个 Issue 对应一个 feature branch 和一个 PR。
+- Issue #6 当前无 assignee、无重复 PR；activity 高度需显式注入 timestamp 和公式版本，gap 需基于 atlas expected node 与实际 membership，不能把低活跃度解释成知识缺口。
