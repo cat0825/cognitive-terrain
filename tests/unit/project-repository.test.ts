@@ -16,6 +16,7 @@ import {
   saveProject,
 } from '../../src/storage/project-repository'
 import { createInteractionEvent } from '../../src/domain/cognitive-state'
+import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { closeDatabase, DATABASE_NAME, DATABASE_VERSION, getDatabase } from '../../src/storage/db'
 
 const repositoryDemoFixture = createDemoProject()
@@ -320,6 +321,60 @@ describe('project repository', () => {
     expect(restored?.name).toBe('初始版本')
     expect((await getProject('p-backup'))?.name).toBe('初始版本')
     expect((await listProjectBackups('p-backup')).some((item) => item.reason === 'before-restore')).toBe(true)
+  })
+
+  it('preserves taxonomy hierarchy and aliases through backup restore and object materialization', async () => {
+    const original = smallProject('p-taxonomy-restore', '分类恢复样本')
+    const root = createTaxonomyNode({
+      id: 'taxonomy-math',
+      workspaceId: original.id,
+      label: '数学',
+      aliases: ['Math'],
+      version: 3,
+    }, original.updatedAt)
+    const child = createTaxonomyNode({
+      id: 'taxonomy-linear-algebra',
+      workspaceId: original.id,
+      label: '线性代数',
+      parentId: root.id,
+      aliases: ['LA', 'Linear Algebra'],
+      version: 3,
+    }, original.updatedAt)
+    original.taxonomyNodes = [root, child]
+    original.taxonomyVersion = 3
+    original.notes[0] = {
+      ...original.notes[0],
+      area: child.label,
+      areas: [child.label],
+      declaredAreas: ['LA'],
+    }
+
+    await saveProject(original)
+    const backup = await createProjectBackup(original)
+    const changed = {
+      ...original,
+      taxonomyVersion: 4,
+      taxonomyNodes: original.taxonomyNodes.map((node) => node.id === child.id
+        ? { ...node, label: '线代', version: 4, updatedAt: '2026-08-17T02:00:00.000Z' }
+        : node),
+      updatedAt: '2026-08-17T02:00:00.000Z',
+    }
+    await saveProject(changed, { createBackup: false })
+
+    const restored = await restoreProjectBackup(backup.id)
+    const materialized = await getProjectObjectBundle(original.id)
+    expect(restored?.taxonomyVersion).toBe(3)
+    expect(restored?.taxonomyNodes).toEqual([root, child])
+    expect(materialized?.workspace.taxonomyVersion).toBe(3)
+    expect(materialized?.taxonomyNodes).toEqual(expect.arrayContaining([root, child]))
+    expect(materialized?.taxonomyNodes).toHaveLength(2)
+    expect(materialized?.plateMemberships.find((membership) => membership.itemId === original.notes[0].id)).toMatchObject({
+      itemId: original.notes[0].id,
+      taxonomyNodeId: child.id,
+      declaredLabel: 'LA',
+      resolved: true,
+      resolution: 'alias',
+    })
   })
 
   it('keeps a recoverable snapshot when deleting a project', async () => {

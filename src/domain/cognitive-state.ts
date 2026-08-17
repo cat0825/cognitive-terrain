@@ -69,5 +69,8 @@ export function commitAnalyzedProject(
     activityHistory: baseProject.activityHistory,
     terrainProfiles: baseProject.terrainProfiles,
     activeTerrainProfileId: baseProject.activeTerrainProfileId,
+    taxonomyNodes: baseProject.taxonomyNodes,
+    taxonomyVersion: baseProject.taxonomyVersion,
+    referenceAtlases: baseProject.referenceAtlases,
   }
 }

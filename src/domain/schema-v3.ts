@@ -1,12 +1,20 @@
 import { cognitiveStateFromNote } from './cognitive-state'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 import { areasForNote, plateIdForArea } from './knowledge-plates'
+import {
+  legacyTaxonomyNodesForProject,
+  normalizeTaxonomyAlias,
+  resolveTaxonomyAlias,
+  validateTaxonomy,
+} from './taxonomy'
 import type { ActivityHistoryState } from './activity-history'
 import type {
   CognitiveState,
   InteractionEvent,
+  ReferenceAtlasManifest,
   TerrainProfile,
   TerrainProject,
+  TaxonomyNode,
 } from './types'
 
 export interface WorkspaceV3 {
@@ -18,6 +26,7 @@ export interface WorkspaceV3 {
   timeZone: string
   activeTerrainProfileId: string
   activityHistory?: ActivityHistoryState
+  taxonomyVersion?: number
 }
 
 export interface KnowledgeItemV3 {
@@ -30,6 +39,7 @@ export interface KnowledgeItemV3 {
   tags: string[]
   area?: string
   areas?: string[]
+  declaredAreas?: string[]
   createdAt: string
   updatedAt: string
   status: 'draft' | 'active' | 'archived'
@@ -61,6 +71,11 @@ export interface RelationV3 {
 export interface PlateMembershipV3 {
   itemId: string
   taxonomyNodeId: string
+  declaredLabel: string
+  declaredLabels: string[]
+  resolved: boolean
+  resolution: 'label' | 'alias' | 'migration' | 'unresolved'
+  taxonomyVersion: number
   weight: number
   provenance: 'yaml' | 'migration'
 }
@@ -118,6 +133,8 @@ export interface SchemaV3Bundle {
   terrainProfiles: TerrainProfile[]
   citations: CitationV3[]
   revisions: RevisionV3[]
+  taxonomyNodes: TaxonomyNode[]
+  referenceAtlases: ReferenceAtlasManifest[]
 }
 
 export interface SchemaV3MigrationReport {
@@ -162,6 +179,9 @@ export function migrateTerrainProjectToV3(
     itemIds,
   )
   const titleIndex = buildTitleIndex(project)
+  const taxonomyNodes = taxonomyNodesForProject(project)
+  validateTaxonomy(taxonomyNodes)
+  const referenceAtlases = referenceAtlasesForProject(project, taxonomyNodes)
   const sources = project.notes.flatMap((note) => {
     if (!hasSourceMetadata(note)) return []
     const sourceIdentity = sourceIdentityForNote(note)
@@ -193,6 +213,7 @@ export function migrateTerrainProjectToV3(
       tags: [...note.tags],
       area: note.area,
       areas: note.areas ? [...note.areas] : undefined,
+      declaredAreas: note.declaredAreas ? [...note.declaredAreas] : undefined,
       createdAt: note.createdAt,
       updatedAt: project.updatedAt,
       status: note.status === 'archived' ? 'archived' : sourceId ? 'active' : 'draft',
@@ -226,14 +247,33 @@ export function migrateTerrainProjectToV3(
   const terrainProfiles = project.terrainProfiles
     ?? DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile }))
   const plateMemberships = project.notes.flatMap((note) => {
-    const areas = areasForNote(note)
-    const weight = areas.length ? 1 / areas.length : 0
-    return areas.map((area) => ({
-      itemId: note.id,
-      taxonomyNodeId: plateIdForArea(area),
-      weight,
-      provenance: note.cognitiveStateProvenance === 'yaml' ? 'yaml' as const : 'migration' as const,
-    }))
+    const areas = note.declaredAreas?.length ? [...note.declaredAreas] : areasForNote(note)
+    const memberships = new Map<string, Omit<PlateMembershipV3, 'weight'>>()
+    for (const area of areas) {
+      const node = resolveTaxonomyAlias(taxonomyNodes, project.id, area)
+      const taxonomyNodeId = node?.id ?? `unresolved-${plateIdForArea(area)}`
+      const existing = memberships.get(taxonomyNodeId)
+      if (existing) {
+        existing.declaredLabels.push(area)
+        continue
+      }
+      memberships.set(taxonomyNodeId, {
+        itemId: note.id,
+        taxonomyNodeId,
+        declaredLabel: area,
+        declaredLabels: [area],
+        resolved: node !== undefined,
+        resolution: node
+          ? project.taxonomyNodes?.length
+            ? normalizeTaxonomyAlias(node.label) === normalizeTaxonomyAlias(area) ? 'label' : 'alias'
+            : 'migration'
+          : 'unresolved',
+        taxonomyVersion: node?.version ?? 0,
+        provenance: note.cognitiveStateProvenance === 'yaml' ? 'yaml' as const : 'migration' as const,
+      })
+    }
+    const weight = memberships.size ? 1 / memberships.size : 0
+    return [...memberships.values()].map((membership) => ({ ...membership, weight }))
   })
   const layouts = project.notes.map((note) => ({
     layoutId: `${project.id}:layout-v2-import`,
@@ -283,6 +323,10 @@ export function migrateTerrainProjectToV3(
       timeZone: project.timeZone,
       activeTerrainProfileId: project.activeTerrainProfileId ?? DEFAULT_TERRAIN_PROFILE_ID,
       activityHistory: project.activityHistory,
+      taxonomyVersion: Math.max(
+        project.taxonomyVersion ?? 0,
+        taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
+      ),
     },
     items,
     sources: uniqueSources,
@@ -294,6 +338,8 @@ export function migrateTerrainProjectToV3(
     terrainProfiles,
     citations,
     revisions,
+    taxonomyNodes,
+    referenceAtlases,
   }
   return {
     bundle,
@@ -320,6 +366,47 @@ function buildTitleIndex(project: TerrainProject): Map<string, string> {
     if (!index.has(title)) index.set(title, note.id)
   }
   return index
+}
+
+function taxonomyNodesForProject(project: TerrainProject): TaxonomyNode[] {
+  if (project.taxonomyNodes?.length) {
+    const foreign = project.taxonomyNodes.find((node) => node.workspaceId !== project.id)
+    if (foreign) throw new Error(`taxonomy node ${foreign.id} crosses workspace boundary`)
+    return project.taxonomyNodes.map((node) => ({ ...node, aliases: [...node.aliases] }))
+  }
+  const labels = project.notes.flatMap((note) => areasForNote(note))
+  return legacyTaxonomyNodesForProject(project.id, labels, project.updatedAt, plateIdForArea)
+}
+
+function referenceAtlasesForProject(
+  project: TerrainProject,
+  taxonomyNodes: readonly TaxonomyNode[],
+): ReferenceAtlasManifest[] {
+  const currentVersion = Math.max(
+    project.taxonomyVersion ?? 0,
+    taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
+  )
+  const nodeIds = new Set(taxonomyNodes.map((node) => node.id))
+  const manifestIds = new Set<string>()
+  return (project.referenceAtlases ?? []).map((manifest) => {
+    if (!manifest.id.trim() || manifestIds.has(manifest.id)) throw new Error(`duplicate or empty reference atlas id: ${manifest.id}`)
+    manifestIds.add(manifest.id)
+    if (manifest.workspaceId !== project.id) throw new Error(`reference atlas ${manifest.id} crosses workspace boundary`)
+    if (!manifest.label.normalize('NFKC').trim()) throw new Error(`reference atlas ${manifest.id} requires a label`)
+    const createdAt = Date.parse(manifest.createdAt)
+    const updatedAt = Date.parse(manifest.updatedAt)
+    if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt) || updatedAt < createdAt) {
+      throw new Error(`reference atlas ${manifest.id} has invalid timestamps`)
+    }
+    if (!Number.isInteger(manifest.taxonomyVersion) || manifest.taxonomyVersion < 1 || manifest.taxonomyVersion > currentVersion) {
+      throw new Error(`reference atlas ${manifest.id} has invalid taxonomy version: ${manifest.taxonomyVersion}`)
+    }
+    const uniqueNodeIds = [...new Set(manifest.taxonomyNodeIds)]
+    for (const nodeId of uniqueNodeIds) {
+      if (!nodeIds.has(nodeId)) throw new Error(`reference atlas ${manifest.id} references missing taxonomy node: ${nodeId}`)
+    }
+    return { ...manifest, taxonomyNodeIds: uniqueNodeIds }
+  })
 }
 
 function normalizeTitle(value: string): string {

@@ -2,6 +2,31 @@ import type { ActivityHistoryState } from './activity-history'
 
 export type NoteStatus = 'seed' | 'growing' | 'stable' | 'gap' | 'archived'
 
+export type TaxonomyNodeStatus = 'active' | 'archived'
+
+export interface TaxonomyNode {
+  id: string
+  workspaceId: string
+  label: string
+  parentId?: string
+  aliases: string[]
+  description?: string
+  version: number
+  status: TaxonomyNodeStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ReferenceAtlasManifest {
+  id: string
+  workspaceId: string
+  label: string
+  taxonomyVersion: number
+  taxonomyNodeIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
 export type CognitiveStateProvenance = 'yaml' | 'app' | 'migration'
 
 export interface CognitiveState {
@@ -60,6 +85,7 @@ export interface NoteInput {
   status?: NoteStatus
   area?: string
   areas?: string[]
+  declaredAreas?: string[]
   reviewedAt?: string
   cognitiveStateProvenance?: CognitiveStateProvenance
   links?: string[]
@@ -83,6 +109,7 @@ export interface TerrainNote {
   status?: NoteStatus
   area?: string
   areas?: string[]
+  declaredAreas?: string[]
   reviewedAt?: string
   cognitiveStateProvenance?: CognitiveStateProvenance
   links: string[]
@@ -125,6 +152,9 @@ export interface TerrainProject {
   activityHistory?: ActivityHistoryState
   terrainProfiles: TerrainProfile[]
   activeTerrainProfileId: string
+  taxonomyNodes?: TaxonomyNode[]
+  taxonomyVersion?: number
+  referenceAtlases?: ReferenceAtlasManifest[]
 }
 
 export interface AnalysisOptions {

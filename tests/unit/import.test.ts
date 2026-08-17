@@ -77,6 +77,7 @@ describe('import parsing', () => {
 
     expect(result.issues).toEqual([])
     expect(result.notes[0]).toMatchObject({ area: '数学', areas: ['数学', '物理'] })
+    expect(result.notes[0]?.declaredAreas).toEqual(['数学', '数学', '物理', ' 物理 '])
   })
 
   it('accepts an area array and reports invalid areas without discarding content', async () => {

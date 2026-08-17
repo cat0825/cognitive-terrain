@@ -131,6 +131,7 @@ function materializeInput(input: NoteInput, index: number): TerrainNote {
     status: input.status,
     area: primaryAreaForNote(input),
     areas: areas.length ? areas : undefined,
+    declaredAreas: input.declaredAreas ? [...input.declaredAreas] : areas.length ? [...areas] : undefined,
     reviewedAt: normalizeReviewedAt(input.reviewedAt),
     cognitiveStateProvenance: input.cognitiveStateProvenance,
     links,

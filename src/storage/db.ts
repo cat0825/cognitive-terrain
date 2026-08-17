@@ -7,7 +7,8 @@ import {
 } from 'idb'
 import { cognitiveStateFromNote } from '../domain/cognitive-state'
 import { compactActivityHistory } from '../domain/activity-history'
-import { areasForNote } from '../domain/knowledge-plates'
+import { areasForNote, plateIdForArea } from '../domain/knowledge-plates'
+import { legacyTaxonomyNodesForProject, validateTaxonomy } from '../domain/taxonomy'
 import {
   migrateTerrainProjectToV3,
   type CitationV3,
@@ -25,12 +26,14 @@ import type {
   CognitiveState,
   InteractionEvent,
   ProjectBackup,
+  ReferenceAtlasManifest,
   TerrainProfile,
   TerrainProject,
+  TaxonomyNode,
 } from '../domain/types'
 
 export const DATABASE_NAME = 'cognitive-terrain'
-export const DATABASE_VERSION = 5
+export const DATABASE_VERSION = 6
 
 export interface StoredCognitiveState extends CognitiveState {
   workspaceId: string
@@ -124,6 +127,23 @@ export interface CognitiveTerrainDB extends DBSchema {
       'by-taxonomy': [string, string]
     }
   }
+  taxonomyNodes: {
+    key: [string, string]
+    value: TaxonomyNode
+    indexes: {
+      'by-workspace': string
+      'by-parent': [string, string]
+      'by-version': [string, number]
+    }
+  }
+  referenceAtlases: {
+    key: [string, string]
+    value: ReferenceAtlasManifest
+    indexes: {
+      'by-workspace': string
+      'by-taxonomy-version': [string, number]
+    }
+  }
   layouts: {
     key: [string, string, string]
     value: StoredLayoutRecord
@@ -167,6 +187,8 @@ export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] =
   'cognitiveStates',
   'interactionEvents',
   'plateMemberships',
+  'taxonomyNodes',
+  'referenceAtlases',
   'layouts',
   'terrainProfiles',
   'citations',
@@ -245,6 +267,15 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     now: project.updatedAt,
     aggregates: project.activityHistory?.aggregates,
   })
+  const taxonomyNodes = project.taxonomyNodes?.length
+    ? project.taxonomyNodes.map((node) => ({ ...node, aliases: [...node.aliases] }))
+    : legacyTaxonomyNodesForProject(
+        project.id,
+        migratedNotes.flatMap((note) => note.declaredAreas?.length ? note.declaredAreas : areasForNote(note)),
+        project.updatedAt,
+        plateIdForArea,
+      )
+  validateTaxonomy(taxonomyNodes)
   return {
     ...project,
     schemaVersion: 3,
@@ -256,6 +287,15 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     activityHistory,
     terrainProfiles,
     activeTerrainProfileId,
+    taxonomyNodes,
+    taxonomyVersion: Math.max(
+      project.taxonomyVersion ?? 0,
+      taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
+    ),
+    referenceAtlases: (project.referenceAtlases ?? []).map((manifest) => ({
+      ...manifest,
+      taxonomyNodeIds: [...manifest.taxonomyNodeIds],
+    })),
   }
 }
 
@@ -284,6 +324,8 @@ export async function replaceProjectMaterialization<Mode extends DatabaseWriteMo
       ...membership,
       workspaceId: project.id,
     })),
+    ...bundle.taxonomyNodes.map((node) => () => transaction.objectStore('taxonomyNodes').put(node)),
+    ...bundle.referenceAtlases.map((manifest) => () => transaction.objectStore('referenceAtlases').put(manifest)),
     ...bundle.layouts.map((layout) => () => transaction.objectStore('layouts').put({
       ...layout,
       workspaceId: project.id,
@@ -311,6 +353,8 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
     'cognitiveStates',
     'interactionEvents',
     'plateMemberships',
+    'taxonomyNodes',
+    'referenceAtlases',
     'layouts',
     'terrainProfiles',
     'citations',
@@ -330,6 +374,8 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     storedCognitiveStates,
     storedInteractionEvents,
     storedPlateMemberships,
+    taxonomyNodes,
+    referenceAtlases,
     storedLayouts,
     storedTerrainProfiles,
     citations,
@@ -341,6 +387,8 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     database.getAllFromIndex('cognitiveStates', 'by-workspace', workspaceId),
     database.getAllFromIndex('interactionEvents', 'by-workspace', workspaceId),
     database.getAllFromIndex('plateMemberships', 'by-workspace', workspaceId),
+    database.getAllFromIndex('taxonomyNodes', 'by-workspace', workspaceId),
+    database.getAllFromIndex('referenceAtlases', 'by-workspace', workspaceId),
     database.getAllFromIndex('layouts', 'by-workspace', workspaceId),
     database.getAllFromIndex('terrainProfiles', 'by-workspace', workspaceId),
     database.getAllFromIndex('citations', 'by-workspace', workspaceId),
@@ -354,6 +402,8 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     cognitiveStates: storedCognitiveStates.map(stripWorkspaceId),
     interactionEvents: storedInteractionEvents.map(stripWorkspaceId),
     plateMemberships: storedPlateMemberships.map(stripWorkspaceId),
+    taxonomyNodes,
+    referenceAtlases,
     layouts: storedLayouts.map(stripWorkspaceId),
     terrainProfiles: storedTerrainProfiles.map(stripWorkspaceId),
     citations,
@@ -399,6 +449,9 @@ function createSchemaV3Stores(database: IDBPDatabase<CognitiveTerrainDB>): void 
   plateMemberships.createIndex('by-workspace', 'workspaceId')
   plateMemberships.createIndex('by-item', ['workspaceId', 'itemId'])
   plateMemberships.createIndex('by-taxonomy', ['workspaceId', 'taxonomyNodeId'])
+
+  createTaxonomyNodeStore(database)
+  createReferenceAtlasStore(database)
 
   const layouts = database.createObjectStore('layouts', {
     keyPath: ['workspaceId', 'layoutId', 'itemId'],
@@ -448,6 +501,31 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
+  if (oldVersion >= 5 && oldVersion < 6) {
+    createTaxonomyNodeStore(database)
+    createReferenceAtlasStore(database)
+    const store = transaction.objectStore('projects')
+    let cursor = await store.openCursor()
+    while (cursor) {
+      const project = migrateProject(cursor.value)
+      await cursor.update(project)
+      await replaceProjectMaterialization(transaction, project, 3)
+      cursor = await cursor.continue()
+    }
+  }
+}
+
+function createTaxonomyNodeStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const taxonomyNodes = database.createObjectStore('taxonomyNodes', { keyPath: ['workspaceId', 'id'] })
+  taxonomyNodes.createIndex('by-workspace', 'workspaceId')
+  taxonomyNodes.createIndex('by-parent', ['workspaceId', 'parentId'])
+  taxonomyNodes.createIndex('by-version', ['workspaceId', 'version'])
+}
+
+function createReferenceAtlasStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const referenceAtlases = database.createObjectStore('referenceAtlases', { keyPath: ['workspaceId', 'id'] })
+  referenceAtlases.createIndex('by-workspace', 'workspaceId')
+  referenceAtlases.createIndex('by-taxonomy-version', ['workspaceId', 'taxonomyVersion'])
 }
 
 async function clearWorkspaceStore<Mode extends DatabaseWriteMode>(

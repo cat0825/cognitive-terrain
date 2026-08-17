@@ -115,6 +115,7 @@ function parseTextDocument(
       status: cognitive.fields.status,
       area: cognitive.fields.area,
       areas: cognitive.fields.areas,
+      declaredAreas: cognitive.fields.declaredAreas,
       reviewedAt: cognitive.fields.reviewedAt,
       cognitiveStateProvenance: Object.keys(cognitive.fields).length ? 'yaml' : undefined,
       links: [...new Set([...parseWikiLinks(content), ...normalizeLinks(frontmatter.links)])],
@@ -174,6 +175,10 @@ function normalizeNote(value: unknown): { note?: NoteInput; issue?: Omit<ImportI
       status: statusValue(record.status),
       area: stringValue(record.area) ?? stringArray(record.area)?.[0] ?? stringArray(record.areas)?.[0],
       areas: mergeStringArrays(stringArray(record.area), stringArray(record.areas)),
+      declaredAreas: mergeStringArrays(
+        typeof record.area === 'string' && record.area.trim() ? [record.area] : declaredStringArray(record.area),
+        declaredStringArray(record.areas),
+      ),
       reviewedAt: stringValue(record.reviewedAt) ?? stringValue(record.reviewed_at),
       links: [...new Set([...parseWikiLinks(content), ...normalizeLinks(record.links)])],
     },
@@ -205,6 +210,12 @@ function stringValue(value: unknown): string | undefined {
 function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   const values = value.flatMap((item) => typeof item === 'string' && item.trim() ? [item.trim()] : [])
+  return values.length ? values : undefined
+}
+
+function declaredStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const values = value.flatMap((item) => typeof item === 'string' && item.trim() ? [item] : [])
   return values.length ? values : undefined
 }
 
