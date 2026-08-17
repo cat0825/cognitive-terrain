@@ -10,8 +10,21 @@ import {
 const MAX_BACKUPS_PER_PROJECT = 8
 
 export async function saveVaultSyncProject(previous: TerrainProject, next: TerrainProject): Promise<void> {
-  if (previous.id !== next.id) throw new Error('vault sync cannot change the project id')
-  if (!next.vaultSync) throw new Error('vault sync state is required')
+  return saveVaultProject(previous, next, 'vault sync', 'before-vault-sync')
+}
+
+export async function saveVaultWritebackProject(previous: TerrainProject, next: TerrainProject): Promise<void> {
+  return saveVaultProject(previous, next, 'vault write-back', 'before-vault-writeback')
+}
+
+async function saveVaultProject(
+  previous: TerrainProject,
+  next: TerrainProject,
+  operation: string,
+  backupReason: Extract<ProjectBackup['reason'], 'before-vault-sync' | 'before-vault-writeback'>,
+): Promise<void> {
+  if (previous.id !== next.id) throw new Error(`${operation} cannot change the project id`)
+  if (!next.vaultSync) throw new Error(`${operation} state is required`)
 
   const database = await getDatabase()
   const transaction = database.transaction(PROJECT_TRANSACTION_STORE_NAMES, 'readwrite')
@@ -19,14 +32,14 @@ export async function saveVaultSyncProject(previous: TerrainProject, next: Terra
     const projects = transaction.objectStore('projects')
     const stored = await projects.get(next.id)
     if (stored && stored.updatedAt !== previous.updatedAt) {
-      throw new Error('vault sync preview is stale; rescan before applying changes')
+      throw new Error(`${operation} preview is stale; refresh before applying changes`)
     }
     const base = stored ? migrateProject(stored) : migrateProject(previous)
     const normalized = migrateProject(next)
     const previousBundle = migrateTerrainProjectToV3(base, { sourceSchemaVersion: base.schemaVersion }).bundle
     const nextBundle = migrateTerrainProjectToV3(normalized, { sourceSchemaVersion: next.schemaVersion }).bundle
 
-    await transaction.objectStore('backups').put(makeBackup(base))
+    await transaction.objectStore('backups').put(makeBackup(base, backupReason))
     await applyProjectMaterializationDiff(transaction, previousBundle, nextBundle)
     await projects.put(normalized)
     await transaction.done
@@ -52,7 +65,7 @@ export async function deleteVaultBinding(workspaceId: string, vaultId: string): 
   await database.delete('vaultBindings', [workspaceId, vaultId])
 }
 
-function makeBackup(project: TerrainProject): ProjectBackup {
+function makeBackup(project: TerrainProject, reason: ProjectBackup['reason']): ProjectBackup {
   const createdAt = new Date().toISOString()
   const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
   return {
@@ -60,7 +73,7 @@ function makeBackup(project: TerrainProject): ProjectBackup {
     projectId: project.id,
     projectName: project.name,
     createdAt,
-    reason: 'before-vault-sync',
+    reason,
     project,
   }
 }

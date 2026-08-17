@@ -20,6 +20,7 @@ import {
   getVaultBinding,
   saveVaultBinding,
   saveVaultSyncProject,
+  saveVaultWritebackProject,
 } from '../../src/storage/vault-sync-repository'
 import { createInteractionEvent } from '../../src/domain/cognitive-state'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
@@ -312,6 +313,41 @@ describe('project repository', () => {
     expect((await getProject(previous.id))?.name).toBe('同步回滚')
     expect((await getProjectObjectBundle(previous.id))?.items[0].title).toBe(previous.notes[0].title)
     expect(await listProjectBackups(previous.id)).toEqual([])
+  })
+
+  it('commits a vault write-back revision with CAS and a write-back recovery point', async () => {
+    const previous = withVaultSync(smallProject('p-vault-writeback', '写回持久化'))
+    await saveProject(previous, { createBackup: false })
+    const source = previous.vaultSync!.sources[0]
+    const acceptedAt = '2026-08-17T12:20:00.000Z'
+    const revision = {
+      id: 'revision:vault-writeback:changed',
+      sourceId: source.sourceId,
+      itemId: source.itemId,
+      path: source.relativePath,
+      beforeRawContentHash: source.rawContentHash,
+      afterRawContentHash: 'sha256:writeback-after',
+      requestIds: ['field:vault-source-stable:mastery'],
+      acceptedAt,
+      provenance: 'vault-writeback' as const,
+    }
+    const next: TerrainProject = {
+      ...previous,
+      updatedAt: acceptedAt,
+      vaultSync: {
+        ...previous.vaultSync!,
+        sources: previous.vaultSync!.sources.map((candidate) => candidate.sourceId === source.sourceId
+          ? { ...candidate, rawContentHash: revision.afterRawContentHash, acceptedAt }
+          : candidate),
+        writebackRevisions: [revision],
+      },
+    }
+
+    await saveVaultWritebackProject(previous, next)
+
+    await expect((await getDatabase()).get('revisions', [previous.id, revision.id]).then((value) => value?.actorId))
+      .resolves.toBe('vault-writeback')
+    expect((await listProjectBackups(previous.id))[0]?.reason).toBe('before-vault-writeback')
   })
 
   it('rejects a stale vault preview instead of overwriting a concurrent project save', async () => {

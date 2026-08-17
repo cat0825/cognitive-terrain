@@ -15,7 +15,7 @@
 - 对比模式：选中时间基准层，直接回放比较新增/消失笔记差异。
 - 编辑模式：直接修改标题、正文和标签，重新分析后保留稳定的笔记 ID。
 - 导入 JSON、CSV、TSV、Markdown、纯文本和 YAML。
-- Obsidian vault 支持本地增量同步：重新选择同一目录后预览新增、修改、重命名、移除和字段冲突；确认前创建恢复点，未变化文件不会重新解析。浏览器不能保留目录权限时会明确要求重新选择，不上传文件或自动写回 Markdown。
+- Obsidian vault 支持本地增量同步：重新选择同一目录后预览新增、修改、重命名、移除和字段冲突；确认前创建恢复点，未变化文件不会重新解析。写回认知字段或逐条接受的 WikiLink 时会单独请求目录读写权限并展示 exact diff，不上传文件或静默修改 Markdown。
 - 导入/导出 `.terrain.json` 完整项目包，导出当前地图为 PNG，导出 Markdown 复盘报告。
 - 项目自动保存到 IndexedDB，支持增量合并新笔记；覆盖、改名、删除和恢复前会自动创建本地恢复点，每个项目最多保留 8 份。
 - IndexedDB v7 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、布局和 revision，并为本地 vault 授权预留独立 binding store；不同项目通过复合键隔离。目录句柄不会进入项目导出或恢复点。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
@@ -123,7 +123,17 @@ tags:
 - 应用内和 vault 同时修改同一字段时逐字段选择保留应用版本或采用 vault 版本。无效 YAML 字段保留上次已接受值，并在预览中报告。
 - 完整扫描中的移除会保留 source tombstone 并归档笔记；读取失败或多 vault 混合造成的不完整扫描不会推断删除。
 - 已接受内容生成 `vault-sync` revision。有效文件修改时间只用于事件时间；不可用或晚于确认时间时明确回退到确认时间。重复扫描和与应用内相同的编辑不会重复增加活动温度。
-- `.terrain.json` 导出/恢复保留 source 身份、同步基线和 revision provenance，但不包含浏览器目录权限。当前版本不会写回 Markdown，也不提供跨设备同步。
+- `.terrain.json` 导出/恢复保留 source 身份、同步基线和 revision provenance，但不包含浏览器目录权限。当前版本不提供跨设备同步。
+
+### Obsidian vault 显式写回
+
+从项目菜单选择“写回 Obsidian vault”，或在笔记详情中选择待写回字段/语义候选。写回只允许 `mastery`、`confidence`、`exploration`、`status`、`area/areas`、`reviewedAt` 与逐条确认的 WikiLink；标题、正文、标签和 weight 不会进入写回请求。
+
+- 应用先显示 vault 相对路径、同步 source hash 和 exact diff；单文件一次确认，多文件还需要第二次摘要确认。
+- 授权后及实际写入前都会重新读取原始 bytes 并检查 SHA-256。任一文件已被外部修改时整批保持 0 写入，需要先重新同步。
+- 批量写入前会把全部原始 bytes 原子保存到 IndexedDB recovery batch，然后按路径串行写入；首个失败后停止，结果明确区分成功、失败与未尝试，并保留恢复材料。
+- 写回成功会更新 source baseline，并记录独立的 `vault-writeback` revision，避免下一次增量同步把本次写回误判为外部修改。
+- 目录写入依赖浏览器 File System Access API。该 API 没有 compare-and-swap，最终 hash 校验到 `createWritable()` 之间仍存在极小的并发修改窗口；应用缩小并记录该窗口，但无法从浏览器侧彻底消除。
 
 ## 分析流程
 

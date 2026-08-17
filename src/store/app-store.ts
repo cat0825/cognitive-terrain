@@ -108,6 +108,7 @@ interface AppState {
     preview: VaultSyncPreview,
     resolutions: VaultSyncResolution[],
   ) => Promise<boolean>
+  commitVaultWritebackProject: (previous: TerrainProject, next: TerrainProject) => Promise<void>
   updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[]; mastery?: number | null; confidence?: number | null; exploration?: number | null; status?: TerrainProject['notes'][number]['status'] | null; area?: string | null; areas?: string[] | null; reviewedAt?: string | null }) => Promise<void>
   markNoteReviewed: (noteId: string) => Promise<void>
   cancelAnalysis: () => void
@@ -419,6 +420,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) {
       set({ error: `Vault 同步失败：${error instanceof Error ? error.message : String(error)}` })
       return false
+    }
+  },
+  commitVaultWritebackProject: async (previous, next) => {
+    const current = get().project
+    if (current.id !== previous.id || current.updatedAt !== previous.updatedAt) {
+      throw new Error('项目已变化，请重新生成写回预览')
+    }
+    try {
+      const { saveVaultWritebackProject } = await import('../storage/vault-sync-repository')
+      await saveVaultWritebackProject(previous, next)
+      const latest = get().project
+      if (latest.id !== previous.id || latest.updatedAt !== previous.updatedAt) {
+        throw new Error('项目在写回提交期间发生变化，请重新打开项目核对已保存状态')
+      }
+      localStorage.setItem('cognitive-terrain:last-project', next.id)
+      setProjectState(set, migrateProject(next))
+      await Promise.all([get().reloadProjects(), get().reloadBackups()])
+    } catch (error) {
+      const message = `Vault 写回状态保存失败：${error instanceof Error ? error.message : String(error)}`
+      set({ error: message })
+      throw new Error(message, { cause: error })
     }
   },
   updateNote: async (noteId, patch) => {

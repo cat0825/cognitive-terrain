@@ -33,7 +33,42 @@ import type {
 } from '../domain/types'
 
 export const DATABASE_NAME = 'cognitive-terrain'
-export const DATABASE_VERSION = 7
+export const DATABASE_VERSION = 8
+
+export type VaultWritebackBatchStatus = 'prepared' | 'in-progress' | 'completed' | 'failed'
+export type VaultWritebackOutcomeStatus = 'succeeded' | 'failed' | 'not-attempted'
+
+export interface StoredVaultWritebackOutcome {
+  requestId: string
+  sourceId: string
+  path: string
+  status: VaultWritebackOutcomeStatus
+  backupId: string
+  error?: string
+}
+
+export interface StoredVaultWritebackBatch {
+  id: string
+  workspaceId: string
+  vaultId: string
+  previewId: string
+  createdAt: string
+  updatedAt: string
+  status: VaultWritebackBatchStatus
+  outcomes: StoredVaultWritebackOutcome[]
+  error?: string
+}
+
+export interface StoredVaultWritebackRecoveryFile {
+  batchId: string
+  workspaceId: string
+  sourceId: string
+  requestIds: string[]
+  path: string
+  beforeByteHash: string
+  byteLength: number
+  originalBytes: ArrayBuffer
+}
 
 export interface StoredVaultBinding {
   workspaceId: string
@@ -185,6 +220,23 @@ export interface CognitiveTerrainDB extends DBSchema {
     key: [string, string]
     value: StoredVaultBinding
     indexes: { 'by-workspace': string }
+  }
+  vaultWritebackBatches: {
+    key: string
+    value: StoredVaultWritebackBatch
+    indexes: {
+      'by-workspace': string
+      'by-created-at': string
+      'by-status': [string, VaultWritebackBatchStatus]
+    }
+  }
+  vaultWritebackRecoveryFiles: {
+    key: [string, string]
+    value: StoredVaultWritebackRecoveryFile
+    indexes: {
+      'by-batch': string
+      'by-workspace': string
+    }
   }
 }
 
@@ -538,6 +590,7 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
+  if (oldVersion < 8) createVaultWritebackRecoveryStores(database)
 }
 
 function createTaxonomyNodeStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
@@ -556,6 +609,19 @@ function createReferenceAtlasStore(database: IDBPDatabase<CognitiveTerrainDB>): 
 function createVaultBindingStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
   const vaultBindings = database.createObjectStore('vaultBindings', { keyPath: ['workspaceId', 'vaultId'] })
   vaultBindings.createIndex('by-workspace', 'workspaceId')
+}
+
+function createVaultWritebackRecoveryStores(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const batches = database.createObjectStore('vaultWritebackBatches', { keyPath: 'id' })
+  batches.createIndex('by-workspace', 'workspaceId')
+  batches.createIndex('by-created-at', 'createdAt')
+  batches.createIndex('by-status', ['workspaceId', 'status'])
+
+  const files = database.createObjectStore('vaultWritebackRecoveryFiles', {
+    keyPath: ['batchId', 'sourceId'],
+  })
+  files.createIndex('by-batch', 'batchId')
+  files.createIndex('by-workspace', 'workspaceId')
 }
 
 async function clearWorkspaceStore<Mode extends DatabaseWriteMode>(

@@ -357,6 +357,10 @@ export function applyVaultSync(
       vaults,
       sources: [...sourceStates.values()].sort((a, b) => a.sourceId.localeCompare(b.sourceId)),
       revisions: [...revisions.values()].sort((a, b) => a.acceptedAt.localeCompare(b.acceptedAt) || a.id.localeCompare(b.id)),
+      writebackRevisions: project.vaultSync?.writebackRevisions?.map((revision) => ({
+        ...revision,
+        requestIds: [...revision.requestIds],
+      })),
     },
     events: newEvents,
     changedItemIds: [...changedItemIds].sort(),
