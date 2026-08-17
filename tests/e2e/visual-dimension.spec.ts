@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const dimensions = ['密度', '熟练度', '探索度', '活跃', '温度', '领域'] as const
+const dimensions = ['密度', '熟练度', '探索度', '活跃', '学习进程', '温度', '领域'] as const
 
 test('switches point cloud encoding across all six visual dimensions', async ({ page }) => {
   test.setTimeout(process.env.CI ? 90_000 : 45_000)
@@ -29,6 +29,9 @@ test('switches point cloud encoding across all six visual dimensions', async ({ 
     }
     await expect(panel.locator('.dimension-help')).not.toBeEmpty()
     await expect(page.locator('canvas').first()).toBeVisible()
+    if (label === '学习进程') {
+      await expect(panel.locator('.dimension-help')).toContainText('显式认知观测')
+    }
     if (label === '领域') {
       const legend = panel.getByRole('group', { name: '知识板块图例' })
       await expect(legend).toBeVisible()
@@ -93,6 +96,28 @@ test('records note activity without moving its stable coordinates', async ({ pag
   await page.getByRole('button', { name: '标记已复习' }).click()
   await expect(page.getByLabel('知识温度')).toContainText('复习 1')
   await expect(page.locator('.activity-elevation-evidence')).toContainText('复习：1 次')
+  expect(errors).toEqual([])
+})
+
+test('replays learning progression evidence and checkpoint comparison', async ({ page }) => {
+  const errors = collectErrors(page)
+
+  await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '切换二维等高线' }).click()
+
+  const note = page.getByRole('button', { name: 'SM 与 Tensor Core', exact: true })
+  await note.click()
+  await expect(page.getByLabel('笔记详情')).toBeVisible()
+  await expect(page.getByLabel('学习进程证据')).toContainText('学习进程海拔')
+  await page.getByText('查看学习进程证据', { exact: true }).click()
+  await expect(page.locator('.progression-evidence')).toContainText('自我评估')
+
+  const checkpoint = page.getByRole('combobox', { name: '学习进程检查点' })
+  await expect(checkpoint).toBeVisible()
+  await checkpoint.selectOption({ index: 1 })
+  await expect(page.getByTestId('progression-comparison')).toContainText('检查点海拔')
   expect(errors).toEqual([])
 })
 

@@ -341,6 +341,26 @@ export function createDemoProject(): TerrainProject {
     createdAt: timestamp,
     updatedAt: timestamp,
   }))
+  const cognitiveObservations = notes.slice(0, 2).flatMap((note, index) => [
+    createCognitiveObservation({
+      id: `demo-observation:${note.id}:baseline`,
+      itemId: note.id,
+      field: 'mastery',
+      value: Math.max(0, (note.mastery ?? 0.5) - 0.18),
+      observedAt: `2025-12-${String(28 + index).padStart(2, '0')}T20:00:00+08:00`,
+      provenance: 'self-assessment',
+      reason: '演示：阶段性自评',
+    }),
+    createCognitiveObservation({
+      id: `demo-observation:${note.id}:review`,
+      itemId: note.id,
+      field: 'mastery',
+      value: note.mastery ?? 0.5,
+      observedAt: '2025-12-31T20:00:00+08:00',
+      provenance: 'review-outcome',
+      reason: '演示：复习结果',
+    }),
+  ])
   return {
     schemaVersion: 3,
     id: 'demo-ai-infra-terrain',
@@ -366,7 +386,7 @@ export function createDemoProject(): TerrainProject {
     })),
     noteNeighbors: computeNeighbors(notes, 6),
     cognitiveStates: buildCognitiveStates(notes, timestamp),
-    cognitiveObservations: [],
+    cognitiveObservations,
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
