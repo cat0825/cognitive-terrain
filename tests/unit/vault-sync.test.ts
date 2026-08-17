@@ -139,6 +139,27 @@ describe('incremental vault sync', () => {
       .toBe('vault content before the first sync')
   })
 
+  it('keeps raw declared area provenance unchanged while comparing normalized areas', () => {
+    const project = baseProject()
+    project.notes[0].area = 'AI 工程'
+    project.notes[0].areas = ['AI 工程']
+    project.notes[0].declaredAreas = [' ＡＩ   工程 ', 'AI 工程']
+    const firstScan = scan({ scannedAt: firstScanAt })
+    firstScan.files[0].note = {
+      ...firstScan.files[0].note!,
+      area: 'AI 工程',
+      areas: ['AI 工程'],
+      declaredAreas: [' ＡＩ   工程 ', 'AI 工程'],
+    }
+
+    const preview = buildVaultSyncPreview(project, firstScan)
+
+    expect(preview.bootstrap).toBe(true)
+    expect(preview.unchangedCount).toBe(1)
+    expect(preview.changes).toEqual([])
+    expect(preview.conflicts).toEqual([])
+  })
+
   it('requires field-level resolution for divergent app and vault edits', () => {
     const baseline = linkedProject()
     const project = {
