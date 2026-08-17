@@ -525,6 +525,7 @@ function normalizedIncomingSnapshot(
   baseline: VaultSyncNoteSnapshot | undefined,
   invalidFields: readonly VaultSyncField[],
 ): VaultSyncNoteSnapshot {
+  const areas = normalizeStrings(note.areas ?? (note.area ? [note.area] : []))
   const normalized: VaultSyncNoteSnapshot = {
     sourceKey: note.sourceKey?.normalize('NFKC').trim() || baseline?.sourceKey,
     title: note.title?.trim() || baseline?.title || note.content.trim().slice(0, 48) || '未命名笔记',
@@ -536,8 +537,8 @@ function normalizedIncomingSnapshot(
     confidence: normalizedScore(note.confidence),
     exploration: normalizedScore(note.exploration),
     status: note.status,
-    areas: normalizeStrings(note.areas ?? (note.area ? [note.area] : [])),
-    declaredAreas: normalizeStrings(note.declaredAreas ?? note.areas ?? (note.area ? [note.area] : [])),
+    areas,
+    declaredAreas: note.declaredAreas ? [...note.declaredAreas] : [...areas],
     reviewedAt: normalizedOptionalDate(note.reviewedAt),
     links: normalizeStrings(note.links ?? []),
   }
