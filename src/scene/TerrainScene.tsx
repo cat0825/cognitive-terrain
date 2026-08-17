@@ -1744,7 +1744,7 @@ function dimensionValue(
 ): number {
   if (dimension === 'mastery') return note.mastery ?? 0.5
   if (dimension === 'exploration') return note.exploration ?? 0.5
-  if (dimension === 'temperature') return activityByNote.get(note.id)?.score ?? 0
+  if (dimension === 'activity' || dimension === 'temperature') return activityByNote.get(note.id)?.score ?? 0
   return 0.5
 }
 
@@ -1752,7 +1752,7 @@ function dimensionMode(dimension: VisualDimension): number {
   if (dimension === 'mastery') return 1
   if (dimension === 'exploration') return 2
   if (dimension === 'area') return 3
-  if (dimension === 'temperature') return 4
+  if (dimension === 'activity' || dimension === 'temperature') return 4
   return 0
 }
 
@@ -1761,7 +1761,7 @@ function dimensionColor(
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
 ): Color {
-  if (dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
+  if (dimension === 'activity' || dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
   if (dimension === 'area') {
     const area = primaryAreaForNote(note)
     return new Color(area ? plateColor(area) : '#767673')

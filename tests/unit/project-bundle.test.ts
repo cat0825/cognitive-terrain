@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoProject } from '../../src/domain/demo'
+import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
 import { parseProjectBundle, serializeProjectBundle } from '../../src/export/project-files'
 import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
@@ -80,6 +81,7 @@ describe('project bundle migration', () => {
         createdAt: demo.updatedAt,
         updatedAt: demo.updatedAt,
       }],
+      activeReferenceAtlasId: 'atlas-engineering-v3',
       notes: [{ ...demo.notes[0], area: 'Systems', areas: ['Systems'], declaredAreas: [' 系统 '] }],
     })
     const file = new File([serializeProjectBundle(source)], 'taxonomy.terrain.json', { type: 'application/json' })
@@ -89,6 +91,41 @@ describe('project bundle migration', () => {
     expect(restored.taxonomyVersion).toBe(3)
     expect(restored.taxonomyNodes).toEqual([root, child])
     expect(restored.referenceAtlases).toEqual(source.referenceAtlases)
+    expect(restored.activeReferenceAtlasId).toBe('atlas-engineering-v3')
     expect(restored.notes[0]?.declaredAreas).toEqual([' 系统 '])
+  })
+
+  it('clears a dangling active reference atlas during materialization and bundle migration', async () => {
+    const demo = createDemoProject()
+    const root = createTaxonomyNode({
+      workspaceId: demo.id,
+      label: 'Engineering',
+      version: 1,
+    }, demo.updatedAt)
+    const project = {
+      ...demo,
+      taxonomyNodes: [root],
+      taxonomyVersion: 1,
+      referenceAtlases: [{
+        id: 'atlas-engineering-v1',
+        workspaceId: demo.id,
+        label: 'Engineering reference',
+        taxonomyVersion: 1,
+        taxonomyNodeIds: [root.id],
+        createdAt: demo.updatedAt,
+        updatedAt: demo.updatedAt,
+      }],
+      activeReferenceAtlasId: 'atlas-missing',
+    }
+
+    const { bundle } = migrateTerrainProjectToV3(project)
+    const file = new File([serializeProjectBundle(project)], 'dangling-atlas.terrain.json', {
+      type: 'application/json',
+    })
+    const restored = await parseProjectBundle(file)
+
+    expect(bundle.workspace.activeReferenceAtlasId).toBeUndefined()
+    expect(restored.referenceAtlases).toEqual(project.referenceAtlases)
+    expect(restored.activeReferenceAtlasId).toBeUndefined()
   })
 })

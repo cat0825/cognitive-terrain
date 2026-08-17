@@ -5,7 +5,9 @@ import type {
   TerrainElevation,
   TerrainNote,
   TerrainProject,
+  InteractionEvent,
 } from '../domain/types'
+import type { ActivityHistoryAggregate } from '../domain/activity-history'
 import type { TerrainData } from './terrain'
 
 export type AnalysisWorkerRequest =
@@ -20,9 +22,12 @@ export type AnalysisWorkerRequest =
       type: 'build-terrain-profile'
       requestId: string
       notes: TerrainNote[]
+      interactionEvents: InteractionEvent[]
+      activityAggregates?: ActivityHistoryAggregate[]
       gridSize: number
       timeZone: string
-      elevation: Extract<TerrainElevation, 'mastery' | 'exploration'>
+      nowMs: number
+      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'activity'>
     }
   | {
       type: 'cancel'

@@ -50,8 +50,10 @@ describe('analysis worker client', () => {
     const handle = runTerrainProfile({
       type: 'build-terrain-profile',
       notes: [],
+      interactionEvents: [],
       gridSize: 32,
       timeZone: 'UTC',
+      nowMs: Date.parse('2026-01-01T00:00:00.000Z'),
       elevation: 'mastery',
     })
     const worker = FakeWorker.instances[0]

@@ -12,7 +12,12 @@ import type {
   VisualDimension,
 } from '../domain/types'
 import { createDemoProject } from '../domain/demo'
-import { commitAnalyzedProject, createInteractionEvent, eventTypeForNoteUpdate } from '../domain/cognitive-state'
+import {
+  commitAnalyzedProject,
+  createInteractionEvent,
+  eventTypeForNoteUpdate,
+  normalizeActiveReferenceAtlasId,
+} from '../domain/cognitive-state'
 import { shouldRecordOpenedEvent } from '../domain/activity-temperature'
 import { areasForNote } from '../domain/knowledge-plates'
 import {
@@ -37,6 +42,7 @@ import {
   renameProject,
   restoreProjectBackup,
   saveProject,
+  updateActiveReferenceAtlas,
 } from '../storage/project-repository'
 import { migrateProject } from '../storage/db'
 
@@ -81,6 +87,7 @@ interface AppState {
   setViewMode: (mode: ViewMode) => void
   setQuality: (quality: QualityLevel) => void
   setVisualDimension: (dimension: VisualDimension) => void
+  setReferenceAtlas: (id: string | undefined) => Promise<void>
   setTimeline: (timeline: number) => void
   setImportOpen: (open: boolean) => void
   setFiltersOpen: (open: boolean) => void
@@ -139,7 +146,8 @@ declare global {
 }
 
 let activeAnalysis: AnalysisHandle | null = null
-const initialProject = migrateProject(createDemoProject())
+const REFERENCE_ATLAS_PREFERENCE_PREFIX = 'cognitive-terrain:reference-atlas:'
+const initialProject = applyStoredReferenceAtlasPreference(migrateProject(createDemoProject()))
 let liveTimeline = Math.max(0, initialProject.snapshots.length - 1)
 
 export function getLiveTimeline(): number {
@@ -204,7 +212,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       ? createInteractionEvent(selectedNoteId, 'opened', occurredAt)
       : undefined
     const project = event
-      ? { ...state.project, interactionEvents: [...state.project.interactionEvents, event] }
+      ? {
+          ...state.project,
+          updatedAt: new Date(Math.max(Date.parse(state.project.updatedAt) || 0, Date.parse(event.occurredAt))).toISOString(),
+          interactionEvents: [...state.project.interactionEvents, event],
+        }
       : state.project
     set({
       project,
@@ -235,6 +247,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   setViewMode: (viewMode) => set({ viewMode }),
   setQuality: (quality) => set({ quality }),
   setVisualDimension: (visualDimension) => set({ visualDimension }),
+  setReferenceAtlas: async (id) => {
+    const current = get().project
+    const nextId = normalizeActiveReferenceAtlasId(current.referenceAtlases, id)
+    const project = { ...current, activeReferenceAtlasId: nextId, updatedAt: new Date().toISOString() }
+    const preferenceKey = `${REFERENCE_ATLAS_PREFERENCE_PREFIX}${project.id}`
+    const previousPreference = localStorage.getItem(preferenceKey)
+    if (nextId) localStorage.setItem(preferenceKey, nextId)
+    else localStorage.removeItem(preferenceKey)
+    // Atlas selection is a view preference. Update the in-memory project first so
+    // the map and detail report respond immediately; persistence can finish in the
+    // background without making the user wait for a full materialization rewrite.
+    set({ project })
+    try {
+      await updateActiveReferenceAtlas(project.id, nextId)
+      await Promise.all([get().reloadProjects(), get().reloadBackups()])
+    } catch (error) {
+      if (get().project.id === project.id && get().project.activeReferenceAtlasId === nextId) {
+        set({ project: current })
+      }
+      if (previousPreference === null) localStorage.removeItem(preferenceKey)
+      else localStorage.setItem(preferenceKey, previousPreference)
+      set({ error: `参考图谱选择保存失败：${error instanceof Error ? error.message : String(error)}` })
+    }
+  },
   setTimeline: (timeline) => {
     liveTimeline = timeline
     const state = get()
@@ -662,6 +698,14 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
     cameraRevision: Date.now(),
     cameraScale: 192,
   })
+}
+
+function applyStoredReferenceAtlasPreference(project: TerrainProject): TerrainProject {
+  const stored = localStorage.getItem(`${REFERENCE_ATLAS_PREFERENCE_PREFIX}${project.id}`) ?? undefined
+  const activeReferenceAtlasId = normalizeActiveReferenceAtlasId(project.referenceAtlases, stored)
+  return activeReferenceAtlasId === project.activeReferenceAtlasId
+    ? project
+    : { ...project, activeReferenceAtlasId }
 }
 
 function nextTaxonomyVersion(project: TerrainProject): number {

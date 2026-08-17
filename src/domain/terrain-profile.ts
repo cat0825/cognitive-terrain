@@ -1,4 +1,5 @@
 import type { TerrainProfile, VisualDimension } from './types'
+import { ACTIVITY_ELEVATION_FORMULA_VERSION } from './activity-elevation'
 
 export const DEFAULT_TERRAIN_PROFILE_ID = 'density'
 
@@ -31,7 +32,7 @@ export const DEFAULT_TERRAIN_PROFILES = [
     elevation: 'activity',
     color: 'area',
     overlay: 'temperature',
-    formulaVersion: 'activity-decay-v1',
+    formulaVersion: ACTIVITY_ELEVATION_FORMULA_VERSION,
   },
   {
     id: 'structure',

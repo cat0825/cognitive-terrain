@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const dimensions = ['密度', '熟练度', '探索度', '温度', '领域'] as const
+const dimensions = ['密度', '熟练度', '探索度', '活跃', '温度', '领域'] as const
 
-test('switches point cloud encoding across all five visual dimensions', async ({ page }) => {
+test('switches point cloud encoding across all six visual dimensions', async ({ page }) => {
   test.setTimeout(process.env.CI ? 90_000 : 45_000)
   const errors = collectErrors(page)
 
@@ -47,9 +47,6 @@ test('switches point cloud encoding across all five visual dimensions', async ({
     }
   }
 
-  await buttons[0].click()
-  await expect(buttons[0]).toHaveAttribute('aria-pressed', 'true')
-
   await page.getByRole('button', { name: '关闭筛选' }).click()
   await expect(panel).toBeHidden()
 
@@ -69,11 +66,24 @@ test('records note activity without moving its stable coordinates', async ({ pag
   const originalY = await note.getAttribute('cy')
   await note.click()
   await expect(page.getByLabel('知识温度')).toContainText('打开 1')
+  const activityEvidence = page.getByText('查看活动海拔证据', { exact: true })
+  await activityEvidence.click()
+  await expect(page.locator('.activity-elevation-evidence')).toContainText('raw heat')
+  await expect(page.locator('.activity-elevation-evidence')).toContainText('评估于')
+  await expect(page.locator('.activity-elevation-evidence')).toContainText('原始事件')
   await expect(page.getByRole('region', { name: '活动历史' })).toBeVisible()
   await expect(page.getByRole('region', { name: '活动历史' }).getByRole('button', { name: '日' })).toHaveAttribute('aria-pressed', 'true')
 
   await page.getByRole('button', { name: '打开地图筛选' }).click()
   const panel = page.getByRole('complementary', { name: '地图筛选' })
+  const activity = panel.locator('.visual-dimension-control').getByRole('button', { name: '活跃', exact: true })
+  await activity.click()
+  await expect(activity).toHaveAttribute('aria-pressed', 'true')
+  await expect(panel.locator('.dimension-help')).toContainText('activity-elevation-v1')
+  await expect(panel.getByRole('group', { name: '知识温度图例' })).toContainText('1 个事件')
+  await expect(note).toHaveAttribute('cx', originalX ?? '')
+  await expect(note).toHaveAttribute('cy', originalY ?? '')
+
   await panel.locator('.visual-dimension-control').getByRole('button', { name: '温度', exact: true }).click()
   await expect(panel.getByRole('group', { name: '知识温度图例' })).toContainText('1 个事件')
   await expect(note).toHaveAttribute('cx', originalX ?? '')
@@ -82,6 +92,49 @@ test('records note activity without moving its stable coordinates', async ({ pag
 
   await page.getByRole('button', { name: '标记已复习' }).click()
   await expect(page.getByLabel('知识温度')).toContainText('复习 1')
+  await expect(page.locator('.activity-elevation-evidence')).toContainText('复习：1 次')
+  expect(errors).toEqual([])
+})
+
+test('disables knowledge-gap claims until a reference atlas is selected', async ({ page }) => {
+  const errors = collectErrors(page)
+
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '打开知识概览' }).click()
+
+  const gaps = page.getByRole('region', { name: '参考图谱知识缺口' })
+  await expect(gaps).toBeVisible()
+  await expect(gaps).toContainText('未选择参考图谱')
+  await expect(gaps).toContainText('活动低不等于知识缺口')
+  await expect(gaps.locator('.reference-gap-item')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('persists an explicit reference atlas and exposes gap evidence', async ({ page }) => {
+  const errors = collectErrors(page)
+
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '打开知识概览' }).click()
+
+  const gaps = page.getByRole('region', { name: '参考图谱知识缺口' })
+  const atlas = gaps.getByRole('combobox', { name: '选择参考图谱' })
+  await atlas.selectOption({ label: 'AI Infra 核心能力参考图谱' })
+
+  await expect(page.getByRole('complementary', { name: '参考图谱海洋图层' })).toBeVisible()
+  await expect(gaps.locator('.reference-gap-item')).not.toHaveCount(0)
+  await gaps.locator('.reference-gap-item summary').first().click()
+  await expect(gaps.locator('.reference-gap-evidence').first()).toContainText('预期节点')
+  await expect(gaps.locator('.reference-gap-evidence').first()).toContainText('支持项')
+
+  await page.reload()
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '打开知识概览' }).click()
+  await expect(page.getByRole('region', { name: '参考图谱知识缺口' })
+    .getByRole('combobox', { name: '选择参考图谱' })).toHaveValue('demo-ai-infra-reference-atlas')
+  await expect(page.getByRole('complementary', { name: '参考图谱海洋图层' })).toBeVisible()
+
   expect(errors).toEqual([])
 })
 

@@ -1,3 +1,4 @@
+import type { ReferenceGapReport } from '../domain/reference-gaps'
 import type { TerrainPeak, TerrainProject, TerrainSnapshot } from '../domain/types'
 
 export const SHARE_CARD_WIDTH = 1280
@@ -7,12 +8,14 @@ export interface ShareCardRenderOptions {
   sourceCanvas: HTMLCanvasElement
   project: TerrainProject
   snapshot?: TerrainSnapshot
+  referenceGapReport?: ReferenceGapReport
 }
 
 export async function renderShareCard({
   sourceCanvas,
   project,
   snapshot,
+  referenceGapReport,
 }: ShareCardRenderOptions): Promise<Blob> {
   const canvas = document.createElement('canvas')
   canvas.width = SHARE_CARD_WIDTH
@@ -30,6 +33,12 @@ export async function renderShareCard({
   drawVignette(context, grid)
   drawPeaks(context, grid, project.peaks)
   drawOverlay(context, project, snapshot)
+  drawReferenceGapSummary(context, project, referenceGapReport, {
+    left: 0,
+    top: 0,
+    width: SHARE_CARD_WIDTH,
+    height: SHARE_CARD_HEIGHT - 52,
+  })
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -37,6 +46,116 @@ export async function renderShareCard({
       else reject(new Error('无法生成分享卡片'))
     }, 'image/png', 1)
   })
+}
+
+interface CanvasBounds {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+const MAX_REFERENCE_GAP_ITEMS = 3
+
+export function drawReferenceGapSummary(
+  context: CanvasRenderingContext2D,
+  project: TerrainProject,
+  report: ReferenceGapReport | undefined,
+  bounds: CanvasBounds = {
+    left: 0,
+    top: 0,
+    width: context.canvas.width,
+    height: context.canvas.height,
+  },
+): void {
+  if (!report?.enabled) return
+
+  const scale = Math.max(0.7, Math.min(1.6, Math.min(bounds.width / SHARE_CARD_WIDTH, bounds.height / SHARE_CARD_HEIGHT)))
+  const margin = 24 * scale
+  const padding = 18 * scale
+  const panelWidth = Math.min(360 * scale, bounds.width - margin * 2)
+  if (panelWidth <= padding * 2) return
+
+  const counts = { missing: 0, sparse: 0, stale: 0 }
+  for (const gap of report.gaps) {
+    if (gap.state !== 'covered') counts[gap.state] += 1
+  }
+  const gaps = report.gaps
+    .filter((gap) => gap.state !== 'covered')
+    .sort((a, b) => b.gap * b.expectedWeight - a.gap * a.expectedWeight || a.label.localeCompare(b.label))
+    .slice(0, MAX_REFERENCE_GAP_ITEMS)
+  const rowHeight = 25 * scale
+  const panelHeight = (gaps.length ? 142 : 150) * scale + gaps.length * rowHeight
+  const left = bounds.left + bounds.width - panelWidth - margin
+  const top = bounds.top + Math.max(margin, bounds.height - panelHeight - margin)
+  const atlas = project.referenceAtlases?.find((candidate) => candidate.id === report.referenceAtlasId)
+  const atlasLabel = atlas?.label ?? report.referenceAtlasId ?? '已选参考图谱'
+
+  context.save()
+  context.fillStyle = 'rgba(10, 15, 17, 0.92)'
+  context.fillRect(left, top, panelWidth, panelHeight)
+  context.strokeStyle = 'rgba(121, 169, 174, 0.7)'
+  context.lineWidth = Math.max(1, scale)
+  context.strokeRect(left + 0.5, top + 0.5, panelWidth - 1, panelHeight - 1)
+  context.fillStyle = '#79a9ae'
+  context.fillRect(left, top, 3 * scale, panelHeight)
+  context.textBaseline = 'alphabetic'
+  context.textAlign = 'left'
+
+  let y = top + padding + 11 * scale
+  context.fillStyle = 'rgba(151, 201, 205, 0.92)'
+  context.font = `700 ${11 * scale}px -apple-system, "PingFang SC", sans-serif`
+  context.fillText('REFERENCE OCEAN / GAP · 非空间摘要', left + padding, y)
+
+  y += 26 * scale
+  context.fillStyle = '#f3eee2'
+  context.font = `700 ${19 * scale}px -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif`
+  context.fillText(truncateText(context, atlasLabel, panelWidth - padding * 2), left + padding, y)
+
+  y += 23 * scale
+  context.fillStyle = 'rgba(243, 238, 226, 0.7)'
+  context.font = `500 ${12 * scale}px -apple-system, "PingFang SC", sans-serif`
+  context.fillText(`未覆盖 ${counts.missing} · 稀疏 ${counts.sparse} · 已过期 ${counts.stale}`, left + padding, y)
+
+  y += 14 * scale
+  context.strokeStyle = 'rgba(121, 169, 174, 0.28)'
+  context.beginPath()
+  context.moveTo(left + padding, y)
+  context.lineTo(left + panelWidth - padding, y)
+  context.stroke()
+
+  if (gaps.length === 0) {
+    y += 26 * scale
+    context.fillStyle = 'rgba(243, 238, 226, 0.72)'
+    context.fillText('当前没有待补覆盖节点', left + padding, y)
+  } else {
+    for (const gap of gaps) {
+      y += rowHeight
+      context.fillStyle = gap.state === 'missing' ? '#df9d78' : gap.state === 'stale' ? '#8fb8b2' : '#d6bd72'
+      context.fillText('●', left + padding, y)
+      context.fillStyle = 'rgba(243, 238, 226, 0.9)'
+      context.fillText(truncateText(context, gap.label, panelWidth - padding * 2 - 102 * scale), left + padding + 16 * scale, y)
+      context.fillStyle = 'rgba(243, 238, 226, 0.58)'
+      context.textAlign = 'right'
+      context.fillText(`${gapStateLabel(gap.state)} ${Math.round(gap.gap * 100)}%`, left + panelWidth - padding, y)
+      context.textAlign = 'left'
+    }
+  }
+
+  y = top + panelHeight - 17 * scale
+  context.fillStyle = 'rgba(151, 201, 205, 0.65)'
+  context.font = `500 ${10 * scale}px -apple-system, "PingFang SC", sans-serif`
+  const remaining = report.gaps.filter((gap) => gap.state !== 'covered').length - gaps.length
+  context.fillText(
+    remaining > 0 ? `另有 ${remaining} 项 · 仅相对所选 atlas，不对应地图坐标` : '仅相对所选 atlas，不对应地图坐标',
+    left + padding,
+    y,
+  )
+  context.restore()
+}
+
+function gapStateLabel(state: ReferenceGapReport['gaps'][number]['state']): string {
+  return state === 'missing' ? '未覆盖' : state === 'sparse' ? '稀疏' : '已过期'
 }
 
 interface Grid {

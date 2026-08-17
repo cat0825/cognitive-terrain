@@ -19,6 +19,13 @@ describe('AI Infra demo project', () => {
     expect(first.snapshots.at(-1)?.bucket).toBe('2025-12')
     expect(buildPlateBridges(first.notes).length).toBeGreaterThan(0)
     expect(buildPlateCollisions(first.notes).filter((collision) => collision.mode === 'band').length).toBeGreaterThan(0)
+    expect(first.referenceAtlases).toEqual([expect.objectContaining({
+      id: 'demo-ai-infra-reference-atlas',
+      taxonomyVersion: 1,
+    })])
+    expect(first.taxonomyNodes).toHaveLength(8)
+    expect(first.referenceAtlases?.[0]?.taxonomyNodeIds).toHaveLength(7)
+    expect(first.activeReferenceAtlasId).toBeUndefined()
     expect(second.notes.map(({ x, y }) => [x, y])).toEqual(first.notes.map(({ x, y }) => [x, y]))
     expect(second.notes.map((note) => note.weight)).toEqual(first.notes.map((note) => note.weight))
   })

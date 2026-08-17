@@ -14,6 +14,7 @@ import {
   renameProject,
   restoreProjectBackup,
   saveProject,
+  updateActiveReferenceAtlas,
 } from '../../src/storage/project-repository'
 import { createInteractionEvent } from '../../src/domain/cognitive-state'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
@@ -27,6 +28,10 @@ function oldV1Project(id: string, name: string): TerrainProject {
     interactionEvents: _interactionEvents,
     terrainProfiles: _terrainProfiles,
     activeTerrainProfileId: _activeTerrainProfileId,
+    taxonomyNodes: _taxonomyNodes,
+    taxonomyVersion: _taxonomyVersion,
+    referenceAtlases: _referenceAtlases,
+    activeReferenceAtlasId: _activeReferenceAtlasId,
     ...legacy
   } = repositoryDemoFixture
   return {
@@ -51,6 +56,8 @@ function smallProject(id: string, name: string): TerrainProject {
     peaks: [],
     noteNeighbors: project.noteNeighbors.slice(0, 2),
     cognitiveStates: project.cognitiveStates.slice(0, 2),
+    taxonomyNodes: project.taxonomyNodes?.map((node) => ({ ...node, workspaceId: id })),
+    referenceAtlases: project.referenceAtlases?.map((manifest) => ({ ...manifest, workspaceId: id })),
   }
 }
 
@@ -61,6 +68,17 @@ beforeEach(async () => {
 })
 
 describe('project repository', () => {
+  it('persists an atlas preference without rebuilding the project materialization', async () => {
+    const project = smallProject('p-atlas-preference', '参考图谱偏好')
+    await saveProject(project)
+
+    const updated = await updateActiveReferenceAtlas(project.id, project.referenceAtlases?.[0]?.id)
+    expect(updated?.activeReferenceAtlasId).toBe(project.referenceAtlases?.[0]?.id)
+    expect((await getProject(project.id))?.activeReferenceAtlasId).toBe(project.referenceAtlases?.[0]?.id)
+    expect((await getProjectObjectBundle(project.id))?.workspace.activeReferenceAtlasId)
+      .toBe(project.referenceAtlases?.[0]?.id)
+  })
+
   it('persists v1 to v3 migrations during the IndexedDB upgrade', async () => {
     const legacy = oldV1Project('legacy-1', '旧项目')
     legacy.notes[0] = { ...legacy.notes[0], reviewedAt: '2025-08-15T00:00:00.000Z' }
@@ -142,6 +160,38 @@ describe('project repository', () => {
     const stored = await getProject(project.id)
     expect(stored?.terrainProfiles.map((profile) => profile.id)).toContain('density')
     expect(stored?.activeTerrainProfileId).toBe('density')
+  })
+
+  it('persists the active reference atlas in the compatibility and materialized stores', async () => {
+    const project = smallProject('p-reference-atlas', '参考图谱持久化')
+    const root = createTaxonomyNode({
+      id: 'taxonomy-engineering',
+      workspaceId: project.id,
+      label: 'Engineering',
+      version: 1,
+    }, project.updatedAt)
+    const atlas = {
+      id: 'atlas-engineering-v1',
+      workspaceId: project.id,
+      label: 'Engineering reference',
+      taxonomyVersion: 1,
+      taxonomyNodeIds: [root.id],
+      createdAt: project.updatedAt,
+      updatedAt: project.updatedAt,
+    }
+    project.taxonomyNodes = [root]
+    project.taxonomyVersion = 1
+    project.referenceAtlases = [atlas]
+    project.activeReferenceAtlasId = atlas.id
+
+    await saveProject(project)
+
+    const stored = await getProject(project.id)
+    const materialized = await getProjectObjectBundle(project.id)
+    expect(stored?.referenceAtlases).toEqual([atlas])
+    expect(stored?.activeReferenceAtlasId).toBe(atlas.id)
+    expect(materialized?.referenceAtlases).toEqual([atlas])
+    expect(materialized?.workspace.activeReferenceAtlasId).toBe(atlas.id)
   })
 
   it('lists summaries sorted by updatedAt descending', async () => {
@@ -342,6 +392,17 @@ describe('project repository', () => {
     }, original.updatedAt)
     original.taxonomyNodes = [root, child]
     original.taxonomyVersion = 3
+    const atlas = {
+      id: 'atlas-math-v3',
+      workspaceId: original.id,
+      label: '数学参考图谱',
+      taxonomyVersion: 3,
+      taxonomyNodeIds: [root.id, child.id],
+      createdAt: original.updatedAt,
+      updatedAt: original.updatedAt,
+    }
+    original.referenceAtlases = [atlas]
+    original.activeReferenceAtlasId = atlas.id
     original.notes[0] = {
       ...original.notes[0],
       area: child.label,
@@ -357,6 +418,7 @@ describe('project repository', () => {
       taxonomyNodes: original.taxonomyNodes.map((node) => node.id === child.id
         ? { ...node, label: '线代', version: 4, updatedAt: '2026-08-17T02:00:00.000Z' }
         : node),
+      activeReferenceAtlasId: undefined,
       updatedAt: '2026-08-17T02:00:00.000Z',
     }
     await saveProject(changed, { createBackup: false })
@@ -365,7 +427,11 @@ describe('project repository', () => {
     const materialized = await getProjectObjectBundle(original.id)
     expect(restored?.taxonomyVersion).toBe(3)
     expect(restored?.taxonomyNodes).toEqual([root, child])
+    expect(restored?.referenceAtlases).toEqual([atlas])
+    expect(restored?.activeReferenceAtlasId).toBe(atlas.id)
     expect(materialized?.workspace.taxonomyVersion).toBe(3)
+    expect(materialized?.workspace.activeReferenceAtlasId).toBe(atlas.id)
+    expect(materialized?.referenceAtlases).toEqual([atlas])
     expect(materialized?.taxonomyNodes).toEqual(expect.arrayContaining([root, child]))
     expect(materialized?.taxonomyNodes).toHaveLength(2)
     expect(materialized?.plateMemberships.find((membership) => membership.itemId === original.notes[0].id)).toMatchObject({

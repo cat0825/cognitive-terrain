@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TerrainNote } from '../../src/domain/types'
+import { buildActivitySummaries } from '../../src/domain/activity-temperature'
 import {
   buildTerrainData,
   interpolateSnapshots,
@@ -99,6 +100,22 @@ describe('terrain pipeline', () => {
     expect(sampleHeight(values, 48, hot.x, hot.y)).toBeGreaterThan(
       sampleHeight(values, 48, cold.x, cold.y) * 4,
     )
+  })
+
+  it('uses activity elevation without changing note plane coordinates', () => {
+    const evaluatedAt = '2026-02-01T00:00:00.000Z'
+    const cold = note('cold-activity', '2026-01-10T00:00:00.000Z', -0.45, 0, 'cold')
+    const hot = note('hot-activity', '2026-01-10T00:00:00.000Z', 0.45, 0, 'hot')
+    const activityByNote = buildActivitySummaries(
+      [cold, hot],
+      [{ id: 'event-hot', itemId: hot.id, type: 'reviewed', occurredAt: '2026-01-31T00:00:00.000Z' }],
+      Date.parse(evaluatedAt),
+    )
+    const terrain = buildTerrainData([cold, hot], 48, 'UTC', 0.06, 'activity', activityByNote)
+    const values = terrain.snapshots[0].values
+
+    expect(sampleHeight(values, 48, hot.x, hot.y)).toBeGreaterThan(sampleHeight(values, 48, cold.x, cold.y) * 3)
+    expect([cold.x, cold.y, hot.x, hot.y]).toEqual([-0.45, 0, 0.45, 0])
   })
 
   it('interpolates and samples height values at timeline boundaries', () => {

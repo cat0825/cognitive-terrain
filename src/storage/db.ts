@@ -5,7 +5,7 @@ import {
   type IDBPTransaction,
   type StoreNames,
 } from 'idb'
-import { cognitiveStateFromNote } from '../domain/cognitive-state'
+import { cognitiveStateFromNote, normalizeActiveReferenceAtlasId } from '../domain/cognitive-state'
 import { compactActivityHistory } from '../domain/activity-history'
 import { areasForNote, plateIdForArea } from '../domain/knowledge-plates'
 import { legacyTaxonomyNodesForProject, validateTaxonomy } from '../domain/taxonomy'
@@ -276,6 +276,14 @@ export function migrateProject(project: TerrainProject): TerrainProject {
         plateIdForArea,
       )
   validateTaxonomy(taxonomyNodes)
+  const referenceAtlases = (project.referenceAtlases ?? []).map((manifest) => ({
+    ...manifest,
+    taxonomyNodeIds: [...manifest.taxonomyNodeIds],
+  }))
+  const activeReferenceAtlasId = normalizeActiveReferenceAtlasId(
+    referenceAtlases,
+    project.activeReferenceAtlasId,
+  )
   return {
     ...project,
     schemaVersion: 3,
@@ -292,10 +300,8 @@ export function migrateProject(project: TerrainProject): TerrainProject {
       project.taxonomyVersion ?? 0,
       taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
     ),
-    referenceAtlases: (project.referenceAtlases ?? []).map((manifest) => ({
-      ...manifest,
-      taxonomyNodeIds: [...manifest.taxonomyNodeIds],
-    })),
+    referenceAtlases,
+    activeReferenceAtlasId,
   }
 }
 

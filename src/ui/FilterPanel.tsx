@@ -90,7 +90,7 @@ export function FilterPanel() {
       <section className="filter-section">
         <span className="filter-heading">地形口径</span>
         <div className="visual-dimension-control">
-          {(['density', 'mastery', 'exploration', 'temperature', 'area'] as VisualDimension[]).map((dimension) => (
+          {(['density', 'mastery', 'exploration', 'activity', 'temperature', 'area'] as VisualDimension[]).map((dimension) => (
             <button
               type="button"
               key={dimension}
@@ -103,7 +103,7 @@ export function FilterPanel() {
           ))}
         </div>
         <p className="dimension-help">{dimensionHelp(visualDimension)}</p>
-        {visualDimension === 'temperature' && (
+        {(visualDimension === 'temperature' || visualDimension === 'activity') && (
           <div className="temperature-legend" role="group" aria-label="知识温度图例">
             <div className="temperature-scale" aria-hidden="true">
               <span><i style={{ backgroundColor: TEMPERATURE_COLORS.cold }} />冷</span>
@@ -179,6 +179,7 @@ export function FilterPanel() {
 function dimensionLabel(dimension: VisualDimension): string {
   if (dimension === 'mastery') return '熟练度'
   if (dimension === 'exploration') return '探索度'
+  if (dimension === 'activity') return '活跃'
   if (dimension === 'temperature') return '温度'
   if (dimension === 'area') return '领域'
   return '密度'
@@ -187,6 +188,7 @@ function dimensionLabel(dimension: VisualDimension): string {
 function dimensionHelp(dimension: VisualDimension): string {
   if (dimension === 'mastery') return '海拔：知识密度 × 置信度加权熟练度；未标注不参与高度。'
   if (dimension === 'exploration') return '海拔：知识密度 × 探索度；暖色节点表示更高探索意愿。'
+  if (dimension === 'activity') return '海拔：activity-elevation-v1 按显式评估时间衰减活动事件；只改变高度，不改变语义平面坐标。'
   if (dimension === 'temperature') return '颜色：打开、编辑和复习事件按时间衰减叠加；保持稳定坐标与知识密度海拔。'
   if (dimension === 'area') return '海拔保持知识密度；颜色来自 YAML area/areas，多选板块按任一归属筛选，跨域金色山脊表示可追溯的 WikiLink。'
   return '海拔：笔记在稳定语义坐标中的局部密度。'
