@@ -36,8 +36,9 @@ export async function scanVaultFiles(
   }
   const settled = await Promise.all(locations.map(async ({ file, path }) => {
     try {
-      const text = await file.text()
-      const rawContentHash = await sha256(text)
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const rawContentHash = await sha256(bytes)
+      const text = decodeVaultUtf8(bytes)
       const baseline = baselineForFile(baselineByPath, project.vaultSync?.sources ?? [], path, rawContentHash)
       if (baseline && normalizePath(baseline.relativePath) === normalizePath(path)
         && baseline.relativePath === path && baseline.rawContentHash === rawContentHash) {
@@ -89,10 +90,21 @@ export async function scanVaultFiles(
   })
 }
 
-export async function sha256(value: string): Promise<string> {
+export async function sha256(value: string | Uint8Array): Promise<string> {
   if (!globalThis.crypto?.subtle) throw new Error('当前环境不支持 SHA-256，无法安全比较文件修订')
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes.slice().buffer)
   return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+export function decodeVaultUtf8(bytes: Uint8Array): string {
+  let decoded: string
+  try {
+    decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    throw new Error('文件不是有效的 UTF-8，无法安全解析')
+  }
+  return decoded.charCodeAt(0) === 0xfeff ? decoded.slice(1) : decoded
 }
 
 function baselineForFile(

@@ -34,7 +34,7 @@ describe('vault file scanner', () => {
     const applied = applyVaultSync(project, bootstrap, [])
     const linked: TerrainProject = { ...project, vaultSync: applied.state }
     const unreadable = vaultFile('base content')
-    Object.defineProperty(unreadable, 'text', {
+    Object.defineProperty(unreadable, 'arrayBuffer', {
       value: () => Promise.reject(new DOMException('permission denied', 'NotAllowedError')),
     })
 
@@ -42,6 +42,24 @@ describe('vault file scanner', () => {
     expect(preview.complete).toBe(false)
     expect(preview.changes).toEqual([])
     expect(preview.issues[0].message).toContain('permission denied')
+  })
+
+  it('hashes original bytes so a BOM-only change is not treated as unchanged', async () => {
+    const project = baseProject()
+    const plain = await scanVaultFiles([vaultFile('base content')], project, firstScanAt)
+    const withBom = await scanVaultFiles([vaultFile('\ufeffbase content')], project, firstScanAt)
+
+    expect(withBom.scanFiles[0].note?.content).toBe('base content')
+    expect(withBom.scanFiles[0].rawContentHash).not.toBe(plain.scanFiles[0].rawContentHash)
+  })
+
+  it('reports invalid UTF-8 as partial I/O instead of replacing bytes', async () => {
+    const file = vaultFile(new Uint8Array([0xc3, 0x28]))
+    const preview = await scanVaultFiles([file], baseProject(), firstScanAt)
+
+    expect(preview.complete).toBe(false)
+    expect(preview.changes).toEqual([])
+    expect(preview.issues[0].message).toContain('不是有效的 UTF-8')
   })
 })
 
@@ -71,7 +89,7 @@ function baseProject(): TerrainProject {
   }
 }
 
-function vaultFile(content: string): File {
+function vaultFile(content: BlobPart): File {
   const file = new File([content], 'Note.md', {
     type: 'text/markdown',
     lastModified: Date.parse('2026-08-01T08:00:00.000Z'),
