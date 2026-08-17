@@ -66,6 +66,38 @@ describe('import parsing', () => {
     })
   })
 
+  it('parses only explicit YAML prerequisite fields with provenance', async () => {
+    const file = new File(
+      ['---\ntitle: Mechanics\nprerequisites: [Algebra, Physics]\nbuildsOn: Calculus\n---\n正文中的 [[Geometry]] 只是普通双链。'],
+      'mechanics.md',
+      { type: 'text/markdown' },
+    )
+
+    const result = await parseImportFile(file)
+
+    expect(result.issues).toEqual([])
+    expect(result.notes[0]?.prerequisites).toEqual([
+      { target: 'Algebra', provenance: 'yaml', sourceField: 'prerequisites' },
+      { target: 'Physics', provenance: 'yaml', sourceField: 'prerequisites' },
+      { target: 'Calculus', provenance: 'yaml', sourceField: 'buildsOn' },
+    ])
+    expect(result.notes[0]?.links).toEqual(['Geometry'])
+  })
+
+  it('reports malformed buildsOn with its canonical source field', async () => {
+    const result = await parseImportFile(new File(
+      ['---\ntitle: Mechanics\nbuildsOn: 42\n---\nBody'],
+      'invalid-prerequisite.md',
+      { type: 'text/markdown' },
+    ))
+
+    expect(result.issues).toEqual([{
+      file: 'invalid-prerequisite.md',
+      field: 'buildsOn',
+      message: '必须是非空文本或非空文本数组',
+    }])
+  })
+
   it('merges scalar area and areas into normalized multi-discipline membership', async () => {
     const file = new File(
       ['---\ntitle: Quantum geometry\narea: 数学\nareas: [数学, 物理, " 物理 "]\n---\n交叉学科正文。'],

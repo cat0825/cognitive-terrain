@@ -4,6 +4,43 @@ import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
 import { migrateProject } from '../storage/db'
 import { renderShareCard } from './share-card'
 
+const prerequisiteDeclarationSchema = z.object({
+  target: z.string(),
+  provenance: z.enum(['yaml', 'app-confirmed']),
+  sourceField: z.enum(['prerequisites', 'buildsOn', 'app']),
+  relationId: z.string(),
+})
+
+const prerequisiteTopologySchema = z.object({
+  version: z.literal(1),
+  formulaVersion: z.literal('explicit-prerequisite-dag-v1'),
+  relations: z.array(z.object({
+    id: z.string(),
+    sourceNoteId: z.string(),
+    fromItemId: z.string(),
+    toItemId: z.string(),
+    declaredTarget: z.string(),
+    provenance: z.enum(['yaml', 'app-confirmed']),
+    sourceField: z.enum(['prerequisites', 'buildsOn', 'app']),
+  })),
+  diagnostics: z.array(z.object({
+    id: z.string(),
+    kind: z.enum(['self-link', 'unresolved-target', 'ambiguous-title', 'cycle']),
+    sourceNoteId: z.string(),
+    relationIds: z.array(z.string()),
+    declaredTarget: z.string().optional(),
+    itemIds: z.array(z.string()),
+  })),
+  assignments: z.array(z.object({
+    itemId: z.string(),
+    status: z.enum(['neutral', 'derived', 'excluded']),
+    depth: z.number().int().nonnegative().optional(),
+    branchRootIds: z.array(z.string()),
+    relationIds: z.array(z.string()),
+    sourceNoteIds: z.array(z.string()),
+  })),
+})
+
 const vaultAcceptedFieldHashesSchema = z.object({
   title: z.string().optional(),
   content: z.string().optional(),
@@ -17,6 +54,7 @@ const vaultAcceptedFieldHashesSchema = z.object({
   areas: z.string().optional(),
   reviewedAt: z.string().optional(),
   links: z.string().optional(),
+  prerequisites: z.string().optional(),
 })
 
 const vaultAcceptedNoteSchema = z.object({
@@ -34,6 +72,7 @@ const vaultAcceptedNoteSchema = z.object({
   declaredAreas: z.array(z.string()),
   reviewedAt: z.string().optional(),
   links: z.array(z.string()),
+  prerequisites: z.array(prerequisiteDeclarationSchema).optional(),
 })
 
 const vaultSyncRevisionSchema = z.object({
@@ -113,6 +152,7 @@ const projectBundleSchema = z.object({
       reviewedAt: z.string().optional(),
       cognitiveStateProvenance: z.enum(['yaml', 'app', 'migration']).optional(),
       links: z.array(z.string()).optional(),
+      prerequisites: z.array(prerequisiteDeclarationSchema).optional(),
       x: z.number(),
       y: z.number(),
     }),
@@ -208,6 +248,7 @@ const projectBundleSchema = z.object({
     createdAt: z.string(),
     updatedAt: z.string(),
   })).optional(),
+  prerequisiteTopology: prerequisiteTopologySchema.optional(),
   vaultSync: vaultSyncStateSchema.optional(),
 })
 
@@ -235,6 +276,7 @@ export async function parseProjectBundle(file: File): Promise<TerrainProject> {
     notes: parsed.notes.map((note) => ({
       ...note,
       links: note.links ?? [],
+      prerequisites: note.prerequisites ?? [],
     })),
     snapshots: parsed.snapshots.map((snapshot) => ({
       ...snapshot,

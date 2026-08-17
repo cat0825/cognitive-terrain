@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { createProjectFromNotes } from '../../src/domain/demo'
+import { materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import {
   applyVaultSync,
   buildVaultSyncPreview,
   entityHash,
+  invalidFieldsForIssues,
   snapshotFromTerrainNote,
   type VaultScanResult,
 } from '../../src/domain/vault-sync'
@@ -158,6 +160,33 @@ describe('incremental vault sync', () => {
     expect(preview.unchangedCount).toBe(1)
     expect(preview.changes).toEqual([])
     expect(preview.conflicts).toEqual([])
+  })
+
+  it('preserves prerequisite provenance through baseline and incremental sync', () => {
+    const project = baseProject()
+    const prerequisites = [{
+      target: 'Algebra',
+      provenance: 'app-confirmed',
+      sourceField: 'app',
+    }] as const
+    project.notes[0].prerequisites = materializePrerequisites(project.notes[0].id, prerequisites)
+    const first = scan({ scannedAt: firstScanAt })
+    first.files[0].note!.prerequisites = [...prerequisites]
+
+    const preview = buildVaultSyncPreview(project, first)
+    const applied = applyVaultSync(project, preview, [])
+
+    expect(preview.unchangedCount).toBe(1)
+    expect(applied.inputs[0]?.prerequisites).toEqual(project.notes[0].prerequisites)
+    expect(applied.state.sources[0]?.acceptedNote.prerequisites).toEqual(project.notes[0].prerequisites)
+  })
+
+  it('preserves the accepted prerequisite baseline when buildsOn is malformed', () => {
+    expect(invalidFieldsForIssues([{
+      file: 'Math/Note.md',
+      field: 'buildsOn',
+      message: '必须是非空文本或非空文本数组',
+    }])).toEqual(['prerequisites'])
   })
 
   it('requires field-level resolution for divergent app and vault edits', () => {

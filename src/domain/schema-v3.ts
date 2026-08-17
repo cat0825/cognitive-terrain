@@ -1,6 +1,7 @@
 import { cognitiveStateFromNote } from './cognitive-state'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 import { areasForNote, plateIdForArea } from './knowledge-plates'
+import { buildPrerequisiteTopology } from './prerequisite-topology'
 import {
   legacyTaxonomyNodesForProject,
   normalizeTaxonomyAlias,
@@ -11,6 +12,7 @@ import type { ActivityHistoryState } from './activity-history'
 import type {
   CognitiveState,
   InteractionEvent,
+  PrerequisiteTopology,
   ReferenceAtlasManifest,
   TerrainProfile,
   TerrainProject,
@@ -29,6 +31,7 @@ export interface WorkspaceV3 {
   activeTerrainProfileId: string
   activityHistory?: ActivityHistoryState
   taxonomyVersion?: number
+  prerequisiteTopology?: PrerequisiteTopology
 }
 
 export interface KnowledgeItemV3 {
@@ -69,9 +72,11 @@ export interface RelationV3 {
   fromItemId: string
   toItemId?: string
   targetTitle: string
-  kind: 'wikilink'
+  kind: 'wikilink' | 'prerequisite'
   resolved: boolean
-  provenance: 'import'
+  provenance: 'import' | 'yaml' | 'app-confirmed'
+  sourceNoteId?: string
+  sourceField?: 'prerequisites' | 'buildsOn' | 'app'
 }
 
 export interface PlateMembershipV3 {
@@ -201,6 +206,7 @@ export function migrateTerrainProjectToV3(
     itemIds,
   )
   const titleIndex = buildTitleIndex(project)
+  const prerequisiteTopology = buildPrerequisiteTopology(project.notes)
   const vaultSources = vaultSourcesForProject(project)
   const taxonomyNodes = taxonomyNodesForProject(project)
   validateTaxonomy(taxonomyNodes)
@@ -254,7 +260,7 @@ export function migrateTerrainProjectToV3(
     } satisfies KnowledgeItemV3
   })
 
-  const relations = dedupeById(project.notes.flatMap((note) => note.links.map((targetTitle) => {
+  const wikiLinkRelations = project.notes.flatMap((note) => note.links.map((targetTitle) => {
     const toItemId = titleIndex.get(normalizeTitle(targetTitle))
     return {
       id: `relation-${stableHash(`${note.id}\n${targetTitle}`)}`,
@@ -266,7 +272,20 @@ export function migrateTerrainProjectToV3(
       resolved: toItemId !== undefined,
       provenance: 'import',
     } satisfies RelationV3
-  })))
+  }))
+  const prerequisiteRelations = prerequisiteTopology.relations.map((relation) => ({
+    id: relation.id,
+    workspaceId: project.id,
+    fromItemId: relation.fromItemId,
+    toItemId: relation.toItemId,
+    targetTitle: relation.declaredTarget,
+    kind: 'prerequisite' as const,
+    resolved: true,
+    provenance: relation.provenance,
+    sourceNoteId: relation.sourceNoteId,
+    sourceField: relation.sourceField,
+  } satisfies RelationV3))
+  const relations = dedupeById([...wikiLinkRelations, ...prerequisiteRelations])
 
   const cognitiveStatesByItem = new Map(
     (project.cognitiveStates ?? []).map((state) => [state.itemId, state]),
@@ -367,7 +386,10 @@ export function migrateTerrainProjectToV3(
   const revisions = dedupeById([...migrationRevisions, ...vaultSyncRevisions])
   const warnings = [
     ...(uniqueSources.length === 0 ? ['项目没有可迁移的来源；所有条目均标记为 draft'] : []),
-    ...(relations.some((relation) => !relation.resolved) ? ['部分 WikiLink 无法解析，已保留目标标题'] : []),
+    ...(relations.some((relation) => relation.kind === 'wikilink' && !relation.resolved) ? ['部分 WikiLink 无法解析，已保留目标标题'] : []),
+    ...(prerequisiteTopology.diagnostics.length
+      ? [`${prerequisiteTopology.diagnostics.length} 条 prerequisite 声明未参与结构派生；请检查拓扑诊断`]
+      : []),
   ]
   const bundle: SchemaV3Bundle = {
     workspace: {
@@ -383,6 +405,7 @@ export function migrateTerrainProjectToV3(
         project.taxonomyVersion ?? 0,
         taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
       ),
+      prerequisiteTopology,
     },
     items,
     sources: uniqueSources,

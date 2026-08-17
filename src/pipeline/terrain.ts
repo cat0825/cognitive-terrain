@@ -1,5 +1,6 @@
 import { contours } from 'd3-contour'
 import type { TerrainElevation, TerrainNote, TerrainPeak, TerrainSnapshot } from '../domain/types'
+import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
 
 export interface ContourPath {
   value: number
@@ -17,7 +18,7 @@ export function buildTerrainData(
   gridSize = chooseGridSize(notes.length),
   timeZone = 'Asia/Shanghai',
   bandwidthOverride?: number,
-  elevation: Extract<TerrainElevation, 'density' | 'mastery' | 'exploration'> = 'density',
+  elevation: Extract<TerrainElevation, 'density' | 'mastery' | 'exploration' | 'structure'> = 'density',
 ): TerrainData {
   if (notes.length === 0) {
     return {
@@ -39,6 +40,7 @@ export function buildTerrainData(
   const densityImpulses = new Float32Array(gridSize * gridSize)
   const numeratorImpulses = elevation === 'density' ? undefined : new Float32Array(gridSize * gridSize)
   const evidenceImpulses = elevation === 'density' ? undefined : new Float32Array(gridSize * gridSize)
+  const accumulatedNotes: TerrainNote[] = []
   const rawSnapshots: Array<{
     bucket: string
     density: Float32Array
@@ -47,19 +49,28 @@ export function buildTerrainData(
   }> = []
   for (const [bucket, bucketNotes] of [...byBucket.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     for (const note of bucketNotes) {
+      accumulatedNotes.push(note)
       splat(densityImpulses, gridSize, note.x, note.y, note.weight)
       if (!numeratorImpulses || !evidenceImpulses) continue
+      if (elevation === 'structure') continue
       const value = elevation === 'mastery' ? note.mastery : note.exploration
       if (value === undefined) continue
       const confidence = elevation === 'mastery' ? note.confidence ?? 0.5 : 1
       splat(numeratorImpulses, gridSize, note.x, note.y, note.weight * confidence * value)
       splat(evidenceImpulses, gridSize, note.x, note.y, note.weight * confidence)
     }
+    const structural = elevation === 'structure'
+      ? buildStructuralImpulses(accumulatedNotes, gridSize)
+      : undefined
     rawSnapshots.push({
       bucket,
       density: gaussianBlur(densityImpulses, gridSize, bandwidth),
-      numerator: numeratorImpulses ? gaussianBlur(numeratorImpulses, gridSize, bandwidth) : undefined,
-      evidence: evidenceImpulses ? gaussianBlur(evidenceImpulses, gridSize, bandwidth) : undefined,
+      numerator: structural
+        ? gaussianBlur(structural.numerator, gridSize, bandwidth)
+        : numeratorImpulses ? gaussianBlur(numeratorImpulses, gridSize, bandwidth) : undefined,
+      evidence: structural
+        ? gaussianBlur(structural.evidence, gridSize, bandwidth)
+        : evidenceImpulses ? gaussianBlur(evidenceImpulses, gridSize, bandwidth) : undefined,
     })
   }
 
@@ -75,6 +86,26 @@ export function buildTerrainData(
   }))
   const peaks = detectPeaks(snapshots.at(-1)?.values ?? finalDensity, gridSize, notes, bandwidth)
   return { snapshots, peaks, bandwidth }
+}
+
+function buildStructuralImpulses(notes: readonly TerrainNote[], gridSize: number): {
+  numerator: Float32Array
+  evidence: Float32Array
+} {
+  const topology = buildPrerequisiteTopology(notes)
+  const derived = topology.assignments.filter((assignment) => assignment.status === 'derived')
+  const maxDepth = Math.max(1, ...derived.map((assignment) => assignment.depth ?? 0))
+  const assignmentById = new Map(derived.map((assignment) => [assignment.itemId, assignment]))
+  const numerator = new Float32Array(gridSize * gridSize)
+  const evidence = new Float32Array(gridSize * gridSize)
+  for (const note of notes) {
+    const assignment = assignmentById.get(note.id)
+    if (!assignment) continue
+    const strata = 0.2 + 0.8 * ((assignment.depth ?? 0) / maxDepth)
+    splat(numerator, gridSize, note.x, note.y, note.weight * strata)
+    splat(evidence, gridSize, note.x, note.y, note.weight)
+  }
+  return { numerator, evidence }
 }
 
 export function chooseGridSize(noteCount: number): number {

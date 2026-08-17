@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoProject } from '../../src/domain/demo'
 import { plateIdForArea } from '../../src/domain/knowledge-plates'
+import { materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { DEFAULT_TERRAIN_PROFILES, profileIdForVisualDimension } from '../../src/domain/terrain-profile'
@@ -150,6 +151,29 @@ describe('Schema v3 dry-run migration', () => {
       expect.objectContaining({ fromItemId: 'linear-algebra', toItemId: 'probability', resolved: true }),
       expect.objectContaining({ fromItemId: 'linear-algebra', targetTitle: '尚未创建的主题', resolved: false }),
     ])
+  })
+
+  it('materializes prerequisite relations separately from WikiLinks with source provenance', () => {
+    const project = migrationFixture()
+    project.notes[1].prerequisites = materializePrerequisites('probability', [{
+      target: '线性代数',
+      provenance: 'yaml',
+      sourceField: 'prerequisites',
+    }])
+
+    const { bundle } = migrateTerrainProjectToV3(project)
+    const relation = bundle.relations.find((candidate) => candidate.kind === 'prerequisite')
+
+    expect(relation).toMatchObject({
+      fromItemId: 'linear-algebra',
+      toItemId: 'probability',
+      sourceNoteId: 'probability',
+      sourceField: 'prerequisites',
+      provenance: 'yaml',
+      resolved: true,
+    })
+    expect(bundle.workspace.prerequisiteTopology?.assignments.find((item) => item.itemId === 'probability'))
+      .toMatchObject({ depth: 1, branchRootIds: ['linear-algebra'] })
   })
 
   it('keeps a WikiLink unresolved when its normalized title matches multiple items', () => {
@@ -311,5 +335,8 @@ describe('terrain profiles', () => {
     ])
     expect(profileIdForVisualDimension('area')).toBe('density')
     expect(profileIdForVisualDimension('temperature')).toBe('density')
+    expect(profileIdForVisualDimension('structure')).toBe('structure')
+    expect(DEFAULT_TERRAIN_PROFILES.find((profile) => profile.id === 'structure')?.formulaVersion)
+      .toBe('explicit-prerequisite-strata-v1')
   })
 })

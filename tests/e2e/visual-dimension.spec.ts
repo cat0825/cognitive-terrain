@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const dimensions = ['密度', '熟练度', '探索度', '温度', '领域'] as const
+const dimensions = ['密度', '熟练度', '探索度', '基础层级', '温度', '领域'] as const
 
-test('switches point cloud encoding across all five visual dimensions', async ({ page }) => {
+test('switches point cloud encoding across all six visual dimensions', async ({ page }) => {
   test.setTimeout(process.env.CI ? 90_000 : 45_000)
   const errors = collectErrors(page)
 
@@ -29,6 +29,12 @@ test('switches point cloud encoding across all five visual dimensions', async ({
     }
     await expect(panel.locator('.dimension-help')).not.toBeEmpty()
     await expect(page.locator('canvas').first()).toBeVisible()
+    if (label === '基础层级') {
+      const legend = panel.getByRole('group', { name: '基础层级图例' })
+      await expect(legend).toBeVisible()
+      await expect(legend).toHaveAttribute('data-formula-version', 'explicit-prerequisite-strata-v1')
+      await expect(legend).toContainText('没有显式 prerequisite / buildsOn 关系')
+    }
     if (label === '领域') {
       const legend = panel.getByRole('group', { name: '知识板块图例' })
       await expect(legend).toBeVisible()

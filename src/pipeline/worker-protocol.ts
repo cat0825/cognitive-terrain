@@ -22,7 +22,7 @@ export type AnalysisWorkerRequest =
       notes: TerrainNote[]
       gridSize: number
       timeZone: string
-      elevation: Extract<TerrainElevation, 'mastery' | 'exploration'>
+      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'structure'>
     }
   | {
       type: 'cancel'

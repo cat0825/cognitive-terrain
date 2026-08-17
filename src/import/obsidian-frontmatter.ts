@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { NoteStatus } from '../domain/types'
+import type { NoteStatus, PrerequisiteInput } from '../domain/types'
 import { areasForNote } from '../domain/knowledge-plates'
 
 const scoreSchema = z.number().finite().min(0).max(1)
@@ -19,10 +19,13 @@ export interface ObsidianCognitiveFields {
   areas?: string[]
   declaredAreas?: string[]
   reviewedAt?: string
+  prerequisites?: PrerequisiteInput[]
 }
 
+type ObsidianFrontmatterField = keyof ObsidianCognitiveFields | 'buildsOn'
+
 export interface ObsidianFrontmatterIssue {
-  field: keyof ObsidianCognitiveFields
+  field: ObsidianFrontmatterField
   message: string
 }
 
@@ -39,8 +42,36 @@ export function parseObsidianCognitiveFields(frontmatter: Record<string, unknown
   parseField(frontmatter, fields, issues, 'status', statusSchema)
   parseAreaFields(frontmatter, fields, issues)
   parseField(frontmatter, fields, issues, 'reviewedAt', reviewedAtSchema, (value) => new Date(value).toISOString())
+  parsePrerequisites(frontmatter, fields, issues)
 
   return { fields, issues }
+}
+
+function parsePrerequisites(
+  source: Record<string, unknown>,
+  target: ObsidianCognitiveFields,
+  issues: ObsidianFrontmatterIssue[],
+): void {
+  const declarations: PrerequisiteInput[] = []
+  for (const [sourceKey, sourceField] of [
+    ['prerequisites', 'prerequisites'],
+    ['buildsOn', 'buildsOn'],
+    ['builds-on', 'buildsOn'],
+  ] as const) {
+    if (!(sourceKey in source)) continue
+    const result = z.union([areaSchema, areaListSchema]).safeParse(source[sourceKey])
+    if (!result.success) {
+      issues.push({ field: sourceField, message: '必须是非空文本或非空文本数组' })
+      continue
+    }
+    const values = typeof result.data === 'string' ? [result.data] : result.data
+    declarations.push(...values.map((value) => ({
+      target: value.trim(),
+      provenance: 'yaml' as const,
+      sourceField,
+    })))
+  }
+  if (declarations.length) target.prerequisites = declarations
 }
 
 function parseAreaFields(
