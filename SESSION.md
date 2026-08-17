@@ -9,7 +9,7 @@
 - Issue #23：本地实现与定向验证 100%，分支 `codex/incremental-vault-sync`。
 - PR：[#33](https://github.com/cat0825/cognitive-terrain/pull/33)，base=`main`，已关联 Issue #23，合并后自动关闭；GitHub quality check 正在运行，不等待 CI 继续本地工作。
 - 路线图：[Issue #29](https://github.com/cat0825/cognitive-terrain/issues/29)。
-- Issue #24：本地实现与 focused 验证已完成，当前分支 `codex/obsidian-diff-writeback` 尚未提交/推送。
+- Issue #24：实现已提交为 `82ece6b` 并创建 stacked [PR #34](https://github.com/cat0825/cognitive-terrain/pull/34)，base=`codex/incremental-vault-sync`。
 
 ## 已完成
 
@@ -35,12 +35,12 @@
 
 1. PR #33 的 GitHub CI/维护者 review 尚未完成。
 2. PR #30 仍有 E2E timeout，PR #31 仍有 a11y timeout，PR #32 仍有 E2E/a11y/visual failure；三个 PR 的 quality 均通过，失败与 Issue #23 分支无关。
-3. Issue #24 尚未提交、推送和创建 PR。
+3. PR #34 的 GitHub CI/维护者 review 尚未完成，不等待长测试阻塞后续 Issue。
 
 ## 下一步
 
 1. Fresh-check PR #33 的 checks/review；只处理可复现的本分支失败，不等待长耗时 CI 阻塞其他工作。
-2. Issue #24 完成最终检查后提交并推送，创建 stacked PR，base=`codex/incremental-vault-sync`；不要等待 PR #33 的长 E2E。
+2. Fresh-check PR #34；只处理可复现的本分支失败，不等待长 E2E。
 3. 分别处理 PR #30/#31/#32 的既有超时或断言失败，不把修复混入 PR #33。
 
 ## 风险 / 红线
