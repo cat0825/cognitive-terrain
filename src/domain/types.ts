@@ -71,6 +71,8 @@ export interface TerrainProfile {
 
 export interface NoteInput {
   id?: string
+  sourceId?: string
+  sourceKey?: string
   title?: string
   content: string
   createdAt: string
@@ -93,6 +95,8 @@ export interface NoteInput {
 
 export interface TerrainNote {
   id: string
+  sourceId?: string
+  sourceKey?: string
   fingerprint: string
   title: string
   content: string
@@ -155,6 +159,83 @@ export interface TerrainProject {
   taxonomyNodes?: TaxonomyNode[]
   taxonomyVersion?: number
   referenceAtlases?: ReferenceAtlasManifest[]
+  vaultSync?: VaultSyncState
+}
+
+export type VaultSyncField =
+  | 'title'
+  | 'content'
+  | 'createdAt'
+  | 'tags'
+  | 'weight'
+  | 'mastery'
+  | 'confidence'
+  | 'exploration'
+  | 'status'
+  | 'areas'
+  | 'reviewedAt'
+  | 'links'
+
+export interface VaultSyncNoteSnapshot {
+  sourceKey?: string
+  title: string
+  content: string
+  createdAt: string
+  tags: string[]
+  weight: number
+  mastery?: number
+  confidence?: number
+  exploration?: number
+  status?: NoteStatus
+  areas: string[]
+  declaredAreas: string[]
+  reviewedAt?: string
+  links: string[]
+}
+
+export interface VaultSyncVault {
+  vaultId: string
+  displayName: string
+  accessMode: 'directory-handle' | 'reselect-files'
+  lastScannedAt: string
+}
+
+export interface VaultSourceState {
+  sourceId: string
+  itemId: string
+  vaultId: string
+  relativePath: string
+  status: 'present' | 'removed'
+  rawContentHash: string
+  entityHash: string
+  lastModifiedMs?: number
+  size?: number
+  acceptedFieldHashes: Partial<Record<VaultSyncField, string>>
+  acceptedNote: VaultSyncNoteSnapshot
+  acceptedAt: string
+}
+
+export interface VaultSyncRevision {
+  id: string
+  sourceId: string
+  itemId: string
+  operation: 'add' | 'modify' | 'rename' | 'remove'
+  rawContentHash: string
+  previousContentHash?: string
+  fromPath?: string
+  toPath?: string
+  entityHash: string
+  acceptedAt: string
+  occurredAt: string
+  timestampSource: 'file-last-modified' | 'accepted-at'
+  provenance: 'vault-sync'
+}
+
+export interface VaultSyncState {
+  version: 1
+  vaults: VaultSyncVault[]
+  sources: VaultSourceState[]
+  revisions: VaultSyncRevision[]
 }
 
 export interface AnalysisOptions {
@@ -203,7 +284,12 @@ export interface ProjectSummary {
   noteCount: number
 }
 
-export type ProjectBackupReason = 'manual' | 'before-save' | 'before-delete' | 'before-restore'
+export type ProjectBackupReason =
+  | 'manual'
+  | 'before-save'
+  | 'before-delete'
+  | 'before-restore'
+  | 'before-vault-sync'
 
 export interface ProjectBackup {
   id: string

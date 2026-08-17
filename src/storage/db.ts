@@ -33,7 +33,13 @@ import type {
 } from '../domain/types'
 
 export const DATABASE_NAME = 'cognitive-terrain'
-export const DATABASE_VERSION = 6
+export const DATABASE_VERSION = 7
+
+export interface StoredVaultBinding {
+  workspaceId: string
+  vaultId: string
+  handle: unknown
+}
 
 export interface StoredCognitiveState extends CognitiveState {
   workspaceId: string
@@ -175,6 +181,11 @@ export interface CognitiveTerrainDB extends DBSchema {
       'by-created-at': [string, string]
     }
   }
+  vaultBindings: {
+    key: [string, string]
+    value: StoredVaultBinding
+    indexes: { 'by-workspace': string }
+  }
 }
 
 export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] = [
@@ -193,6 +204,7 @@ export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] =
   'terrainProfiles',
   'citations',
   'revisions',
+  'vaultBindings',
 ]
 
 type DatabaseWriteMode = 'readwrite' | 'versionchange'
@@ -344,6 +356,7 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
   transaction: DatabaseWriteTransaction<Mode>,
   workspaceId: string,
   includeRevisions = true,
+  includeVaultBindings = false,
 ): Promise<void> {
   await transaction.objectStore('workspaces').delete(workspaceId)
   const stores: WorkspaceStoreName[] = [
@@ -359,6 +372,7 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
     'terrainProfiles',
     'citations',
     ...(includeRevisions ? ['revisions' as const] : []),
+    ...(includeVaultBindings ? ['vaultBindings' as const] : []),
   ]
   await Promise.all(stores.map((storeName) => clearWorkspaceStore(transaction, storeName, workspaceId)))
 }
@@ -513,6 +527,17 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
+  if (oldVersion < 7) createVaultBindingStore(database)
+  if (oldVersion >= 6 && oldVersion < 7) {
+    const store = transaction.objectStore('projects')
+    let cursor = await store.openCursor()
+    while (cursor) {
+      const project = migrateProject(cursor.value)
+      await cursor.update(project)
+      await replaceProjectMaterialization(transaction, project, 3)
+      cursor = await cursor.continue()
+    }
+  }
 }
 
 function createTaxonomyNodeStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
@@ -526,6 +551,11 @@ function createReferenceAtlasStore(database: IDBPDatabase<CognitiveTerrainDB>): 
   const referenceAtlases = database.createObjectStore('referenceAtlases', { keyPath: ['workspaceId', 'id'] })
   referenceAtlases.createIndex('by-workspace', 'workspaceId')
   referenceAtlases.createIndex('by-taxonomy-version', ['workspaceId', 'taxonomyVersion'])
+}
+
+function createVaultBindingStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const vaultBindings = database.createObjectStore('vaultBindings', { keyPath: ['workspaceId', 'vaultId'] })
+  vaultBindings.createIndex('by-workspace', 'workspaceId')
 }
 
 async function clearWorkspaceStore<Mode extends DatabaseWriteMode>(

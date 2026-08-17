@@ -24,6 +24,7 @@ import {
   validateTaxonomy,
 } from '../domain/taxonomy'
 import { migrateTerrainProjectToV3 } from '../domain/schema-v3'
+import type { VaultSyncPreview, VaultSyncResolution } from '../domain/vault-sync'
 import { TODAY_STUDY_PACK_NAME, todayStudyPack } from '../domain/study-pack'
 import { runAnalysis, type AnalysisHandle } from '../pipeline/worker-client'
 import { parseWikiLinks } from '../import/parse'
@@ -103,6 +104,10 @@ interface AppState {
   ) => Promise<void>
   loadStudyPack: () => Promise<void>
   mergeNotes: (newNotes: NoteInput[], options?: AnalysisOptions) => Promise<void>
+  applyVaultSync: (
+    preview: VaultSyncPreview,
+    resolutions: VaultSyncResolution[],
+  ) => Promise<boolean>
   updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[]; mastery?: number | null; confidence?: number | null; exploration?: number | null; status?: TerrainProject['notes'][number]['status'] | null; area?: string | null; areas?: string[] | null; reviewedAt?: string | null }) => Promise<void>
   markNoteReviewed: (noteId: string) => Promise<void>
   cancelAnalysis: () => void
@@ -124,6 +129,7 @@ interface AppState {
 interface AnalysisCommitContext {
   baseProject: TerrainProject
   events?: InteractionEvent[]
+  vaultSync?: TerrainProject['vaultSync']
 }
 
 interface PerformanceControls {
@@ -283,17 +289,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       const project = commit
         ? commitAnalyzedProject(analyzedProject, commit.baseProject, commit.events)
         : analyzedProject
+      const committedProject = commit?.vaultSync
+        ? {
+            ...project,
+            updatedAt: commit.vaultSync.vaults.reduce(
+              (latest, vault) => vault.lastScannedAt > latest ? vault.lastScannedAt : latest,
+              commit.baseProject.updatedAt,
+            ),
+            vaultSync: commit.vaultSync,
+          }
+        : project
       const embeddingMode: 'semantic' | 'fallback' =
-        project.embeddingMode === 'semantic' ? 'semantic' : 'fallback'
+        committedProject.embeddingMode === 'semantic' ? 'semantic' : 'fallback'
       set({
         lastAnalysis: {
-          modelId: project.modelId,
+          modelId: committedProject.modelId,
           embeddingMode,
           device: options.embeddingStrategy === 'deterministic' ? 'local' : 'webgpu/wasm',
           elapsedMs: Math.round(performance.now() - startedAt),
         },
       })
-      await get().replaceProject(project)
+      if (commit?.vaultSync) {
+        const normalizedProject = migrateProject(committedProject)
+        const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
+        await saveVaultSyncProject(commit.baseProject, normalizedProject)
+        localStorage.setItem('cognitive-terrain:last-project', normalizedProject.id)
+        setProjectState(set, normalizedProject)
+        await Promise.all([get().reloadProjects(), get().reloadBackups()])
+      } else {
+        await get().replaceProject(committedProject)
+      }
       set({ isAnalyzing: false, progress: null })
     } catch (error) {
       set({
@@ -316,6 +341,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const stateProvenance = new Map(current.cognitiveStates.map((state) => [state.itemId, state.provenance]))
     const existing: NoteInput[] = current.notes.map((note) => ({
       id: note.id,
+      sourceId: note.sourceId,
+      sourceKey: note.sourceKey,
       title: note.title,
       content: note.content,
       createdAt: note.createdAt,
@@ -350,6 +377,50 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     await get().startAnalysis(current.name, merged, effective, { baseProject: current })
   },
+  applyVaultSync: async (preview, resolutions) => {
+    const current = get().project
+    try {
+      const { applyVaultSync: applyVaultSyncPreview } = await import('../domain/vault-sync')
+      const applied = applyVaultSyncPreview(current, preview, resolutions)
+      if (!preview.bootstrap && preview.changes.length === 0) return true
+      if (preview.changes.length === 0) {
+        const sourceByItem = new Map(applied.state.sources.map((source) => [source.itemId, source]))
+        const next: TerrainProject = {
+          ...current,
+          updatedAt: preview.scannedAt,
+          notes: current.notes.map((note) => {
+            const source = sourceByItem.get(note.id)
+            return source ? {
+              ...note,
+              sourceId: source.sourceId,
+              sourceKey: source.acceptedNote.sourceKey,
+            } : note
+          }),
+          vaultSync: applied.state,
+        }
+        const normalized = migrateProject(next)
+        const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
+        await saveVaultSyncProject(current, normalized)
+        setProjectState(set, normalized)
+        await Promise.all([get().reloadProjects(), get().reloadBackups()])
+        return true
+      }
+      const effective = {
+        embeddingStrategy: (current.embeddingMode === 'semantic' ? 'transformers' : 'deterministic') as
+          | 'transformers'
+          | 'deterministic',
+      }
+      await get().startAnalysis(current.name, applied.inputs, effective, {
+        baseProject: current,
+        events: applied.events,
+        vaultSync: applied.state,
+      })
+      return get().error === null
+    } catch (error) {
+      set({ error: `Vault 同步失败：${error instanceof Error ? error.message : String(error)}` })
+      return false
+    }
+  },
   updateNote: async (noteId, patch) => {
     const current = get().project
     const target = current.notes.find((note) => note.id === noteId)
@@ -364,6 +435,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (note.id !== noteId) {
         return {
           id: note.id,
+          sourceId: note.sourceId,
+          sourceKey: note.sourceKey,
           title: note.title,
           content: note.content,
           createdAt: note.createdAt,
@@ -391,6 +464,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           : areasForNote(note)
       return {
         id: note.id,
+        sourceId: note.sourceId,
+        sourceKey: note.sourceKey,
         title: patch.title ?? note.title,
         content: patch.content ?? note.content,
         createdAt: note.createdAt,

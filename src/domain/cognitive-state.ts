@@ -72,5 +72,6 @@ export function commitAnalyzedProject(
     taxonomyNodes: baseProject.taxonomyNodes,
     taxonomyVersion: baseProject.taxonomyVersion,
     referenceAtlases: baseProject.referenceAtlases,
+    vaultSync: baseProject.vaultSync,
   }
 }

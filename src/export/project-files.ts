@@ -4,6 +4,79 @@ import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
 import { migrateProject } from '../storage/db'
 import { renderShareCard } from './share-card'
 
+const vaultAcceptedFieldHashesSchema = z.object({
+  title: z.string().optional(),
+  content: z.string().optional(),
+  createdAt: z.string().optional(),
+  tags: z.string().optional(),
+  weight: z.string().optional(),
+  mastery: z.string().optional(),
+  confidence: z.string().optional(),
+  exploration: z.string().optional(),
+  status: z.string().optional(),
+  areas: z.string().optional(),
+  reviewedAt: z.string().optional(),
+  links: z.string().optional(),
+})
+
+const vaultAcceptedNoteSchema = z.object({
+  sourceKey: z.string().optional(),
+  title: z.string(),
+  content: z.string(),
+  createdAt: z.string(),
+  tags: z.array(z.string()),
+  weight: z.number(),
+  mastery: z.number().min(0).max(1).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  exploration: z.number().min(0).max(1).optional(),
+  status: z.enum(['seed', 'growing', 'stable', 'gap', 'archived']).optional(),
+  areas: z.array(z.string()),
+  declaredAreas: z.array(z.string()),
+  reviewedAt: z.string().optional(),
+  links: z.array(z.string()),
+})
+
+const vaultSyncRevisionSchema = z.object({
+  id: z.string(),
+  sourceId: z.string(),
+  itemId: z.string(),
+  operation: z.enum(['add', 'modify', 'rename', 'remove']),
+  rawContentHash: z.string(),
+  previousContentHash: z.string().optional(),
+  fromPath: z.string().optional(),
+  toPath: z.string().optional(),
+  entityHash: z.string(),
+  acceptedAt: z.string(),
+  occurredAt: z.string(),
+  timestampSource: z.enum(['file-last-modified', 'accepted-at']),
+  provenance: z.literal('vault-sync'),
+})
+
+const vaultSyncStateSchema = z.object({
+  version: z.literal(1),
+  vaults: z.array(z.object({
+    vaultId: z.string(),
+    displayName: z.string(),
+    accessMode: z.enum(['directory-handle', 'reselect-files']),
+    lastScannedAt: z.string(),
+  })),
+  sources: z.array(z.object({
+    sourceId: z.string(),
+    itemId: z.string(),
+    vaultId: z.string(),
+    relativePath: z.string(),
+    status: z.enum(['present', 'removed']),
+    rawContentHash: z.string(),
+    entityHash: z.string(),
+    lastModifiedMs: z.number().optional(),
+    size: z.number().nonnegative().optional(),
+    acceptedFieldHashes: vaultAcceptedFieldHashesSchema,
+    acceptedNote: vaultAcceptedNoteSchema,
+    acceptedAt: z.string(),
+  })),
+  revisions: z.array(vaultSyncRevisionSchema),
+})
+
 const projectBundleSchema = z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   id: z.string(),
@@ -18,6 +91,8 @@ const projectBundleSchema = z.object({
   notes: z.array(
     z.object({
       id: z.string(),
+      sourceId: z.string().optional(),
+      sourceKey: z.string().optional(),
       fingerprint: z.string(),
       title: z.string(),
       content: z.string(),
@@ -133,6 +208,7 @@ const projectBundleSchema = z.object({
     createdAt: z.string(),
     updatedAt: z.string(),
   })).optional(),
+  vaultSync: vaultSyncStateSchema.optional(),
 })
 
 export function downloadProjectBundle(project: TerrainProject): void {

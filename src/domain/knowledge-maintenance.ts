@@ -113,7 +113,7 @@ function buildNoteIndex(notes: TerrainNote[]): Map<string, TerrainNote[]> {
 
 function resolveLink(index: Map<string, TerrainNote[]>, value: string): TerrainNote | undefined {
   const candidates = index.get(normalizeKey(value))
-  return candidates?.length === 1 ? candidates[0] : candidates?.[0]
+  return candidates?.length === 1 ? candidates[0] : undefined
 }
 
 function noteKeys(note: TerrainNote): string[] {
