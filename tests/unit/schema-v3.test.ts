@@ -115,6 +115,50 @@ describe('Schema v3 dry-run migration', () => {
     })
   })
 
+  it('materializes exploration decisions while removing current dangling note references', () => {
+    const project = migrationFixture()
+    project.explorationItems = [{
+      id: 'explore-missing-note',
+      suggestion: {
+        id: 'suggest-missing-note',
+        reason: { code: 'stale-reviewed-item', detail: '复习时间已过期' },
+        supportingItemIds: ['linear-algebra', 'deleted-note', 'linear-algebra'],
+        sourceRoute: { kind: 'note', noteId: 'deleted-note' },
+        evidenceFingerprint: 'stale-v1',
+        priority: 0.75,
+        action: { title: '重新复习线性代数' },
+      },
+      status: 'completed',
+      action: { title: '重新复习线性代数', detail: '检查核心定义' },
+      lastExploredAt: project.updatedAt,
+      updatedAt: project.updatedAt,
+      history: [{
+        id: 'complete-stale-review',
+        type: 'complete',
+        occurredAt: project.updatedAt,
+        fromStatus: 'in-progress',
+        toStatus: 'completed',
+        evidenceFingerprint: 'stale-v1',
+        action: { title: '重新复习线性代数', detail: '检查核心定义' },
+      }],
+    }]
+
+    const { bundle, report } = migrateTerrainProjectToV3(project)
+
+    expect(report.explorationItemCount).toBe(1)
+    expect(bundle.explorationItems[0]).toMatchObject({
+      status: 'completed',
+      suggestion: {
+        supportingItemIds: ['linear-algebra'],
+        sourceRoute: { kind: 'unavailable', originalKind: 'note' },
+      },
+      history: [expect.objectContaining({
+        type: 'complete',
+        action: expect.objectContaining({ title: '重新复习线性代数' }),
+      })],
+    })
+  })
+
   it('preserves the declared area label while resolving an alias to a versioned taxonomy node', () => {
     const project = migrationFixture()
     const declaredLabel = '  ＳＴＡＴＳ  '

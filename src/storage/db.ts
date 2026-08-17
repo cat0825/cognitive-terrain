@@ -11,6 +11,7 @@ import { areasForNote, plateIdForArea } from '../domain/knowledge-plates'
 import { legacyTaxonomyNodesForProject, validateTaxonomy } from '../domain/taxonomy'
 import {
   migrateTerrainProjectToV3,
+  normalizeExplorationItems,
   type CitationV3,
   type KnowledgeItemV3,
   type LayoutRecordV3,
@@ -24,6 +25,7 @@ import {
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from '../domain/terrain-profile'
 import type {
   CognitiveState,
+  ExplorationLifecycleItem,
   InteractionEvent,
   ProjectBackup,
   ReferenceAtlasManifest,
@@ -33,7 +35,7 @@ import type {
 } from '../domain/types'
 
 export const DATABASE_NAME = 'cognitive-terrain'
-export const DATABASE_VERSION = 6
+export const DATABASE_VERSION = 7
 
 export interface StoredCognitiveState extends CognitiveState {
   workspaceId: string
@@ -52,6 +54,10 @@ export interface StoredLayoutRecord extends LayoutRecordV3 {
 }
 
 export interface StoredTerrainProfile extends TerrainProfile {
+  workspaceId: string
+}
+
+export interface StoredExplorationLifecycleItem extends ExplorationLifecycleItem {
   workspaceId: string
 }
 
@@ -175,6 +181,15 @@ export interface CognitiveTerrainDB extends DBSchema {
       'by-created-at': [string, string]
     }
   }
+  explorationItems: {
+    key: [string, string]
+    value: StoredExplorationLifecycleItem
+    indexes: {
+      'by-workspace': string
+      'by-status': [string, string]
+      'by-updated-at': [string, string]
+    }
+  }
 }
 
 export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] = [
@@ -193,6 +208,7 @@ export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] =
   'terrainProfiles',
   'citations',
   'revisions',
+  'explorationItems',
 ]
 
 type DatabaseWriteMode = 'readwrite' | 'versionchange'
@@ -284,6 +300,10 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     referenceAtlases,
     project.activeReferenceAtlasId,
   )
+  const explorationItems = normalizeExplorationItems(
+    project.explorationItems ?? [],
+    new Set(migratedNotes.map((note) => note.id)),
+  )
   return {
     ...project,
     schemaVersion: 3,
@@ -302,6 +322,7 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     ),
     referenceAtlases,
     activeReferenceAtlasId,
+    explorationItems,
   }
 }
 
@@ -342,6 +363,10 @@ export async function replaceProjectMaterialization<Mode extends DatabaseWriteMo
     })),
     ...bundle.citations.map((citation) => () => transaction.objectStore('citations').put(citation)),
     ...bundle.revisions.map((revision) => () => transaction.objectStore('revisions').put(revision)),
+    ...bundle.explorationItems.map((item) => () => transaction.objectStore('explorationItems').put({
+      ...item,
+      workspaceId: project.id,
+    })),
   ]
   await Promise.all(writes.map((write) => Promise.resolve().then(write)))
 }
@@ -364,6 +389,7 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
     'layouts',
     'terrainProfiles',
     'citations',
+    'explorationItems',
     ...(includeRevisions ? ['revisions' as const] : []),
   ]
   await Promise.all(stores.map((storeName) => clearWorkspaceStore(transaction, storeName, workspaceId)))
@@ -386,6 +412,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     storedTerrainProfiles,
     citations,
     revisions,
+    storedExplorationItems,
   ] = await Promise.all([
     database.getAllFromIndex('items', 'by-workspace', workspaceId),
     database.getAllFromIndex('sources', 'by-workspace', workspaceId),
@@ -399,6 +426,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     database.getAllFromIndex('terrainProfiles', 'by-workspace', workspaceId),
     database.getAllFromIndex('citations', 'by-workspace', workspaceId),
     database.getAllFromIndex('revisions', 'by-workspace', workspaceId),
+    database.getAllFromIndex('explorationItems', 'by-workspace', workspaceId),
   ])
   return {
     workspace,
@@ -414,6 +442,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     terrainProfiles: storedTerrainProfiles.map(stripWorkspaceId),
     citations,
     revisions,
+    explorationItems: storedExplorationItems.map(stripWorkspaceId),
   }
 }
 
@@ -479,6 +508,8 @@ function createSchemaV3Stores(database: IDBPDatabase<CognitiveTerrainDB>): void 
   revisions.createIndex('by-workspace', 'workspaceId')
   revisions.createIndex('by-entity', ['workspaceId', 'entityId'])
   revisions.createIndex('by-created-at', ['workspaceId', 'createdAt'])
+
+  createExplorationItemStore(database)
 }
 
 async function upgradeDatabase(
@@ -507,9 +538,22 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
+  if (oldVersion >= 5 && oldVersion < 7) {
+    createExplorationItemStore(database)
+  }
   if (oldVersion >= 5 && oldVersion < 6) {
     createTaxonomyNodeStore(database)
     createReferenceAtlasStore(database)
+    const store = transaction.objectStore('projects')
+    let cursor = await store.openCursor()
+    while (cursor) {
+      const project = migrateProject(cursor.value)
+      await cursor.update(project)
+      await replaceProjectMaterialization(transaction, project, 3)
+      cursor = await cursor.continue()
+    }
+  }
+  if (oldVersion >= 6 && oldVersion < 7) {
     const store = transaction.objectStore('projects')
     let cursor = await store.openCursor()
     while (cursor) {
@@ -532,6 +576,15 @@ function createReferenceAtlasStore(database: IDBPDatabase<CognitiveTerrainDB>): 
   const referenceAtlases = database.createObjectStore('referenceAtlases', { keyPath: ['workspaceId', 'id'] })
   referenceAtlases.createIndex('by-workspace', 'workspaceId')
   referenceAtlases.createIndex('by-taxonomy-version', ['workspaceId', 'taxonomyVersion'])
+}
+
+function createExplorationItemStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const explorationItems = database.createObjectStore('explorationItems', {
+    keyPath: ['workspaceId', 'id'],
+  })
+  explorationItems.createIndex('by-workspace', 'workspaceId')
+  explorationItems.createIndex('by-status', ['workspaceId', 'status'])
+  explorationItems.createIndex('by-updated-at', ['workspaceId', 'updatedAt'])
 }
 
 async function clearWorkspaceStore<Mode extends DatabaseWriteMode>(

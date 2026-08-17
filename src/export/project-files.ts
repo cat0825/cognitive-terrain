@@ -1,9 +1,107 @@
 import { z } from 'zod'
 import { buildProjectReferenceGapReport, type ReferenceGapReport } from '../domain/reference-gaps'
+import { generateProjectExplorationSuggestions } from '../domain/exploration-loop'
 import type { TerrainProject, TerrainSnapshot } from '../domain/types'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
 import { migrateProject } from '../storage/db'
 import { drawReferenceGapSummary, renderShareCard } from './share-card'
+
+const explorationActionSchema = z.object({
+  title: z.string(),
+  detail: z.string().optional(),
+})
+
+const explorationStatusSchema = z.enum([
+  'proposed',
+  'accepted',
+  'in-progress',
+  'completed',
+  'snoozed',
+  'dismissed',
+  'rejected',
+])
+
+const explorationSourceRouteSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('note'), noteId: z.string() }),
+  z.object({
+    kind: z.literal('relationship'),
+    bridgeId: z.string(),
+    fromItemId: z.string(),
+    toItemId: z.string().optional(),
+    targetTitle: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal('reference-node'),
+    atlasId: z.string(),
+    taxonomyNodeId: z.string(),
+  }),
+  z.object({ kind: z.literal('goal'), goalId: z.string(), noteId: z.string().optional() }),
+  z.object({
+    kind: z.literal('unavailable'),
+    originalKind: z.enum(['note', 'relationship', 'reference-node', 'goal']),
+    detail: z.string().optional(),
+  }),
+])
+
+const explorationItemSchema = z.object({
+  id: z.string(),
+  suggestion: z.object({
+    id: z.string(),
+    reason: z.object({
+      code: z.enum([
+        'reference-gap',
+        'stale-reviewed-item',
+        'unresolved-bridge',
+        'unassessed-note',
+        'low-confidence-note',
+        'user-marked-goal',
+      ]),
+      detail: z.string(),
+    }),
+    supportingItemIds: z.array(z.string()),
+    sourceRoute: explorationSourceRouteSchema,
+    evidenceFingerprint: z.string(),
+    priority: z.number().finite(),
+    action: explorationActionSchema,
+    referenceBoundary: z.object({
+      atlasId: z.string(),
+      taxonomyNodeId: z.string(),
+      label: z.string().optional(),
+      taxonomyVersion: z.union([z.string(), z.number()]).optional(),
+    }).optional(),
+    reopenReason: z.object({
+      code: z.enum([
+        'fresh-evidence-after-completed',
+        'fresh-evidence-after-dismissed',
+        'fresh-evidence-after-rejected',
+      ]),
+      previousEvidenceFingerprint: z.string(),
+      previousDecidedAt: z.string(),
+    }).optional(),
+    previousDecision: z.object({
+      status: z.enum(['completed', 'dismissed', 'rejected']),
+      decidedAt: z.string(),
+      evidenceFingerprint: z.string(),
+    }).optional(),
+  }),
+  status: explorationStatusSchema,
+  action: explorationActionSchema,
+  userNotes: z.string().optional(),
+  snoozedUntil: z.string().optional(),
+  lastExploredAt: z.string().optional(),
+  updatedAt: z.string(),
+  history: z.array(z.object({
+    id: z.string(),
+    type: z.enum(['edit', 'accept', 'start', 'complete', 'snooze', 'dismiss', 'reject']),
+    occurredAt: z.string(),
+    fromStatus: explorationStatusSchema,
+    toStatus: explorationStatusSchema,
+    evidenceFingerprint: z.string(),
+    action: explorationActionSchema.optional(),
+    snoozedUntil: z.string().optional(),
+    note: z.string().optional(),
+  })),
+})
 
 const projectBundleSchema = z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
@@ -135,6 +233,7 @@ const projectBundleSchema = z.object({
     createdAt: z.string(),
     updatedAt: z.string(),
   })).optional(),
+  explorationItems: z.array(explorationItemSchema).optional(),
 })
 
 export function downloadProjectBundle(project: TerrainProject): void {
@@ -246,13 +345,30 @@ export async function downloadProjectReport(project: TerrainProject): Promise<vo
 
 export async function buildProjectReport(project: TerrainProject): Promise<string> {
   const lines: string[] = []
+  const evaluatedAt = Date.now()
+  const workingSet = (project.explorationItems ?? [])
+    .filter((item) => item.status === 'accepted' || item.status === 'in-progress')
+    .sort((left, right) => right.suggestion.priority - left.suggestion.priority || left.id.localeCompare(right.id))
+    .slice(0, 3)
+  const itemsBySuggestionId = new Map(
+    (project.explorationItems ?? []).map((item) => [item.suggestion.id, item]),
+  )
+  const explorationQueue = generateProjectExplorationSuggestions(project, evaluatedAt)
+    .filter((suggestion) => {
+      if (suggestion.reopenReason) return true
+      const item = itemsBySuggestionId.get(suggestion.id)
+      return item === undefined
+        || item.status === 'proposed'
+        || (item.status === 'snoozed'
+          && (!item.snoozedUntil || Date.parse(item.snoozedUntil) <= evaluatedAt))
+    })
   lines.push(`# ${project.name} 复盘报告`, '')
   lines.push(`- 生成时间：${new Date().toLocaleString('zh-CN', { timeZone: project.timeZone })}`)
   lines.push(`- 模型：${project.modelId}（${project.embeddingMode}）`)
   lines.push(`- 笔记数：${project.notes.length}`)
   lines.push(`- 主题峰值：${project.peaks.length}`)
-  const maintenance = [...project.notes].sort(maintenancePriority).slice(0, 8)
-  lines.push(`- 待维护建议：${maintenance.length}`, '')
+  lines.push(`- 当前探索工作集：${workingSet.length}/3`)
+  lines.push(`- 可解释建议队列：${explorationQueue.length}/8`, '')
   lines.push(`- 时间层：${project.snapshots.length}`, '')
   appendTerrainSemantics(lines, project)
   lines.push('## 主题峰值', '')
@@ -273,10 +389,16 @@ export async function buildProjectReport(project: TerrainProject): Promise<strin
   for (const note of byTime) {
     lines.push(`- [${note.title}](${note.source ?? ''}) — ${note.tags.map((tag) => `#${tag}`).join(' ')}`)
   }
-  lines.push('', '## 待维护建议', '')
-  for (const note of maintenance) {
-    lines.push(`- ${note.title} — 熟练度 ${note.mastery === undefined ? '未标注' : `${(note.mastery * 100).toFixed(0)}%`}，连接 ${note.links.length} 条，状态 ${note.status ?? '未标注'}`)
+  lines.push('', '## 探索工作台', '')
+  lines.push('建议仅来自所选参考边界、明确复习时间、未解析关系、自评状态或用户标记目标；不由活动分数单独触发。', '')
+  for (const item of workingSet) {
+    lines.push(`- [${item.status}] ${item.action.title} — ${item.suggestion.reason.code}：${item.suggestion.reason.detail}`)
   }
+  for (const suggestion of explorationQueue) {
+    const item = itemsBySuggestionId.get(suggestion.id)
+    lines.push(`- [${suggestion.reopenReason ? 'reopened' : item?.status ?? 'proposed'}] ${item?.action.title ?? suggestion.action.title} — ${suggestion.reason.code}：${suggestion.reason.detail}`)
+  }
+  if (!workingSet.length && !explorationQueue.length) lines.push('- 当前没有需要处理的建议。')
   lines.push('')
   return lines.join('\n')
 }
@@ -294,21 +416,6 @@ function appendTerrainSemantics(lines: string[], project: TerrainProject): void 
     lines.push('- 海洋/缺口（reference-gap-v1）：disabled；未选择有效的 active reference atlas，不生成知识或技能缺口声明；低活动不等于缺口。')
   }
   lines.push('')
-}
-
-function maintenancePriority(a: TerrainProject['notes'][number], b: TerrainProject['notes'][number]): number {
-  const scoreA = maintenanceScore(a)
-  const scoreB = maintenanceScore(b)
-  return scoreB - scoreA || a.title.localeCompare(b.title)
-}
-
-function maintenanceScore(note: TerrainProject['notes'][number]): number {
-  const needsAssessment = note.mastery === undefined ? 0.25 : 0
-  return needsAssessment
-    + (1 - (note.mastery ?? 0.5)) * 0.4
-    + (1 - (note.confidence ?? 0.5)) * 0.15
-    + Math.min(1, note.links.length / 6) * 0.1
-    + (note.exploration ?? 0.5) * 0.1
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {

@@ -4,9 +4,9 @@ import path from 'node:path'
 const distDir = path.resolve('dist/assets')
 const budget = {
   main: 340 * 1024,
-  // Issue #6 adds versioned activity/gap semantics plus PNG evidence. Keep the
-  // startup bundle strict while allowing the measured 25.2 KiB feature delta.
-  totalJs: 2190 * 1024,
+  // Issue #8 adds the persisted exploration domain, workbench, and report
+  // export. Keep startup strict while allowing its measured 31.7 KiB delta.
+  totalJs: 2220 * 1024,
   css: 40 * 1024,
 }
 

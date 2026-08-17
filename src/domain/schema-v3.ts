@@ -10,6 +10,7 @@ import {
 import type { ActivityHistoryState } from './activity-history'
 import type {
   CognitiveState,
+  ExplorationLifecycleItem,
   InteractionEvent,
   ReferenceAtlasManifest,
   TerrainProfile,
@@ -136,6 +137,7 @@ export interface SchemaV3Bundle {
   revisions: RevisionV3[]
   taxonomyNodes: TaxonomyNode[]
   referenceAtlases: ReferenceAtlasManifest[]
+  explorationItems: ExplorationLifecycleItem[]
 }
 
 export interface SchemaV3MigrationReport {
@@ -149,6 +151,7 @@ export interface SchemaV3MigrationReport {
   layoutCount: number
   citationCount: number
   revisionCount: number
+  explorationItemCount: number
   warnings: string[]
 }
 
@@ -169,6 +172,7 @@ export function migrateTerrainProjectToV3(
   assertUniqueIds('interaction event', (project.interactionEvents ?? []).map((event) => event.id))
   assertUniqueIds('terrain profile', (project.terrainProfiles ?? []).map((profile) => profile.id))
   const itemIds = new Set(project.notes.map((note) => note.id))
+  const explorationItems = normalizeExplorationItems(project.explorationItems ?? [], itemIds)
   assertKnownItemReferences(
     'cognitive state',
     (project.cognitiveStates ?? []).map((state) => state.itemId),
@@ -345,6 +349,7 @@ export function migrateTerrainProjectToV3(
     revisions,
     taxonomyNodes,
     referenceAtlases,
+    explorationItems,
   }
   return {
     bundle,
@@ -359,9 +364,68 @@ export function migrateTerrainProjectToV3(
       layoutCount: layouts.length,
       citationCount: citations.length,
       revisionCount: revisions.length,
+      explorationItemCount: explorationItems.length,
       warnings,
     },
   }
+}
+
+export function normalizeExplorationItems(
+  values: readonly ExplorationLifecycleItem[],
+  knownItemIds: ReadonlySet<string>,
+): ExplorationLifecycleItem[] {
+  assertUniqueIds('exploration item', values.map((item) => item.id))
+  assertUniqueIds('exploration suggestion', values.map((item) => item.suggestion.id))
+  assertUniqueIds(
+    'exploration lifecycle event',
+    values.flatMap((item) => item.history.map((event) => event.id)),
+  )
+  return values.map((item) => {
+    if (!Number.isFinite(item.suggestion.priority)) {
+      throw new Error(`Schema v3 migration rejected invalid exploration priority: ${item.id}`)
+    }
+    return {
+      ...item,
+      suggestion: {
+        ...item.suggestion,
+        reason: { ...item.suggestion.reason },
+        supportingItemIds: [...new Set(item.suggestion.supportingItemIds)]
+          .filter((itemId) => knownItemIds.has(itemId)),
+        sourceRoute: normalizeExplorationSourceRoute(item.suggestion.sourceRoute, knownItemIds),
+        action: { ...item.suggestion.action },
+        referenceBoundary: item.suggestion.referenceBoundary
+          ? { ...item.suggestion.referenceBoundary }
+          : undefined,
+        reopenReason: item.suggestion.reopenReason ? { ...item.suggestion.reopenReason } : undefined,
+        previousDecision: item.suggestion.previousDecision
+          ? { ...item.suggestion.previousDecision }
+          : undefined,
+      },
+      action: { ...item.action },
+      history: item.history.map((event) => ({
+        ...event,
+        action: event.action ? { ...event.action } : undefined,
+      })),
+    }
+  })
+}
+
+function normalizeExplorationSourceRoute(
+  route: ExplorationLifecycleItem['suggestion']['sourceRoute'],
+  knownItemIds: ReadonlySet<string>,
+): ExplorationLifecycleItem['suggestion']['sourceRoute'] {
+  if (route.kind === 'note' && !knownItemIds.has(route.noteId)) {
+    return { kind: 'unavailable', originalKind: 'note', detail: 'source note no longer exists' }
+  }
+  if (route.kind === 'relationship'
+    && (!knownItemIds.has(route.fromItemId) || (route.toItemId !== undefined && !knownItemIds.has(route.toItemId)))) {
+    return { kind: 'unavailable', originalKind: 'relationship', detail: 'relationship endpoint no longer exists' }
+  }
+  if (route.kind === 'goal' && route.noteId !== undefined && !knownItemIds.has(route.noteId)) {
+    const { noteId: _noteId, ...goalRoute } = route
+    return goalRoute
+  }
+  return { ...route }
 }
 
 function buildTitleIndex(project: TerrainProject): Map<string, string> {

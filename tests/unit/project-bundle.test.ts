@@ -4,6 +4,7 @@ import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
 import { parseProjectBundle, serializeProjectBundle } from '../../src/export/project-files'
 import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
+import type { ExplorationLifecycleItem } from '../../src/domain/types'
 
 describe('project bundle migration', () => {
   it('loads a Schema v2 bundle into the Schema v3 compatibility shape', async () => {
@@ -127,5 +128,52 @@ describe('project bundle migration', () => {
     expect(bundle.workspace.activeReferenceAtlasId).toBeUndefined()
     expect(restored.referenceAtlases).toEqual(project.referenceAtlases)
     expect(restored.activeReferenceAtlasId).toBeUndefined()
+  })
+
+  it('round-trips exploration lifecycle state and removes dangling supporting note ids', async () => {
+    const demo = createDemoProject()
+    const lifecycle: ExplorationLifecycleItem = {
+      id: 'explore-linear-algebra',
+      suggestion: {
+        id: 'suggestion-linear-algebra',
+        reason: { code: 'unassessed-note', detail: '该笔记尚未完成自评' },
+        supportingItemIds: [demo.notes[0].id, 'deleted-note'],
+        sourceRoute: { kind: 'note', noteId: 'deleted-note' },
+        evidenceFingerprint: 'evidence-v1',
+        priority: 0.8,
+        action: { title: '补充熟练度自评', detail: '回到原笔记记录当前掌握程度' },
+      },
+      status: 'snoozed',
+      action: { title: '补充熟练度自评', detail: '回到原笔记记录当前掌握程度' },
+      userNotes: '周末处理',
+      snoozedUntil: '2026-08-22T00:00:00.000Z',
+      updatedAt: demo.updatedAt,
+      history: [{
+        id: 'explore-event-1',
+        type: 'snooze',
+        occurredAt: demo.updatedAt,
+        fromStatus: 'accepted',
+        toStatus: 'snoozed',
+        evidenceFingerprint: 'evidence-v1',
+        note: '等待周末',
+      }],
+    }
+    const source = migrateProject({ ...demo, explorationItems: [lifecycle] })
+    const file = new File([serializeProjectBundle(source)], 'exploration.terrain.json', {
+      type: 'application/json',
+    })
+
+    const restored = await parseProjectBundle(file)
+
+    expect(restored.explorationItems).toHaveLength(1)
+    expect(restored.explorationItems?.[0]).toMatchObject({
+      status: 'snoozed',
+      userNotes: '周末处理',
+      suggestion: {
+        supportingItemIds: [demo.notes[0].id],
+        sourceRoute: { kind: 'unavailable', originalKind: 'note' },
+      },
+      history: [expect.objectContaining({ type: 'snooze', toStatus: 'snoozed' })],
+    })
   })
 })

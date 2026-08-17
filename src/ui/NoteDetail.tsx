@@ -13,11 +13,12 @@ import {
   type PlateCollision,
 } from '../domain/knowledge-plates'
 import { findNeighbors } from '../pipeline/neighbors'
-import { maintenanceCandidates, resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
+import { resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
 import { useAppStore } from '../store/app-store'
 import { ActivityHistory, type ActivityHistoryBucket } from './ActivityHistory'
 
 const ReferenceGapSection = lazy(async () => import('./ReferenceGapSection').then((module) => ({ default: module.ReferenceGapSection })))
+const ExplorationWorkbench = lazy(async () => import('./ExplorationWorkbench').then((module) => ({ default: module.ExplorationWorkbench })))
 
 interface NoteDetailProps {
   project: TerrainProject
@@ -65,7 +66,7 @@ export function NoteDetail({ project, note, collision, visibleCount }: NoteDetai
 
   return (
     <aside
-      className={collapsed ? 'note-detail is-collapsed' : 'note-detail'}
+      className={`${collapsed ? 'note-detail is-collapsed' : 'note-detail'}${!collision && !note ? ' note-detail--overview' : ''}`}
       aria-label={collision ? '板块碰撞详情' : note ? '笔记详情' : '知识概览'}
     >
       <div className="detail-grip" aria-hidden="true" />
@@ -387,6 +388,10 @@ function NoteContent({ note }: { note: TerrainNote }) {
 
 function ProjectOverview({ project, visibleCount }: { project: TerrainProject; visibleCount: number }) {
   const setReferenceAtlas = useAppStore((state) => state.setReferenceAtlas)
+  const selectNote = useAppStore((state) => state.selectNote)
+  const transitionExploration = useAppStore((state) => state.transitionExploration)
+  const editExploration = useAppStore((state) => state.editExploration)
+  const isAnalyzing = useAppStore((state) => state.isAnalyzing)
   const timeline = useAppStore((state) => state.timeline)
   const compareRef = useAppStore((state) => state.compareRef)
   const setCompareRef = useAppStore((state) => state.setCompareRef)
@@ -401,7 +406,6 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
           added: project.notes.filter((note) => note.createdAtMs > referenceCutoff && note.createdAtMs <= currentCutoff).length,
           removed: project.notes.filter((note) => note.createdAtMs <= referenceCutoff && note.createdAtMs > currentCutoff).length,
         }
-  const maintenance = maintenanceCandidates(project, 5)
   return (
     <div className="project-overview">
       <h2>{project.name}</h2>
@@ -452,6 +456,15 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
       <Suspense fallback={<div className="reference-gap-empty" role="status">正在加载参考图谱缺口</div>}>
         <ReferenceGapSection project={project} onSelectAtlas={(id) => void setReferenceAtlas(id || undefined)} />
       </Suspense>
+      <Suspense fallback={<section className="exploration-workbench" aria-label="探索工作台" aria-busy="true"><p className="exploration-empty" role="status">正在加载探索工作台</p></section>}>
+        <ExplorationWorkbench
+          project={project}
+          isLoading={isAnalyzing}
+          onCommand={transitionExploration}
+          onEdit={editExploration}
+          onSelectNote={selectNote}
+        />
+      </Suspense>
       <div className="peak-index">
         {project.peaks.slice(0, 6).map((peak) => (
           <div key={peak.id}>
@@ -460,12 +473,6 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
           </div>
         ))}
       </div>
-      <section className="maintenance-section">
-        <div className="section-heading"><span className="panel-kicker">待维护</span><small>按当前标注排序</small></div>
-        <ul className="maintenance-list">
-          {maintenance.map(({ note, reasons }) => <li key={note.id}><button type="button" onClick={() => useAppStore.getState().selectNote(note.id)}><strong>{note.title}</strong><small>{reasons.slice(0, 2).join(' · ')}</small></button></li>)}
-        </ul>
-      </section>
     </div>
   )
 }
