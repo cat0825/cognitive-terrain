@@ -175,7 +175,7 @@ describe('Schema v3 dry-run migration', () => {
     expect(() => migrateTerrainProjectToV3(project)).toThrow(/duplicate item id/)
   })
 
-  it('rejects orphan cognitive state and interaction event references instead of dropping them', () => {
+  it('rejects orphan cognitive state, observation, and interaction event references instead of dropping them', () => {
     const stateProject = migrationFixture()
     stateProject.cognitiveStates = [{
       itemId: 'missing-item',
@@ -184,6 +184,19 @@ describe('Schema v3 dry-run migration', () => {
       provenance: 'migration',
     }]
     expect(() => migrateTerrainProjectToV3(stateProject)).toThrow(/cognitive state reference to missing item/)
+
+    const observationProject = migrationFixture()
+    observationProject.cognitiveObservations = [{
+      schemaVersion: 1,
+      id: 'orphan-observation',
+      itemId: 'missing-item',
+      field: 'mastery',
+      value: 0.5,
+      observedAt: observationProject.updatedAt,
+      provenance: 'migration',
+      reason: 'snapshot import',
+    }]
+    expect(() => migrateTerrainProjectToV3(observationProject)).toThrow(/cognitive observation reference to missing item/)
 
     const eventProject = migrationFixture()
     eventProject.interactionEvents = [{

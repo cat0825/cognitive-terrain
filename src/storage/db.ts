@@ -7,6 +7,10 @@ import {
 } from 'idb'
 import { cognitiveStateFromNote, normalizeActiveReferenceAtlasId } from '../domain/cognitive-state'
 import { compactActivityHistory } from '../domain/activity-history'
+import {
+  DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION,
+  normalizeCognitiveObservations,
+} from '../domain/learning-progression'
 import { areasForNote, plateIdForArea } from '../domain/knowledge-plates'
 import { legacyTaxonomyNodesForProject, validateTaxonomy } from '../domain/taxonomy'
 import {
@@ -24,6 +28,7 @@ import {
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from '../domain/terrain-profile'
 import type {
   CognitiveState,
+  CognitiveObservation,
   InteractionEvent,
   ProjectBackup,
   ReferenceAtlasManifest,
@@ -33,11 +38,13 @@ import type {
 } from '../domain/types'
 
 export const DATABASE_NAME = 'cognitive-terrain'
-export const DATABASE_VERSION = 6
+export const DATABASE_VERSION = 7
 
 export interface StoredCognitiveState extends CognitiveState {
   workspaceId: string
 }
+
+export type StoredCognitiveObservation = CognitiveObservation & { workspaceId: string }
 
 export interface StoredInteractionEvent extends InteractionEvent {
   workspaceId: string
@@ -107,6 +114,15 @@ export interface CognitiveTerrainDB extends DBSchema {
     indexes: {
       'by-workspace': string
       'by-item': [string, string]
+    }
+  }
+  cognitiveObservations: {
+    key: [string, string]
+    value: StoredCognitiveObservation
+    indexes: {
+      'by-workspace': string
+      'by-item': [string, string]
+      'by-observed-at': [string, string]
     }
   }
   interactionEvents: {
@@ -185,6 +201,7 @@ export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] =
   'sources',
   'relations',
   'cognitiveStates',
+  'cognitiveObservations',
   'interactionEvents',
   'plateMemberships',
   'taxonomyNodes',
@@ -255,6 +272,7 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     const state = cognitiveStateFromNote(note, 'migration', note.reviewedAt ?? project.updatedAt)
     return state ? [state] : []
   })
+  const cognitiveObservations = normalizeCognitiveObservations(project.cognitiveObservations)
   const terrainProfiles = project.terrainProfiles?.length
     ? project.terrainProfiles
     : DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile }))
@@ -291,6 +309,9 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     noteNeighbors: legacyV1 ? [] : project.noteNeighbors ?? [],
     notes: migratedNotes,
     cognitiveStates,
+    cognitiveObservations,
+    learningProgressionProfileVersion: project.learningProgressionProfileVersion
+      ?? DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION,
     interactionEvents: activityHistory.rawEvents,
     activityHistory,
     terrainProfiles,
@@ -320,6 +341,10 @@ export async function replaceProjectMaterialization<Mode extends DatabaseWriteMo
     ...bundle.relations.map((relation) => () => transaction.objectStore('relations').put(relation)),
     ...bundle.cognitiveStates.map((state) => () => transaction.objectStore('cognitiveStates').put({
       ...state,
+      workspaceId: project.id,
+    })),
+    ...bundle.cognitiveObservations.map((observation) => () => transaction.objectStore('cognitiveObservations').put({
+      ...observation,
       workspaceId: project.id,
     })),
     ...bundle.interactionEvents.map((event) => () => transaction.objectStore('interactionEvents').put({
@@ -357,6 +382,7 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
     'sources',
     'relations',
     'cognitiveStates',
+    'cognitiveObservations',
     'interactionEvents',
     'plateMemberships',
     'taxonomyNodes',
@@ -378,6 +404,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     sources,
     relations,
     storedCognitiveStates,
+    storedCognitiveObservations,
     storedInteractionEvents,
     storedPlateMemberships,
     taxonomyNodes,
@@ -391,6 +418,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     database.getAllFromIndex('sources', 'by-workspace', workspaceId),
     database.getAllFromIndex('relations', 'by-workspace', workspaceId),
     database.getAllFromIndex('cognitiveStates', 'by-workspace', workspaceId),
+    database.getAllFromIndex('cognitiveObservations', 'by-workspace', workspaceId),
     database.getAllFromIndex('interactionEvents', 'by-workspace', workspaceId),
     database.getAllFromIndex('plateMemberships', 'by-workspace', workspaceId),
     database.getAllFromIndex('taxonomyNodes', 'by-workspace', workspaceId),
@@ -406,6 +434,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     sources,
     relations,
     cognitiveStates: storedCognitiveStates.map(stripWorkspaceId),
+    cognitiveObservations: storedCognitiveObservations.map(stripCognitiveObservationWorkspaceId),
     interactionEvents: storedInteractionEvents.map(stripWorkspaceId),
     plateMemberships: storedPlateMemberships.map(stripWorkspaceId),
     taxonomyNodes,
@@ -441,6 +470,8 @@ function createSchemaV3Stores(database: IDBPDatabase<CognitiveTerrainDB>): void 
   })
   cognitiveStates.createIndex('by-workspace', 'workspaceId')
   cognitiveStates.createIndex('by-item', ['workspaceId', 'itemId'])
+
+  createCognitiveObservationStore(database)
 
   const interactionEvents = database.createObjectStore('interactionEvents', {
     keyPath: ['workspaceId', 'id'],
@@ -507,9 +538,12 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
-  if (oldVersion >= 5 && oldVersion < 6) {
-    createTaxonomyNodeStore(database)
-    createReferenceAtlasStore(database)
+  if (oldVersion >= 5 && oldVersion < 7) {
+    if (oldVersion < 6) {
+      createTaxonomyNodeStore(database)
+      createReferenceAtlasStore(database)
+    }
+    createCognitiveObservationStore(database)
     const store = transaction.objectStore('projects')
     let cursor = await store.openCursor()
     while (cursor) {
@@ -519,6 +553,15 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
+}
+
+function createCognitiveObservationStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const cognitiveObservations = database.createObjectStore('cognitiveObservations', {
+    keyPath: ['workspaceId', 'id'],
+  })
+  cognitiveObservations.createIndex('by-workspace', 'workspaceId')
+  cognitiveObservations.createIndex('by-item', ['workspaceId', 'itemId'])
+  cognitiveObservations.createIndex('by-observed-at', ['workspaceId', 'observedAt'])
 }
 
 function createTaxonomyNodeStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
@@ -547,4 +590,9 @@ async function clearWorkspaceStore<Mode extends DatabaseWriteMode>(
 function stripWorkspaceId<T extends { workspaceId: string }>(value: T): Omit<T, 'workspaceId'> {
   const { workspaceId: _workspaceId, ...record } = value
   return record
+}
+
+function stripCognitiveObservationWorkspaceId(value: StoredCognitiveObservation): CognitiveObservation {
+  const { workspaceId: _workspaceId, ...observation } = value
+  return observation as CognitiveObservation
 }

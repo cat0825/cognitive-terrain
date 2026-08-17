@@ -1,4 +1,8 @@
 import { cognitiveStateFromNote, normalizeActiveReferenceAtlasId } from './cognitive-state'
+import {
+  DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION,
+  normalizeCognitiveObservations,
+} from './learning-progression'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 import { areasForNote, plateIdForArea } from './knowledge-plates'
 import {
@@ -10,6 +14,7 @@ import {
 import type { ActivityHistoryState } from './activity-history'
 import type {
   CognitiveState,
+  CognitiveObservation,
   InteractionEvent,
   ReferenceAtlasManifest,
   TerrainProfile,
@@ -28,6 +33,7 @@ export interface WorkspaceV3 {
   activityHistory?: ActivityHistoryState
   taxonomyVersion?: number
   activeReferenceAtlasId?: string
+  learningProgressionProfileVersion?: TerrainProject['learningProgressionProfileVersion']
 }
 
 export interface KnowledgeItemV3 {
@@ -128,6 +134,7 @@ export interface SchemaV3Bundle {
   sources: SourceV3[]
   relations: RelationV3[]
   cognitiveStates: CognitiveState[]
+  cognitiveObservations: CognitiveObservation[]
   interactionEvents: InteractionEvent[]
   plateMemberships: PlateMembershipV3[]
   layouts: LayoutRecordV3[]
@@ -146,6 +153,7 @@ export interface SchemaV3MigrationReport {
   relationCount: number
   unresolvedRelationCount: number
   cognitiveStateCount: number
+  cognitiveObservationCount: number
   layoutCount: number
   citationCount: number
   revisionCount: number
@@ -166,6 +174,8 @@ export function migrateTerrainProjectToV3(
   const sourceSchemaVersion = options.sourceSchemaVersion ?? project.schemaVersion
   assertUniqueIds('item', project.notes.map((note) => note.id))
   assertUniqueIds('cognitive state item', (project.cognitiveStates ?? []).map((state) => state.itemId))
+  const cognitiveObservations = normalizeCognitiveObservations(project.cognitiveObservations)
+  assertUniqueIds('cognitive observation', cognitiveObservations.map((observation) => observation.id))
   assertUniqueIds('interaction event', (project.interactionEvents ?? []).map((event) => event.id))
   assertUniqueIds('terrain profile', (project.terrainProfiles ?? []).map((profile) => profile.id))
   const itemIds = new Set(project.notes.map((note) => note.id))
@@ -177,6 +187,11 @@ export function migrateTerrainProjectToV3(
   assertKnownItemReferences(
     'interaction event',
     (project.interactionEvents ?? []).map((event) => event.itemId),
+    itemIds,
+  )
+  assertKnownItemReferences(
+    'cognitive observation',
+    cognitiveObservations.map((observation) => observation.itemId),
     itemIds,
   )
   const titleIndex = buildTitleIndex(project)
@@ -332,11 +347,14 @@ export function migrateTerrainProjectToV3(
         referenceAtlases,
         project.activeReferenceAtlasId,
       ),
+      learningProgressionProfileVersion: project.learningProgressionProfileVersion
+        ?? DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION,
     },
     items,
     sources: uniqueSources,
     relations,
     cognitiveStates,
+    cognitiveObservations,
     interactionEvents,
     plateMemberships,
     layouts,
@@ -356,6 +374,7 @@ export function migrateTerrainProjectToV3(
       relationCount: relations.length,
       unresolvedRelationCount: relations.filter((relation) => !relation.resolved).length,
       cognitiveStateCount: cognitiveStates.length,
+      cognitiveObservationCount: cognitiveObservations.length,
       layoutCount: layouts.length,
       citationCount: citations.length,
       revisionCount: revisions.length,

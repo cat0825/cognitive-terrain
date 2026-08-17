@@ -40,6 +40,39 @@ export interface CognitiveState {
   provenance: CognitiveStateProvenance
 }
 
+export type CognitiveObservationProvenance =
+  | 'self-assessment'
+  | 'yaml-import'
+  | 'review-outcome'
+  | 'migration'
+
+export interface CognitiveObservationBase {
+  schemaVersion: 1
+  id: string
+  itemId: string
+  observedAt: string
+  provenance: CognitiveObservationProvenance
+  reason: string
+}
+
+export type CognitiveObservation =
+  | (CognitiveObservationBase & {
+      field: 'mastery' | 'confidence' | 'exploration'
+      value: number
+    })
+  | (CognitiveObservationBase & {
+      field: 'status'
+      value: NoteStatus
+    })
+  | (CognitiveObservationBase & {
+      field: 'reviewedAt'
+      value: string
+    })
+
+export type LearningProgressionProfileVersion =
+  | 'learning-progression-v1'
+  | 'learning-progression-linear-decay-v1'
+
 export type InteractionEventType =
   | 'created'
   | 'edited'
@@ -148,6 +181,8 @@ export interface TerrainProject {
   peaks: TerrainPeak[]
   noteNeighbors: string[][]
   cognitiveStates: CognitiveState[]
+  cognitiveObservations?: CognitiveObservation[]
+  learningProgressionProfileVersion?: LearningProgressionProfileVersion
   interactionEvents: InteractionEvent[]
   activityHistory?: ActivityHistoryState
   terrainProfiles: TerrainProfile[]
