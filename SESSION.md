@@ -8,8 +8,9 @@
 
 ## 进度
 
-- Issue #22 本地实现与验收已完成，待 commit、push 和创建 PR。
-- 当前分支 `codex/terrain-evidence-inspector`，基于 #31 commit `55f3ae7`。
+- Issue #22 实现、验收、提交、推送与 stacked PR 均已完成：
+  [PR #32](https://github.com/cat0825/cognitive-terrain/pull/32)。
+- 当前分支 `codex/terrain-evidence-inspector`，实现 commit `67cc548`，基于 #31 commit `55f3ae7`。
 - #30 与 #31 仍 open；无需等待远端长耗时 CI 才提交当前 stacked PR。
 
 ## 已完成
@@ -42,9 +43,9 @@
 
 ## 未完成
 
-1. 提交并推送 `codex/terrain-evidence-inspector`。
-2. 创建 base=`codex/exploration-feedback-loop` 的英文 stacked PR，正文 `Closes #22`。
-3. 在 Issue #22 留英文 PR 链接评论。
+1. 跟踪 PR #32 的 CI / reviewer；可修复反馈继续提交到同一分支。
+2. #30 与 #31 合并后，将 PR #32 retarget 到 `main`。
+3. 无需等待远端长耗时 CI 才继续下一个独立 issue。
 
 ## 风险 / 红线
 
