@@ -167,7 +167,7 @@ declare global {
 
 let activeAnalysis: AnalysisHandle | null = null
 const REFERENCE_ATLAS_PREFERENCE_PREFIX = 'cognitive-terrain:reference-atlas:'
-const initialProject = applyStoredReferenceAtlasPreference(migrateProject(createDemoProject()))
+const initialProject = applyStoredReferenceAtlasPreference(migrateProject(createDemoProject({ includeProgressionEvidence: true })))
 let liveTimeline = Math.max(0, initialProject.snapshots.length - 1)
 
 export function getLiveTimeline(): number {
@@ -547,7 +547,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   resetDemo: () => {
-    const project = migrateProject(createDemoProject())
+    const project = migrateProject(createDemoProject({ includeProgressionEvidence: true }))
     localStorage.removeItem('cognitive-terrain:last-project')
     setProjectState(set, project)
     void get().reloadProjects()
@@ -587,7 +587,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get()
     if (state.project.id === id) {
       localStorage.removeItem('cognitive-terrain:last-project')
-      setProjectState(set, migrateProject(createDemoProject()))
+    setProjectState(set, migrateProject(createDemoProject({ includeProgressionEvidence: true })))
     }
     await Promise.all([get().reloadProjects(), get().reloadBackups()])
   },

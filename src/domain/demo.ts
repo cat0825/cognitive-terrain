@@ -321,7 +321,7 @@ const topics: DemoTopic[] = [
   },
 ]
 
-export function createDemoProject(): TerrainProject {
+export function createDemoProject(options: { includeProgressionEvidence?: boolean } = {}): TerrainProject {
   const notes = Array.from({ length: topics.length * articlesPerTopic }, (_, index) => createDemoNote(index))
   const bridgeStride = Math.max(1, Math.floor(topics.length / 3))
   for (let topicIndex = 0; topicIndex < topics.length; topicIndex += 1) {
@@ -341,26 +341,6 @@ export function createDemoProject(): TerrainProject {
     createdAt: timestamp,
     updatedAt: timestamp,
   }))
-  const cognitiveObservations = notes.slice(0, 2).flatMap((note, index) => [
-    createCognitiveObservation({
-      id: `demo-observation:${note.id}:baseline`,
-      itemId: note.id,
-      field: 'mastery',
-      value: Math.max(0, (note.mastery ?? 0.5) - 0.18),
-      observedAt: `2025-12-${String(28 + index).padStart(2, '0')}T20:00:00+08:00`,
-      provenance: 'self-assessment',
-      reason: '演示：阶段性自评',
-    }),
-    createCognitiveObservation({
-      id: `demo-observation:${note.id}:review`,
-      itemId: note.id,
-      field: 'mastery',
-      value: note.mastery ?? 0.5,
-      observedAt: '2025-12-31T20:00:00+08:00',
-      provenance: 'review-outcome',
-      reason: '演示：复习结果',
-    }),
-  ])
   return {
     schemaVersion: 3,
     id: 'demo-ai-infra-terrain',
@@ -386,7 +366,7 @@ export function createDemoProject(): TerrainProject {
     })),
     noteNeighbors: computeNeighbors(notes, 6),
     cognitiveStates: buildCognitiveStates(notes, timestamp),
-    cognitiveObservations,
+    cognitiveObservations: options.includeProgressionEvidence ? buildDemoProgressionObservations(notes) : [],
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
@@ -402,6 +382,29 @@ export function createDemoProject(): TerrainProject {
       updatedAt: timestamp,
     }],
   }
+}
+
+function buildDemoProgressionObservations(notes: TerrainNote[]): TerrainProject['cognitiveObservations'] {
+  return notes.slice(0, 2).flatMap((note, index) => [
+    createCognitiveObservation({
+      id: `demo-observation:${note.id}:baseline`,
+      itemId: note.id,
+      field: 'mastery',
+      value: Math.max(0, (note.mastery ?? 0.5) - 0.18),
+      observedAt: `2025-12-${String(28 + index).padStart(2, '0')}T20:00:00+08:00`,
+      provenance: 'self-assessment',
+      reason: '演示：阶段性自评',
+    }),
+    createCognitiveObservation({
+      id: `demo-observation:${note.id}:review`,
+      itemId: note.id,
+      field: 'mastery',
+      value: note.mastery ?? 0.5,
+      observedAt: '2025-12-31T20:00:00+08:00',
+      provenance: 'review-outcome',
+      reason: '演示：复习结果',
+    }),
+  ])
 }
 
 export function createProjectFromNotes(name: string, notes: TerrainNote[], modelId = 'local-analysis'): TerrainProject {
