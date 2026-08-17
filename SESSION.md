@@ -9,8 +9,9 @@
 ## 进度
 
 - v1.1 实施项 11/11 已完成本地实现；#6 与 #8 等待 GitHub 合并。
-- 当前分支 `codex/exploration-feedback-loop`，基于 #6 commit `9f8bbe2`。
-- #8 实现与本地验收完成；剩余提交、推送、创建堆叠 PR。
+- 当前分支 `codex/exploration-feedback-loop`，commit `7609441`，基于 #6 commit `9f8bbe2`。
+- #8 实现、本地验收、推送与堆叠 PR 均已完成：
+  [PR #31](https://github.com/cat0825/cognitive-terrain/pull/31)。
 - #6 PR #30 open；quality、visual、a11y 通过，e2e 仅
   `peak-label-lod` desktop 截图/鼠标操作超时，30 个其他 E2E 通过。
 
@@ -39,9 +40,9 @@
 
 ## 未完成
 
-1. 最终 diff/status 复核，提交并推送 `codex/exploration-feedback-loop`。
-2. 创建英文 `Closes #8` 堆叠 PR，base 为 `codex/activity-elevation-gaps`。
-3. #30 合并后将 #8 PR retarget 到 `main`；无需等待远端长耗时 E2E 才继续后续 issue。
+1. 跟踪 PR #31 的 CI / reviewer；可修复反馈继续提交到同一分支。
+2. #30 合并后将 PR #31 retarget 到 `main`。
+3. 无需等待远端长耗时 E2E 才继续下一个独立 issue。
 
 ## 风险 / 红线
 
