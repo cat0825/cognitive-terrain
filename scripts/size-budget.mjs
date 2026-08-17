@@ -4,9 +4,9 @@ import path from 'node:path'
 const distDir = path.resolve('dist/assets')
 const budget = {
   main: 340 * 1024,
-  // Issue #8 adds the persisted exploration domain, workbench, and report
-  // export. Keep startup strict while allowing its measured 31.7 KiB delta.
-  totalJs: 2220 * 1024,
+  // Issues #8 and #22 add persisted exploration plus versioned terrain
+  // evidence. Keep startup strict while allowing #22's measured 27.8 KiB.
+  totalJs: 2250 * 1024,
   css: 40 * 1024,
 }
 

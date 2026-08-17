@@ -22,6 +22,7 @@ export interface PlateBridge {
 }
 
 export interface PlateBridgeEvidence {
+  relationId: string
   fromId: string
   toId: string
   fromArea: string
@@ -126,7 +127,7 @@ export function summarizeKnowledgePlates(notes: TerrainNote[]): KnowledgePlate[]
 export function buildPlateBridges(notes: TerrainNote[]): PlateBridge[] {
   const edges = explicitEdges(notes)
   const bridges = new Map<string, PlateBridge>()
-  for (const { from, to } of edges) {
+  for (const { from, to, relationId } of edges) {
     const fromAreas = normalizedAreasForNote(from)
     const toAreas = normalizedAreasForNote(to)
     if (!fromAreas.length || !toAreas.length || sharesArea(fromAreas, toAreas)) continue
@@ -134,7 +135,7 @@ export function buildPlateBridges(notes: TerrainNote[]): PlateBridge[] {
     const toArea = toAreas[0]
     const [firstId, secondId] = [from.id, to.id].sort()
     const id = `bridge-${firstId}-${secondId}`
-    const evidence = { fromId: from.id, toId: to.id, fromArea, toArea }
+    const evidence = { relationId, fromId: from.id, toId: to.id, fromArea, toArea }
     const current = bridges.get(id)
     if (current) {
       current.evidence.push(evidence)
@@ -300,16 +301,21 @@ function averagePoint(points: Array<{ x: number; y: number }>): { x: number; y: 
 interface ExplicitEdge {
   from: TerrainNote
   to: TerrainNote
+  relationId: string
 }
 
 function explicitEdges(notes: TerrainNote[]): ExplicitEdge[] {
   const index = buildNoteIndex(notes)
   const edges: ExplicitEdge[] = []
   for (const from of notes) {
-    for (const link of from.links) {
-      const to = index.get(normalizeRelationKey(link))
+    for (const targetTitle of from.links) {
+      const to = index.get(normalizeRelationKey(targetTitle))
       if (!to || to.id === from.id) continue
-      edges.push({ from, to })
+      edges.push({
+        from,
+        to,
+        relationId: `relation-${stableHash(`${from.id}\n${targetTitle}`)}`,
+      })
     }
   }
   return edges

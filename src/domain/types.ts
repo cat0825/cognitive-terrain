@@ -245,6 +245,17 @@ export interface TerrainPeak {
   noteIds: string[]
 }
 
+export interface NoteNeighborEvidence {
+  sourceId: string
+  targetId: string
+  rank: number
+  score: number
+  modelId: string
+  embeddingMode: 'semantic' | 'fallback'
+  formulaVersion: 'embedding-cosine-neighbors-v1'
+  provenance: 'embedding'
+}
+
 export interface TerrainProject {
   schemaVersion: 3
   id: string
@@ -260,6 +271,7 @@ export interface TerrainProject {
   snapshots: TerrainSnapshot[]
   peaks: TerrainPeak[]
   noteNeighbors: string[][]
+  noteNeighborEvidence?: NoteNeighborEvidence[][]
   cognitiveStates: CognitiveState[]
   interactionEvents: InteractionEvent[]
   activityHistory?: ActivityHistoryState

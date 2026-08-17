@@ -27,6 +27,7 @@ import type {
   CognitiveState,
   ExplorationLifecycleItem,
   InteractionEvent,
+  NoteNeighborEvidence,
   ProjectBackup,
   ReferenceAtlasManifest,
   TerrainProfile,
@@ -35,7 +36,7 @@ import type {
 } from '../domain/types'
 
 export const DATABASE_NAME = 'cognitive-terrain'
-export const DATABASE_VERSION = 7
+export const DATABASE_VERSION = 8
 
 export interface StoredCognitiveState extends CognitiveState {
   workspaceId: string
@@ -58,6 +59,10 @@ export interface StoredTerrainProfile extends TerrainProfile {
 }
 
 export interface StoredExplorationLifecycleItem extends ExplorationLifecycleItem {
+  workspaceId: string
+}
+
+export interface StoredNoteNeighborEvidence extends NoteNeighborEvidence {
   workspaceId: string
 }
 
@@ -158,6 +163,14 @@ export interface CognitiveTerrainDB extends DBSchema {
       'by-layout': [string, string]
     }
   }
+  neighborEvidence: {
+    key: [string, string, string]
+    value: StoredNoteNeighborEvidence
+    indexes: {
+      'by-workspace': string
+      'by-source': [string, string]
+    }
+  }
   terrainProfiles: {
     key: [string, string]
     value: StoredTerrainProfile
@@ -205,6 +218,7 @@ export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] =
   'taxonomyNodes',
   'referenceAtlases',
   'layouts',
+  'neighborEvidence',
   'terrainProfiles',
   'citations',
   'revisions',
@@ -309,6 +323,7 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     schemaVersion: 3,
     embeddingMode: legacyV1 ? 'fallback' : project.embeddingMode ?? 'fallback',
     noteNeighbors: legacyV1 ? [] : project.noteNeighbors ?? [],
+    noteNeighborEvidence: legacyV1 ? [] : project.noteNeighborEvidence ?? [],
     notes: migratedNotes,
     cognitiveStates,
     interactionEvents: activityHistory.rawEvents,
@@ -357,6 +372,10 @@ export async function replaceProjectMaterialization<Mode extends DatabaseWriteMo
       ...layout,
       workspaceId: project.id,
     })),
+    ...bundle.neighborEvidence.map((evidence) => () => transaction.objectStore('neighborEvidence').put({
+      ...evidence,
+      workspaceId: project.id,
+    })),
     ...bundle.terrainProfiles.map((profile) => () => transaction.objectStore('terrainProfiles').put({
       ...profile,
       workspaceId: project.id,
@@ -387,6 +406,7 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
     'taxonomyNodes',
     'referenceAtlases',
     'layouts',
+    'neighborEvidence',
     'terrainProfiles',
     'citations',
     'explorationItems',
@@ -409,6 +429,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     taxonomyNodes,
     referenceAtlases,
     storedLayouts,
+    storedNeighborEvidence,
     storedTerrainProfiles,
     citations,
     revisions,
@@ -423,6 +444,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     database.getAllFromIndex('taxonomyNodes', 'by-workspace', workspaceId),
     database.getAllFromIndex('referenceAtlases', 'by-workspace', workspaceId),
     database.getAllFromIndex('layouts', 'by-workspace', workspaceId),
+    database.getAllFromIndex('neighborEvidence', 'by-workspace', workspaceId),
     database.getAllFromIndex('terrainProfiles', 'by-workspace', workspaceId),
     database.getAllFromIndex('citations', 'by-workspace', workspaceId),
     database.getAllFromIndex('revisions', 'by-workspace', workspaceId),
@@ -439,6 +461,7 @@ export async function readProjectMaterialization(workspaceId: string): Promise<S
     taxonomyNodes,
     referenceAtlases,
     layouts: storedLayouts.map(stripWorkspaceId),
+    neighborEvidence: storedNeighborEvidence.map(stripWorkspaceId),
     terrainProfiles: storedTerrainProfiles.map(stripWorkspaceId),
     citations,
     revisions,
@@ -494,6 +517,8 @@ function createSchemaV3Stores(database: IDBPDatabase<CognitiveTerrainDB>): void 
   layouts.createIndex('by-workspace', 'workspaceId')
   layouts.createIndex('by-layout', ['workspaceId', 'layoutId'])
 
+  createNeighborEvidenceStore(database)
+
   const terrainProfiles = database.createObjectStore('terrainProfiles', {
     keyPath: ['workspaceId', 'id'],
   })
@@ -541,6 +566,9 @@ async function upgradeDatabase(
   if (oldVersion >= 5 && oldVersion < 7) {
     createExplorationItemStore(database)
   }
+  if (oldVersion >= 5 && oldVersion < 8) {
+    createNeighborEvidenceStore(database)
+  }
   if (oldVersion >= 5 && oldVersion < 6) {
     createTaxonomyNodeStore(database)
     createReferenceAtlasStore(database)
@@ -563,6 +591,16 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
+  if (oldVersion >= 7 && oldVersion < 8) {
+    const store = transaction.objectStore('projects')
+    let cursor = await store.openCursor()
+    while (cursor) {
+      const project = migrateProject(cursor.value)
+      await cursor.update(project)
+      await replaceProjectMaterialization(transaction, project, 3)
+      cursor = await cursor.continue()
+    }
+  }
 }
 
 function createTaxonomyNodeStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
@@ -576,6 +614,14 @@ function createReferenceAtlasStore(database: IDBPDatabase<CognitiveTerrainDB>): 
   const referenceAtlases = database.createObjectStore('referenceAtlases', { keyPath: ['workspaceId', 'id'] })
   referenceAtlases.createIndex('by-workspace', 'workspaceId')
   referenceAtlases.createIndex('by-taxonomy-version', ['workspaceId', 'taxonomyVersion'])
+}
+
+function createNeighborEvidenceStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const neighborEvidence = database.createObjectStore('neighborEvidence', {
+    keyPath: ['workspaceId', 'sourceId', 'targetId'],
+  })
+  neighborEvidence.createIndex('by-workspace', 'workspaceId')
+  neighborEvidence.createIndex('by-source', ['workspaceId', 'sourceId'])
 }
 
 function createExplorationItemStore(database: IDBPDatabase<CognitiveTerrainDB>): void {

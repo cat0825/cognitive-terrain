@@ -1,6 +1,12 @@
 import { UMAP } from 'umap-js'
+export { STABLE_LAYOUT_FORMULA_VERSION } from '../domain/layout-version'
 
 export type Coordinate = [number, number]
+
+export interface StableLayoutResult {
+  coordinates: Coordinate[]
+  neighborIndices: number[][]
+}
 
 export function mulberry32(seed: number): () => number {
   let state = seed >>> 0
@@ -23,9 +29,18 @@ export async function buildStableLayout(
   vectors: number[][],
   onProgress?: (completed: number, total: number) => void,
 ): Promise<Coordinate[]> {
-  if (vectors.length === 0) return []
-  if (vectors.length === 1) return [[0, 0]]
-  if (vectors.length === 2) return [[-0.42, 0], [0.42, 0]]
+  return (await buildStableLayoutWithNeighbors(vectors, onProgress)).coordinates
+}
+
+export async function buildStableLayoutWithNeighbors(
+  vectors: number[][],
+  onProgress?: (completed: number, total: number) => void,
+): Promise<StableLayoutResult> {
+  if (vectors.length === 0) return { coordinates: [], neighborIndices: [] }
+  if (vectors.length === 1) return { coordinates: [[0, 0]], neighborIndices: [[]] }
+  if (vectors.length === 2) {
+    return { coordinates: [[-0.42, 0], [0.42, 0]], neighborIndices: [[1], [0]] }
+  }
 
   const umap = new UMAP({
     nComponents: 2,
@@ -35,12 +50,19 @@ export async function buildStableLayout(
     random: mulberry32(0x5eedc0de),
   })
   const total = umap.initializeFit(vectors)
+  // umap-js computes approximate high-dimensional KNN during initializeFit.
+  // Reusing those candidates avoids a second O(n^2 * dimensions) pass.
+  const neighborIndices = ((umap as unknown as { knnIndices?: number[][] }).knnIndices ?? [])
+    .map((indices, sourceIndex) => indices.filter((index) => index >= 0 && index !== sourceIndex))
   for (let epoch = 0; epoch < total; epoch += 1) {
     umap.step()
     if (epoch % 5 === 0 || epoch === total - 1) onProgress?.(epoch + 1, total)
     if (epoch % 20 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0))
   }
-  return orientAndScale(umap.getEmbedding() as Coordinate[])
+  return {
+    coordinates: orientAndScale(umap.getEmbedding() as Coordinate[]),
+    neighborIndices,
+  }
 }
 
 export function orientAndScale(input: Coordinate[]): Coordinate[] {
@@ -85,4 +107,3 @@ export function orientAndScale(input: Coordinate[]): Coordinate[] {
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
-

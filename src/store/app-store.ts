@@ -9,6 +9,7 @@ import type {
   InteractionEvent,
   ExplorationSuggestion,
   TerrainProject,
+  TerrainPeak,
   ViewMode,
   VisualDimension,
 } from '../domain/types'
@@ -73,7 +74,9 @@ interface AppState {
   cameraInteractionMode: CameraInteractionMode
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
+  activePeak: TerrainPeak | null
   activeCollisionId: string | null
+  activeGapNodeId: string | null
   compareRef: number | null
   firstRun: boolean
   dismissFirstRun: () => void
@@ -98,8 +101,9 @@ interface AppState {
   setCameraInteractionMode: (mode: CameraInteractionMode) => void
   resetCamera: () => void
   requestFocus: (noteId: string) => void
-  setActivePeak: (peakId: string | null) => void
+  setActivePeak: (peak: TerrainPeak | null) => void
   selectCollision: (collisionId: string | null) => void
+  selectGap: (nodeId: string | null) => void
   setCompareRef: (bucketIndex: number | null) => void
   reportError: (message: string) => void
   dismissError: () => void
@@ -189,7 +193,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   cameraInteractionMode: 'rotate',
   focusRequest: null,
   activePeakId: null,
+  activePeak: null,
   activeCollisionId: null,
+  activeGapNodeId: null,
   compareRef: null,
   firstRun: localStorage.getItem('cognitive-terrain:first-run') === null,
   lastAnalysis: null,
@@ -232,7 +238,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       project,
       selectedNoteId,
+      activePeakId: null,
+      activePeak: null,
       activeCollisionId: null,
+      activeGapNodeId: null,
       detailsOpen: selectedNoteId !== null,
     })
     if (event) {
@@ -257,7 +266,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearAreas: () => set({ activeAreas: [] }),
   setViewMode: (viewMode) => set({ viewMode }),
   setQuality: (quality) => set({ quality }),
-  setVisualDimension: (visualDimension) => set({ visualDimension }),
+  setVisualDimension: (visualDimension) => set((state) => ({
+    visualDimension,
+    ...(state.activePeak ? {
+      activePeak: null,
+      activePeakId: null,
+      detailsOpen: false,
+    } : {}),
+  })),
   setReferenceAtlas: async (id) => {
     const current = get().project
     const nextId = normalizeActiveReferenceAtlasId(current.referenceAtlases, id)
@@ -269,7 +285,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Atlas selection is a view preference. Update the in-memory project first so
     // the map and detail report respond immediately; persistence can finish in the
     // background without making the user wait for a full materialization rewrite.
-    set({ project })
+    set({ project, activeGapNodeId: null })
     try {
       await updateActiveReferenceAtlas(project.id, nextId)
       await Promise.all([get().reloadProjects(), get().reloadBackups()])
@@ -302,11 +318,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   resetCamera: () => set((state) => ({ cameraRevision: state.cameraRevision + 1, cameraScale: 192 })),
   requestFocus: (noteId) =>
     set((state) => ({ focusRequest: { noteId, revision: (state.focusRequest?.revision ?? 0) + 1 } })),
-  setActivePeak: (activePeakId) => set({ activePeakId }),
+  setActivePeak: (activePeak) => set({
+    activePeak,
+    activePeakId: activePeak?.id ?? null,
+    activeCollisionId: null,
+    activeGapNodeId: null,
+    selectedNoteId: null,
+    detailsOpen: activePeak !== null,
+  }),
   selectCollision: (activeCollisionId) => set({
     activeCollisionId,
+    activePeakId: null,
+    activePeak: null,
     selectedNoteId: null,
+    activeGapNodeId: null,
     detailsOpen: activeCollisionId !== null,
+  }),
+  selectGap: (activeGapNodeId) => set({
+    activeGapNodeId,
+    activePeakId: null,
+    activePeak: null,
+    activeCollisionId: null,
+    selectedNoteId: null,
+    detailsOpen: activeGapNodeId !== null,
   }),
   setCompareRef: (compareRef) => set({ compareRef }),
   reportError: (error) => set({ error }),
@@ -726,7 +760,9 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
     detailsOpen: false,
     focusRequest: null,
     activePeakId: null,
+    activePeak: null,
     activeCollisionId: null,
+    activeGapNodeId: null,
     compareRef: null,
     cameraRevision: Date.now(),
     cameraScale: 192,

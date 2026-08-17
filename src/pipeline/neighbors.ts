@@ -1,10 +1,59 @@
-import type { TerrainNote } from '../domain/types'
+import type { NoteNeighborEvidence, TerrainNote, TerrainProject } from '../domain/types'
+
+export const EMBEDDING_NEIGHBOR_FORMULA_VERSION = 'embedding-cosine-neighbors-v1' as const
 
 export interface NeighborMatch {
   id: string
   title: string
   tags: string[]
   distance: number
+}
+
+export interface EmbeddingNeighborResult {
+  noteNeighbors: string[][]
+  noteNeighborEvidence: NoteNeighborEvidence[][]
+}
+
+export function computeEmbeddingNeighbors(
+  notes: readonly TerrainNote[],
+  vectors: readonly (readonly number[])[],
+  modelId: string,
+  embeddingMode: Extract<TerrainProject['embeddingMode'], 'semantic' | 'fallback'>,
+  k = 6,
+  candidateIndices?: readonly (readonly number[])[],
+): EmbeddingNeighborResult {
+  if (notes.length !== vectors.length) throw new RangeError('notes and vectors must have equal length')
+  const noteNeighborEvidence = notes.map((note, sourceIndex) => {
+    const candidates = candidateIndices?.[sourceIndex]
+      ?? vectors.map((_targetVector, targetIndex) => targetIndex)
+    return candidates
+    .map((targetIndex) => ({
+      targetIndex,
+      score: cosineSimilarity(vectors[sourceIndex] ?? [], vectors[targetIndex] ?? []),
+    }))
+    .filter(({ targetIndex }) => targetIndex !== sourceIndex)
+    .sort((left, right) => right.score - left.score
+      || (notes[left.targetIndex]?.id ?? '').localeCompare(notes[right.targetIndex]?.id ?? ''))
+    .slice(0, Math.max(0, k))
+    .flatMap(({ targetIndex, score }, rank) => {
+      const target = notes[targetIndex]
+      if (!target) return []
+      return [{
+        sourceId: note.id,
+        targetId: target.id,
+        rank: rank + 1,
+        score,
+        modelId,
+        embeddingMode,
+        formulaVersion: EMBEDDING_NEIGHBOR_FORMULA_VERSION,
+        provenance: 'embedding',
+      } satisfies NoteNeighborEvidence]
+    })
+  })
+  return {
+    noteNeighbors: noteNeighborEvidence.map((evidence) => evidence.map((entry) => entry.targetId)),
+    noteNeighborEvidence,
+  }
 }
 
 export function computeNeighbors(
@@ -61,6 +110,22 @@ function coordinateDistance(a: TerrainNote, b: TerrainNote): number {
 function tagOverlap(a: TerrainNote, b: TerrainNote): number {
   const bTags = new Set(b.tags)
   return a.tags.filter((tag) => bTags.has(tag)).length
+}
+
+function cosineSimilarity(left: readonly number[], right: readonly number[]): number {
+  if (left.length !== right.length || left.length === 0) return 0
+  let dot = 0
+  let leftMagnitude = 0
+  let rightMagnitude = 0
+  for (let index = 0; index < left.length; index += 1) {
+    const leftValue = left[index] ?? 0
+    const rightValue = right[index] ?? 0
+    dot += leftValue * rightValue
+    leftMagnitude += leftValue * leftValue
+    rightMagnitude += rightValue * rightValue
+  }
+  const denominator = Math.sqrt(leftMagnitude * rightMagnitude)
+  return denominator > 0 ? Math.max(-1, Math.min(1, dot / denominator)) : 0
 }
 
 function toMatch(note: TerrainNote): NeighborMatch {

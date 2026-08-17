@@ -107,6 +107,29 @@ describe('project repository', () => {
       .toBe(project.referenceAtlases?.[0]?.id)
   })
 
+  it('persists embedding neighbor evidence in the project and materialized object store', async () => {
+    const project = smallProject('p-neighbor-evidence', '邻居证据')
+    const evidence = {
+      sourceId: project.notes[0].id,
+      targetId: project.notes[1].id,
+      rank: 1,
+      score: 0.84,
+      modelId: 'Xenova/multilingual-e5-small',
+      embeddingMode: 'semantic' as const,
+      formulaVersion: 'embedding-cosine-neighbors-v1' as const,
+      provenance: 'embedding' as const,
+    }
+    project.noteNeighbors = [[project.notes[1].id], [project.notes[0].id]]
+    project.noteNeighborEvidence = [[evidence], []]
+
+    await saveProject(project)
+
+    expect((await getProject(project.id))?.noteNeighborEvidence).toEqual([[evidence], []])
+    expect((await getProjectObjectBundle(project.id))?.neighborEvidence).toEqual([evidence])
+    expect(await (await getDatabase()).get('neighborEvidence', [project.id, evidence.sourceId, evidence.targetId]))
+      .toMatchObject(evidence)
+  })
+
   it('updates exploration lifecycle state without backups or rebuilding note records', async () => {
     const project = smallProject('p-exploration-update', '探索状态')
     await saveProject(project)
@@ -146,6 +169,7 @@ describe('project repository', () => {
     expect(upgraded.version).toBe(DATABASE_VERSION)
     expect(upgraded.objectStoreNames.contains('backups')).toBe(true)
     expect(upgraded.objectStoreNames.contains('workspaces')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('neighborEvidence')).toBe(true)
     expect(stored?.schemaVersion).toBe(3)
     expect(stored?.embeddingMode).toBe('fallback')
     expect(stored?.noteNeighbors).toEqual([])
@@ -411,6 +435,17 @@ describe('project repository', () => {
   it('backs up the previous version before save and restores it', async () => {
     const original = smallProject('p-backup', '初始版本')
     original.explorationItems = [explorationItemFor(original)]
+    const neighborEvidence = {
+      sourceId: original.notes[0].id,
+      targetId: original.notes[1].id,
+      rank: 1,
+      score: 0.72,
+      modelId: 'semantic-backup-model',
+      embeddingMode: 'semantic' as const,
+      formulaVersion: 'embedding-cosine-neighbors-v1' as const,
+      provenance: 'embedding' as const,
+    }
+    original.noteNeighborEvidence = [[neighborEvidence], []]
     await saveProject(original)
     await saveProject({ ...original, name: '修改版本', updatedAt: '2026-08-14T08:00:00.000Z' })
 
@@ -420,8 +455,10 @@ describe('project repository', () => {
     const restored = await restoreProjectBackup(backup.id)
     expect(restored?.name).toBe('初始版本')
     expect(restored?.explorationItems).toEqual(original.explorationItems)
+    expect(restored?.noteNeighborEvidence).toEqual(original.noteNeighborEvidence)
     expect((await getProject('p-backup'))?.name).toBe('初始版本')
     expect((await getProjectObjectBundle('p-backup'))?.explorationItems).toEqual(original.explorationItems)
+    expect((await getProjectObjectBundle('p-backup'))?.neighborEvidence).toEqual([neighborEvidence])
     expect((await listProjectBackups('p-backup')).some((item) => item.reason === 'before-restore')).toBe(true)
   })
 

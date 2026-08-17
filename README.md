@@ -12,13 +12,14 @@
 - Obsidian `area` / `areas` 多领域归属与 WikiLink 关系可生成知识板块、跨域山脊和可解释碰撞带。方向只来自已解析的 source → target WikiLink；至少 2 组唯一笔记关系且正反向计数置信度达到 60% 才显示箭头，低样本或混合方向保持无向。
 - 领域维护使用版本化 taxonomy node：稳定 ID 与显示名称分离，支持父子层级、Unicode/空白/大小写归一化别名、创建、重命名、重挂和合并预览；每次确认前创建恢复点。导入时同时保留原始声明标签与解析后的 node ID，未分类和未解析标签进入维护队列。
 - 焦点模式：选中笔记后一键飞行到该笔记；点击峰标签高亮该峰并绘制峰内笔记的路径连线。
+- 地形语义图例与证据检查器统一解释平面位置、山峰、海拔、颜色、叠加层、板块、碰撞和参考缺口。笔记邻居分别显示原始 embedding 分数/rank/model、近似 UMAP 二维距离、taxonomy、tags 和显式 WikiLink；峰、碰撞与缺口可追溯公式版本、来源和证据 ID，2D/3D 共用同一契约。
 - 峰值标签按视口、缩放、重要性和碰撞占位确定显示层级；移动端同屏最多 8 个，选中标签始终优先。
 - 对比模式：选中时间基准层，直接回放比较新增/消失笔记差异。
 - 编辑模式：直接修改标题、正文和标签，重新分析后保留稳定的笔记 ID。
 - 导入 JSON、CSV、TSV、Markdown、纯文本和 YAML。
 - 导入/导出 `.terrain.json` 完整项目包，导出当前地图为 PNG，导出 Markdown 复盘报告。
 - 项目自动保存到 IndexedDB，支持增量合并新笔记；覆盖、改名、删除和恢复前会自动创建本地恢复点，每个项目最多保留 8 份。
-- IndexedDB v7 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、探索生命周期、布局和 revision hash 基线；不同项目通过复合键隔离。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
+- IndexedDB v8 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、探索生命周期、布局、原始 embedding 邻居证据和 revision hash 基线；不同项目通过复合键隔离。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
 - 海洋/知识缺口（`reference-gap-v1`）只表示当前项目相对显式选中的 active reference atlas 的 taxonomy 覆盖差距。未选择有效 atlas 时该计算为 disabled，不输出用户知识或技能缺口声明；低活动不等于缺口。
 - 探索工作台把所选参考缺口、陈旧复习、未解析双链、未评估/低置信度笔记和用户明确标记的 `gap` 目标转换为最多 8 条确定性建议；当前工作集最多 3 项。每条建议保留 reason code、支持项、参考边界、来源回跳、下一步动作与本地生命周期历史，活动分数不会单独触发建议。
 - 活动历史按 retention policy v1 有界保存：打开/编辑/复习原始事件分别保留 30/180/365 天，每条笔记每类最多 500 条；180 天内可按日查看，最长 730 天按周聚合。项目 `timeZone` 决定日历边界，非法时间戳会被忽略。聚合保留每类事件的计数、首末时间和衰减热度；笔记自身的 `reviewedAt` 不参与裁剪，因此迁移不会丢失最近复习时间。超过 730 天的活动不再出现在历史或温度计算中，也不承诺作为审计档案。
@@ -124,7 +125,7 @@ tags:
 2. 优先使用 `Xenova/multilingual-e5-small` 生成语义向量。
 3. 优先使用 WebGPU，浏览器不支持时使用 WASM。
 4. 模型下载或初始化失败时，切换到明确标记的确定性本地向量。
-5. 使用固定随机种子的 UMAP 生成二维坐标。
+5. 使用固定随机种子的 UMAP 生成二维坐标（`umap-js-2d-v1`）；embedding model ID 与布局算法版本分别保存。
 6. 通过 KDE、Gaussian blur 和对数高度整形生成月份累计地形。
 7. 检测局部峰值，并用附近笔记标签命名。
 

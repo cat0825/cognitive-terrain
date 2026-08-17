@@ -404,7 +404,6 @@ function TerrainSurface({
           labelLimit={peakLabelLimit}
           compact={compactLabels}
           reducedMotion={reducedMotion}
-          onSelectNote={onSelectNote}
         />
       )}
     </group>
@@ -907,7 +906,6 @@ function PeakField({
   labelLimit,
   compact,
   reducedMotion,
-  onSelectNote,
 }: {
   snapshots: TerrainSnapshot[]
   gridSize: number
@@ -917,7 +915,6 @@ function PeakField({
   labelLimit: number
   compact: boolean
   reducedMotion: boolean
-  onSelectNote: (id: string | null) => void
 }) {
   const labels = useRef<Array<HTMLDivElement | null>>([])
   const labelLayer = useRef<HTMLDivElement | null>(null)
@@ -1117,11 +1114,9 @@ function PeakField({
                     event.stopPropagation()
                     if (activePeakId === peak.id) {
                       setActivePeak(null)
-                      onSelectNote(null)
                       return
                     }
-                    setActivePeak(peak.id)
-                    onSelectNote(peak.noteIds[0] ?? null)
+                    setActivePeak(peak)
                   }}
                 >
                   <span>{peak.label}</span>
@@ -1543,7 +1538,7 @@ function makeNoteMaterial(atlas: HeightAtlas, quality: QualityLevel): ShaderMate
           * mix(0.88, 1.18, peakAffinity);
         float pulse = 1.0 + freshness * (0.025 + peakAffinity * 0.035)
           * sin(uTime * 0.55 + seed * 6.2831853);
-        float pointPixels = uPointSize * (uScale / max(0.1, -mvPosition.z)) * hierarchy * pulse * mix(0.92, 1.08, mastery);
+        float pointPixels = uPointSize * (uScale / max(0.1, -mvPosition.z)) * hierarchy * pulse;
         gl_PointSize = vVisible * clamp(pointPixels, uMinimumPixels, uMaximumPixels);
         vDepthFade = 1.0 - smoothstep(7.0, 14.0, -mvPosition.z);
         #include <fog_vertex>
@@ -1749,10 +1744,8 @@ function dimensionValue(
 }
 
 function dimensionMode(dimension: VisualDimension): number {
-  if (dimension === 'mastery') return 1
-  if (dimension === 'exploration') return 2
-  if (dimension === 'area') return 3
-  if (dimension === 'activity' || dimension === 'temperature') return 4
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'area') return 3
+  if (dimension === 'temperature') return 4
   return 0
 }
 
@@ -1761,8 +1754,8 @@ function dimensionColor(
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
 ): Color {
-  if (dimension === 'activity' || dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
-  if (dimension === 'area') {
+  if (dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'area') {
     const area = primaryAreaForNote(note)
     return new Color(area ? plateColor(area) : '#767673')
   }
