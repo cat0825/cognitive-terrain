@@ -229,6 +229,56 @@ describe('vault write-back recovery repository', () => {
     ])
   })
 
+  it('rolls back every outcome when one update in the file batch is invalid', async () => {
+    const shared = new Uint8Array([10, 20, 30])
+    await prepareVaultWritebackRecoveryBatch({
+      id: 'batch-atomic-outcomes',
+      workspaceId: 'workspace-a',
+      vaultId: 'vault-a',
+      previewId: 'preview-atomic-outcomes',
+      createdAt: CREATED_AT,
+      entries: [
+        {
+          requestId: 'request-mastery',
+          sourceId: 'source-shared',
+          path: 'Shared.md',
+          beforeByteHash: 'sha256:shared',
+          originalBytes: shared,
+        },
+        {
+          requestId: 'request-confidence',
+          sourceId: 'source-shared',
+          path: 'Shared.md',
+          beforeByteHash: 'sha256:shared',
+          originalBytes: shared,
+        },
+      ],
+    })
+
+    await expect(updateVaultWritebackRecoveryOutcomes('batch-atomic-outcomes', [
+      {
+        requestId: 'request-mastery',
+        sourceId: 'source-shared',
+        path: 'Shared.md',
+        status: 'succeeded',
+      },
+      {
+        requestId: 'request-confidence',
+        sourceId: 'source-wrong',
+        path: 'Shared.md',
+        status: 'succeeded',
+      },
+    ])).rejects.toThrow(/identity changed/)
+
+    expect(await getVaultWritebackRecoveryBatch('batch-atomic-outcomes')).toMatchObject({
+      status: 'prepared',
+      outcomes: [
+        { requestId: 'request-mastery', status: 'not-attempted' },
+        { requestId: 'request-confidence', status: 'not-attempted' },
+      ],
+    })
+  })
+
   it('rejects conflicting recovery material before creating a batch', async () => {
     await expect(prepareVaultWritebackRecoveryBatch({
       id: 'batch-conflict',
