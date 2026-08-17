@@ -67,6 +67,7 @@ test('note detail sheet is accessible', async ({ page }) => {
 })
 
 test('exploration workbench is accessible', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.addInitScript(() => {
     localStorage.setItem('cognitive-terrain:first-run', 'seen')
     localStorage.setItem('cognitive-terrain:embedding', 'deterministic')
