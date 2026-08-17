@@ -9,6 +9,11 @@ const baselineDir = path.resolve('tests/visual/baselines')
 const diffDir = path.resolve('tests/visual/diffs')
 const update = process.env.UPDATE_BASELINES === '1'
 const platform = process.platform
+const fixedTime = new Date('2026-08-17T08:00:00.000Z')
+
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(fixedTime)
+})
 
 async function compareScreenshot(page: import('@playwright/test').Page, name: string): Promise<void> {
   const shot = await page.screenshot({ animations: 'disabled' })

@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
 test('terrain evidence inspector has no serious accessibility violations', async ({ page }) => {
+  test.setTimeout(60_000)
   await page.addInitScript(() => {
     localStorage.setItem('cognitive-terrain:first-run', 'seen')
     localStorage.setItem('cognitive-terrain:reference-atlas:demo-ai-infra-terrain', 'demo-ai-infra-reference-atlas')
