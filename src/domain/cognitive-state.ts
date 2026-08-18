@@ -77,6 +77,11 @@ export function commitAnalyzedProject(
     createdAt: baseProject.createdAt,
     updatedAt,
     interactionEvents: [...baseProject.interactionEvents, ...events],
+    cognitiveObservations: mergeCognitiveObservations(
+      baseProject.cognitiveObservations,
+      analyzedProject.cognitiveObservations,
+    ),
+    learningProgressionProfileVersion: baseProject.learningProgressionProfileVersion,
     activityHistory: baseProject.activityHistory,
     terrainProfiles: baseProject.terrainProfiles,
     activeTerrainProfileId: baseProject.activeTerrainProfileId,
@@ -90,4 +95,18 @@ export function commitAnalyzedProject(
     explorationItems: baseProject.explorationItems,
     vaultSync: baseProject.vaultSync,
   }
+}
+
+function mergeCognitiveObservations(
+  base: TerrainProject['cognitiveObservations'],
+  analyzed: TerrainProject['cognitiveObservations'],
+): TerrainProject['cognitiveObservations'] {
+  const merged = [...(base ?? [])]
+  const ids = new Set(merged.map((observation) => observation.id))
+  for (const observation of analyzed ?? []) {
+    if (ids.has(observation.id)) continue
+    ids.add(observation.id)
+    merged.push(observation)
+  }
+  return merged
 }

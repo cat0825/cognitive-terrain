@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TerrainNote } from '../../src/domain/types'
 import { buildActivitySummaries } from '../../src/domain/activity-temperature'
+import { createCognitiveObservation, calculateLearningProgression } from '../../src/domain/learning-progression'
 import { materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import {
   buildTerrainData,
@@ -117,6 +118,30 @@ describe('terrain pipeline', () => {
 
     expect(sampleHeight(values, 48, hot.x, hot.y)).toBeGreaterThan(sampleHeight(values, 48, cold.x, cold.y) * 3)
     expect([cold.x, cold.y, hot.x, hot.y]).toEqual([-0.45, 0, 0.45, 0])
+  })
+
+  it('uses explicit learning progression evidence for terrain height without moving notes', () => {
+    const low = note('low-progression', '2026-01-10T00:00:00.000Z', -0.45, 0, 'low')
+    const high = note('high-progression', '2026-01-10T00:00:00.000Z', 0.45, 0, 'high')
+    const observations = [
+      createCognitiveObservation({
+        id: 'progression-low', itemId: low.id, field: 'mastery', value: 0.2,
+        observedAt: '2026-01-31T00:00:00.000Z', provenance: 'self-assessment', reason: 'baseline',
+      }),
+      createCognitiveObservation({
+        id: 'progression-high', itemId: high.id, field: 'mastery', value: 0.9,
+        observedAt: '2026-01-31T00:00:00.000Z', provenance: 'review-outcome', reason: 'review',
+      }),
+    ]
+    const progressionByNote = new Map([low, high].map((item) => [
+      item.id,
+      calculateLearningProgression({ itemId: item.id, observations, evaluatedAt: '2026-02-01T00:00:00.000Z' }),
+    ]))
+    const terrain = buildTerrainData([low, high], 48, 'UTC', 0.06, 'progression', undefined, progressionByNote)
+    const values = terrain.snapshots[0].values
+
+    expect(sampleHeight(values, 48, high.x, high.y)).toBeGreaterThan(sampleHeight(values, 48, low.x, low.y) * 3)
+    expect([low.x, low.y, high.x, high.y]).toEqual([-0.45, 0, 0.45, 0])
   })
 
   it('renders explicit prerequisite depth as strata without moving planar coordinates', () => {

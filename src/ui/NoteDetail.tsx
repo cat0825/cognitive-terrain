@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, FilePenLine, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
 import { calculateActivityElevation } from '../domain/activity-elevation'
-import type { InteractionEventType, TerrainNote, TerrainProject } from '../domain/types'
+import { calculateProjectLearningProgression } from '../domain/learning-progression'
+import type { CognitiveObservation, InteractionEventType, TerrainNote, TerrainProject } from '../domain/types'
 import { buildActivitySummaries, temperatureColor } from '../domain/activity-temperature'
 import { aggregateActivityHistoryCounts } from '../domain/activity-history'
 import {
@@ -312,6 +313,31 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
       weekly: aggregateActivityHistoryCounts({ ...state, rawEvents: state.rawEvents.filter((event) => event.itemId === note.id), aggregates: state.aggregates.filter((aggregate) => aggregate.itemId === note.id) }, 'week').map(toBucket),
     }
   }, [note.id, project.activityHistory, project.interactionEvents, project.timeZone])
+  const progressionEvaluatedAt = project.updatedAt
+  const progression = useMemo(
+    () => calculateProjectLearningProgression(project, note.id, progressionEvaluatedAt),
+    [note.id, project, progressionEvaluatedAt],
+  )
+  const progressionObservations = useMemo(
+    () => (project.cognitiveObservations ?? [])
+      .filter((observation) => observation.itemId === note.id)
+      .sort(compareCognitiveObservations),
+    [note.id, project.cognitiveObservations],
+  )
+  const progressionCheckpoints = useMemo(
+    () => [...new Set(progressionObservations
+      .filter(isNumericCognitiveObservation)
+      .map((observation) => observation.observedAt))],
+    [progressionObservations],
+  )
+  const [progressionCheckpoint, setProgressionCheckpoint] = useState('current')
+  useEffect(() => setProgressionCheckpoint('current'), [note.id])
+  const checkpointProgression = useMemo(
+    () => progressionCheckpoint === 'current'
+      ? undefined
+      : calculateProjectLearningProgression(project, note.id, progressionCheckpoint),
+    [note.id, project, progressionCheckpoint],
+  )
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState(note.title)
   const [draftContent, setDraftContent] = useState(note.content)
@@ -321,6 +347,8 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
   const [draftConfidence, setDraftConfidence] = useState(note.confidence === undefined ? '' : String(Math.round(note.confidence * 100)))
   const [draftExploration, setDraftExploration] = useState(note.exploration === undefined ? '' : String(Math.round(note.exploration * 100)))
   const [draftStatus, setDraftStatus] = useState(note.status ?? '')
+  const [draftObservationProvenance, setDraftObservationProvenance] = useState<'self-assessment' | 'review-outcome'>('self-assessment')
+  const [draftObservationReason, setDraftObservationReason] = useState('手动自评')
   const [isReviewing, setIsReviewing] = useState(false)
   const isAnalyzing = useAppStore((state) => state.isAnalyzing)
   const dirty = draftTitle.trim() !== note.title || draftContent.trim() !== note.content || splitTags(draftTags).join(',') !== note.tags.join(',') || splitAreas(draftAreas).join(',') !== noteAreas.join(',') || draftMastery !== scoreText(note.mastery) || draftConfidence !== scoreText(note.confidence) || draftExploration !== scoreText(note.exploration) || draftStatus !== (note.status ?? '')
@@ -350,13 +378,21 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
           <label className="edit-field"><span>探索度 0–100</span><input inputMode="numeric" value={draftExploration} onChange={(event) => setDraftExploration(event.target.value)} placeholder="未标注" /></label>
           <label className="edit-field"><span>状态</span><select value={draftStatus} onChange={(event) => setDraftStatus(event.target.value)}><option value="">未标注</option><option value="seed">seed · 起点</option><option value="growing">growing · 生长中</option><option value="stable">stable · 稳定</option><option value="gap">gap · 缺口</option><option value="archived">archived · 归档</option></select></label>
         </div>
+        <div className="state-grid observation-fields">
+          <label className="edit-field"><span>认知变更来源</span><select aria-label="认知变更来源" value={draftObservationProvenance} onChange={(event) => {
+            const provenance = event.target.value as 'self-assessment' | 'review-outcome'
+            setDraftObservationProvenance(provenance)
+            setDraftObservationReason(provenance === 'review-outcome' ? '显式复习结果' : '手动自评')
+          }}><option value="self-assessment">自我评估</option><option value="review-outcome">复习结果</option></select></label>
+          <label className="edit-field observation-reason"><span>变更理由</span><input required value={draftObservationReason} onChange={(event) => setDraftObservationReason(event.target.value)} /></label>
+        </div>
         <div className="edit-actions">
           <button
             type="button"
             className="primary-button"
             disabled={!dirty || isAnalyzing}
             onClick={async () => {
-              await updateNote(note.id, { title: draftTitle, content: draftContent, tags: splitTags(draftTags), areas: splitAreas(draftAreas), mastery: parseScore(draftMastery), confidence: parseScore(draftConfidence), exploration: parseScore(draftExploration), status: draftStatus ? draftStatus as TerrainNote['status'] : null })
+              await updateNote(note.id, { title: draftTitle, content: draftContent, tags: splitTags(draftTags), areas: splitAreas(draftAreas), mastery: parseScore(draftMastery), confidence: parseScore(draftConfidence), exploration: parseScore(draftExploration), status: draftStatus ? draftStatus as TerrainNote['status'] : null }, { provenance: draftObservationProvenance, reason: draftObservationReason })
               setEditing(false)
             }}
           >
@@ -405,6 +441,19 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
             ))}
           </div>
         )}
+        <section className="note-progression" aria-label="学习进程证据">
+          <div className="note-progression__heading"><span>学习进程海拔</span><strong>{Math.round(progression.elevation * 100)}%</strong></div>
+          <small>{progressionHistoryLabel(progression.historyState)} · 不确定性 {Math.round(progression.uncertainty * 100)}% · {progression.profileVersion}{progression.observationsTruncated ? ' · 历史已按上限截断' : ''}</small>
+          {progressionCheckpoints.length > 0 && <label className="progression-checkpoint"><span>对比检查点</span><select aria-label="学习进程检查点" value={progressionCheckpoint} onChange={(event) => setProgressionCheckpoint(event.target.value)}><option value="current">当前状态</option>{progressionCheckpoints.map((checkpoint) => <option key={checkpoint} value={checkpoint}>{formatDate(checkpoint)}</option>)}</select></label>}
+          {checkpointProgression && <div className="progression-comparison" data-testid="progression-comparison"><small>检查点海拔 {Math.round(checkpointProgression.elevation * 100)}% → 当前 {Math.round(progression.elevation * 100)}%</small><strong>{progression.elevation - checkpointProgression.elevation >= 0 ? '+' : ''}{Math.round((progression.elevation - checkpointProgression.elevation) * 100)}%</strong></div>}
+          <details className="progression-evidence">
+            <summary>查看学习进程证据</summary>
+            <div>
+              <small>评估于 {formatDate(progression.evaluatedAt)} · 语义平面坐标保持不变</small>
+              {progressionObservations.length > 0 ? progressionObservations.map((observation) => <small key={observation.id}>{cognitiveObservationFieldLabel(observation)} · {cognitiveObservationProvenanceLabel(observation.provenance)} · {formatDate(observation.observedAt)} · {observation.reason}</small>) : <small>无显式观测；当前快照仅作为中性基线。</small>}
+            </div>
+          </details>
+        </section>
         <div className="note-activity" aria-label="知识温度">
           <div><span>知识温度</span><strong style={{ color: temperatureColor(activity?.score ?? 0) }}>{Math.round((activity?.score ?? 0) * 100)}%</strong></div>
           <small>打开 {activity?.openedCount ?? 0} · 编辑 {activity?.editedCount ?? 0} · 复习 {activity?.reviewedCount ?? 0}</small>
@@ -688,6 +737,40 @@ function scoreText(value: number | undefined): string {
 
 function scoreLabel(value: number | undefined): string {
   return value === undefined ? '未标注' : `${Math.round(value * 100)}%`
+}
+
+function isNumericCognitiveObservation(
+  observation: CognitiveObservation,
+): observation is Extract<CognitiveObservation, { field: 'mastery' | 'confidence' | 'exploration' }> {
+  return observation.field === 'mastery' || observation.field === 'confidence' || observation.field === 'exploration'
+}
+
+function compareCognitiveObservations(a: CognitiveObservation, b: CognitiveObservation): number {
+  return Date.parse(a.observedAt) - Date.parse(b.observedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+}
+
+function progressionHistoryLabel(historyState: ReturnType<typeof calculateProjectLearningProgression>['historyState']): string {
+  if (historyState === 'missing') return '无历史：中性海拔'
+  if (historyState === 'snapshot-only') return '仅当前快照：中性海拔'
+  if (historyState === 'sparse') return '观测稀疏'
+  if (historyState === 'stale') return '观测过期'
+  if (historyState === 'conflicting') return '观测冲突：中性海拔'
+  return '观测历史'
+}
+
+function cognitiveObservationFieldLabel(observation: CognitiveObservation): string {
+  if (observation.field === 'mastery') return `熟练度 ${Math.round(observation.value * 100)}%`
+  if (observation.field === 'confidence') return `置信度 ${Math.round(observation.value * 100)}%`
+  if (observation.field === 'exploration') return `探索度 ${Math.round(observation.value * 100)}%`
+  if (observation.field === 'status') return `状态 ${observation.value}`
+  return `复习时间 ${formatDate(String(observation.value))}`
+}
+
+function cognitiveObservationProvenanceLabel(provenance: CognitiveObservation['provenance']): string {
+  if (provenance === 'self-assessment') return '自我评估'
+  if (provenance === 'yaml-import') return 'YAML 导入'
+  if (provenance === 'review-outcome') return '复习结果'
+  return '迁移快照'
 }
 
 function relativeActivityTime(value: string): string {

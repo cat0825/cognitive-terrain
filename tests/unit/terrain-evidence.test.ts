@@ -79,6 +79,40 @@ describe('terrain evidence contract', () => {
     })
   })
 
+  it('attributes progression height to explicit cognitive observations while retaining area color', () => {
+    const project = projectFixture()
+    project.cognitiveObservations = [{
+      schemaVersion: 1,
+      id: 'observation-a-mastery',
+      itemId: 'a',
+      field: 'mastery',
+      value: 0.82,
+      observedAt: evaluatedAt,
+      provenance: 'self-assessment',
+      reason: 'explicit checkpoint',
+    }]
+    const legend = buildTerrainSemanticsLegend(project, {
+      visualDimension: 'progression',
+      evaluatedAt,
+    })
+    const peak = buildPeakEvidence(project, 'peak-1', {
+      profileId: 'progression',
+      evaluatedAt,
+    })
+
+    expect(legend.entries.find((entry) => entry.kind === 'elevation')).toMatchObject({
+      provenance: ['cognitive-observation'],
+    })
+    expect(legend.entries.find((entry) => entry.kind === 'color')).toMatchObject({
+      formulaVersion: 'declared-taxonomy-area-color-v1',
+    })
+    expect(peak?.activeHeight.inputs.find((input) => input.itemId === 'a')).toMatchObject({
+      provenance: ['cognitive-observation'],
+      supportingIds: ['observation-a-mastery'],
+      missing: false,
+    })
+  })
+
   it('keeps original embedding score, approximate UMAP distance, taxonomy, tags and WikiLink separate', () => {
     const project = projectFixture()
     const evidence = buildNoteNeighborEvidence(project, 'a', 'b', {

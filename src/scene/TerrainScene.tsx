@@ -30,6 +30,7 @@ import {
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { PrerequisiteTopology, QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot, VisualDimension } from '../domain/types'
 import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
+import type { LearningProgressionResult } from '../domain/learning-progression'
 import { buildPlateCollisions, plateColor, primaryAreaForNote, type PlateBridge, type PlateCollision } from '../domain/knowledge-plates'
 import { sampleHeight } from '../pipeline/terrain'
 import { linkedNotes } from '../domain/knowledge-maintenance'
@@ -69,6 +70,7 @@ interface TerrainSceneProps {
   visualDimension: VisualDimension
   prerequisiteTopology?: PrerequisiteTopology
   activityByNote: ReadonlyMap<string, NoteActivitySummary>
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
   onSelectNote: (id: string | null) => void
@@ -344,6 +346,7 @@ function TerrainSurface({
   visualDimension,
   prerequisiteTopology,
   activityByNote,
+  progressionByNote,
 }: TerrainSceneProps & { compactLabels: boolean; peakLabelLimit: number; reducedMotion: boolean }) {
   const heightAtlas = useMemo(() => buildHeightAtlas(snapshots, gridSize), [gridSize, snapshots])
   const heightAtlasSize = useMemo(
@@ -390,6 +393,7 @@ function TerrainSurface({
         visualDimension={visualDimension}
         prerequisiteTopology={prerequisiteTopology}
         activityByNote={activityByNote}
+        progressionByNote={progressionByNote}
       />
       <SelectedMarker
         snapshots={snapshots}
@@ -695,7 +699,8 @@ function NotePoints({
   visualDimension,
   prerequisiteTopology,
   activityByNote,
-}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'prerequisiteTopology' | 'activityByNote'> & {
+  progressionByNote,
+}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'prerequisiteTopology' | 'activityByNote' | 'progressionByNote'> & {
   heightAtlas: HeightAtlas
   peaks: TerrainPeak[]
   reducedMotion: boolean
@@ -721,9 +726,10 @@ function NotePoints({
         peaks,
         visualDimension,
         activityByNote,
+        progressionByNote,
         structureByNote,
       ),
-    [activityByNote, birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, structureByNote, visualDimension],
+    [activityByNote, birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, progressionByNote, structureByNote, visualDimension],
   )
   const material = useMemo(() => makeNoteMaterial(heightAtlas, quality), [heightAtlas, quality])
   const lastRaycastBucket = useRef(Number.NaN)
@@ -1377,6 +1383,7 @@ function buildNoteGeometry(
   peaks: TerrainPeak[],
   visualDimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
   structureByNote: ReadonlyMap<string, number>,
 ): BufferGeometry {
   const geometry = new BufferGeometry()
@@ -1408,7 +1415,7 @@ function buildNoteGeometry(
     )
     peakAffinity[index] = resolvePeakAffinity(note, peaks)
     mastery[index] = note.mastery ?? 0.5
-    visualValue[index] = dimensionValue(note, visualDimension, activityByNote, structureByNote)
+    visualValue[index] = dimensionValue(note, visualDimension, activityByNote, progressionByNote, structureByNote)
     visualMode[index] = dimensionMode(visualDimension)
     const color = dimensionColor(note, visualDimension, activityByNote, structureByNote)
     visualColor[offset] = color.r
@@ -1744,17 +1751,19 @@ function dimensionValue(
   note: TerrainNote,
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
   structureByNote: ReadonlyMap<string, number>,
 ): number {
   if (dimension === 'mastery') return note.mastery ?? 0.5
   if (dimension === 'exploration') return note.exploration ?? 0.5
+  if (dimension === 'progression') return progressionByNote.get(note.id)?.elevation ?? 0.5
   if (dimension === 'activity' || dimension === 'temperature') return activityByNote.get(note.id)?.score ?? 0
   if (dimension === 'structure') return structureByNote.get(note.id) ?? 0
   return 0.5
 }
 
 function dimensionMode(dimension: VisualDimension): number {
-  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'structure' || dimension === 'area') return 3
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'progression' || dimension === 'structure' || dimension === 'area') return 3
   if (dimension === 'temperature') return 4
   return 0
 }
@@ -1766,7 +1775,7 @@ function dimensionColor(
   _structureByNote: ReadonlyMap<string, number>,
 ): Color {
   if (dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
-  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'structure' || dimension === 'area') {
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'progression' || dimension === 'structure' || dimension === 'area') {
     const area = primaryAreaForNote(note)
     return new Color(area ? plateColor(area) : '#767673')
   }

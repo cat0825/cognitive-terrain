@@ -4,10 +4,43 @@ import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
 import { parseProjectBundle, serializeProjectBundle } from '../../src/export/project-files'
 import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
+import { createCognitiveObservation } from '../../src/domain/learning-progression'
 import { buildPrerequisiteTopology, materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import type { ExplorationLifecycleItem, TerrainProject } from '../../src/domain/types'
 
 describe('project bundle migration', () => {
+  it('round-trips learning observations while snapshot-only projects stay history-free', async () => {
+    const demo = createDemoProject()
+    const observation = createCognitiveObservation({
+      id: 'observation:bundle:mastery:1',
+      itemId: demo.notes[0].id,
+      field: 'mastery',
+      value: 0.76,
+      observedAt: '2026-08-17T08:00:00.000Z',
+      provenance: 'yaml-import',
+      reason: 'Obsidian frontmatter import',
+    })
+    const source = migrateProject({
+      ...demo,
+      cognitiveObservations: [observation],
+      learningProgressionProfileVersion: 'learning-progression-v1',
+    })
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'learning-progression.terrain.json',
+      { type: 'application/json' },
+    ))
+    const snapshotOnly = await parseProjectBundle(new File(
+      [serializeProjectBundle({ ...demo, cognitiveObservations: undefined })],
+      'snapshot-only.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.cognitiveObservations).toEqual([observation])
+    expect(restored.learningProgressionProfileVersion).toBe('learning-progression-v1')
+    expect(snapshotOnly.cognitiveObservations).toEqual([])
+  })
+
   it('loads a Schema v2 bundle into the Schema v3 compatibility shape', async () => {
     const project = createDemoProject()
     const {

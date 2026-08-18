@@ -25,6 +25,7 @@ import {
   saveVaultWritebackProject,
 } from '../../src/storage/vault-sync-repository'
 import { createInteractionEvent } from '../../src/domain/cognitive-state'
+import { createCognitiveObservation } from '../../src/domain/learning-progression'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { closeDatabase, DATABASE_NAME, DATABASE_VERSION, getDatabase } from '../../src/storage/db'
 
@@ -158,6 +159,28 @@ beforeEach(async () => {
 })
 
 describe('project repository', () => {
+  it('persists and materializes versioned cognitive observations', async () => {
+    const project = smallProject('p-learning-observations', '学习进程证据')
+    const observation = createCognitiveObservation({
+      id: 'observation:note:mastery:review-1',
+      itemId: project.notes[0].id,
+      field: 'mastery',
+      value: 0.82,
+      observedAt: '2026-08-17T08:00:00.000Z',
+      provenance: 'review-outcome',
+      reason: 'manual review outcome',
+    })
+    project.cognitiveObservations = [observation]
+    project.learningProgressionProfileVersion = 'learning-progression-v1'
+
+    await saveProject(project)
+
+    expect((await getProject(project.id))?.cognitiveObservations).toEqual([observation])
+    const bundle = await getProjectObjectBundle(project.id)
+    expect(bundle?.cognitiveObservations).toEqual([observation])
+    expect(bundle?.workspace.learningProgressionProfileVersion).toBe('learning-progression-v1')
+  })
+
   it('persists an atlas preference without rebuilding the project materialization', async () => {
     const project = smallProject('p-atlas-preference', '参考图谱偏好')
     await saveProject(project)
@@ -231,6 +254,7 @@ describe('project repository', () => {
     expect(upgraded.version).toBe(DATABASE_VERSION)
     expect(upgraded.objectStoreNames.contains('backups')).toBe(true)
     expect(upgraded.objectStoreNames.contains('workspaces')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('cognitiveObservations')).toBe(true)
     expect(upgraded.objectStoreNames.contains('neighborEvidence')).toBe(true)
     expect(upgraded.objectStoreNames.contains('explorationItems')).toBe(true)
     expect(upgraded.objectStoreNames.contains('vaultBindings')).toBe(true)
@@ -243,11 +267,14 @@ describe('project repository', () => {
     expect(stored?.cognitiveStates[0]?.provenance).toBe('migration')
     expect(stored?.notes[0]?.reviewedAt).toBe('2025-08-15T00:00:00.000Z')
     expect(stored?.interactionEvents).toEqual([])
+    expect(stored?.cognitiveObservations).toEqual([])
+    expect(stored?.learningProgressionProfileVersion).toBe('learning-progression-v1')
     expect(stored?.terrainProfiles.map((profile) => profile.id)).toEqual([
       'density',
       'mastery',
       'exploration',
       'activity',
+      'progression',
       'structure',
     ])
     expect(bundle?.items).toHaveLength(2)

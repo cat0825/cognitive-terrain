@@ -1,5 +1,7 @@
 import { calculateActivityElevation } from './activity-elevation'
+import { calculateProjectLearningProgression } from './learning-progression'
 import { areasForNote, normalizeArea, type PlateCollision } from './knowledge-plates'
+import { buildPrerequisiteTopology } from './prerequisite-topology'
 import {
   REFERENCE_GAP_FORMULA_VERSION,
   type ReferenceGapReport,
@@ -51,6 +53,7 @@ export type TerrainEvidenceProvenance =
   | 'note-tag'
   | 'explicit-wikilink'
   | 'explicit-prerequisite'
+  | 'cognitive-observation'
   | 'cognitive-state-yaml'
   | 'cognitive-state-app'
   | 'cognitive-state-migration'
@@ -572,6 +575,7 @@ function activeProfile(project: TerrainProject, requestedId?: string): TerrainPr
 function elevationProvenance(elevation: TerrainProfile['elevation']): TerrainEvidenceProvenance[] {
   if (elevation === 'density') return ['kernel-density']
   if (elevation === 'activity') return ['raw-event', 'retained-aggregate']
+  if (elevation === 'progression') return ['cognitive-observation']
   if (elevation === 'structure') return ['explicit-prerequisite']
   return ['terrain-profile']
 }
@@ -580,7 +584,8 @@ function elevationLimitation(elevation: TerrainProfile['elevation']): string {
   if (elevation === 'mastery') return '熟练度是显式自评；缺失值不从活动或空间位置推断。'
   if (elevation === 'exploration') return '探索度表示用户意图，不等于熟练度、学习成果或活动频率。'
   if (elevation === 'activity') return '活动海拔只编码带衰减的打开、编辑、复习记录，不代表掌握程度。'
-  if (elevation === 'structure') return '结构高度只依据显式 WikiLink，不从空间接近推断关系。'
+  if (elevation === 'progression') return '学习进程只重放显式认知观测；活动事件和单次当前快照不能冒充跨时间证据。'
+  if (elevation === 'structure') return '结构高度只依据显式 prerequisite/buildsOn，不从 WikiLink 或空间接近推断关系。'
   return '知识密度表示局部 KDE 聚合，不代表重要性、真实性或掌握程度。'
 }
 
@@ -609,7 +614,7 @@ function effectiveColorEncoding(
       timeSensitive: false,
     }
   }
-  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'structure' || dimension === 'area') {
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'progression' || dimension === 'structure' || dimension === 'area') {
     return {
       formulaVersion: 'declared-taxonomy-area-color-v1',
       provenance: ['declared-taxonomy'],
@@ -795,8 +800,25 @@ function activeHeightInput(
       [...result.rawEventIds, ...result.aggregateIds],
     )
   }
-  const linkedIds = explicitLinkedItemIds(project.notes, note)
-  return inputEvidence(note.id, linkedIds.length, null, ['explicit-wikilink'], [note.id, ...linkedIds])
+  if (profile.elevation === 'progression') {
+    const result = calculateProjectLearningProgression(project, note.id, evaluatedAt ?? project.updatedAt)
+    return inputEvidence(
+      note.id,
+      result.historyState === 'missing' ? undefined : result.elevation,
+      1 - result.uncertainty,
+      ['cognitive-observation'],
+      result.evidence.map((observation) => observation.id),
+    )
+  }
+  const topology = project.prerequisiteTopology ?? buildPrerequisiteTopology(project.notes)
+  const assignment = topology.assignments.find((candidate) => candidate.itemId === note.id)
+  return inputEvidence(
+    note.id,
+    assignment?.status === 'derived' ? assignment.depth ?? 0 : undefined,
+    null,
+    ['explicit-prerequisite'],
+    [note.id, ...(assignment?.relationIds ?? [])],
+  )
 }
 
 function inputEvidence(
@@ -828,17 +850,9 @@ function missingInputBehavior(elevation: TerrainProfile['elevation']): string {
   if (elevation === 'mastery') return '未评估 mastery 的笔记不贡献高度分子；已评估但缺 confidence 时使用 0.5。'
   if (elevation === 'exploration') return '未标注 exploration intent 的笔记不贡献高度分子。'
   if (elevation === 'activity') return '没有有效活动历史的笔记不贡献活动高度；不会回退为 mastery。'
-  if (elevation === 'structure') return '没有可解析 WikiLink 的笔记结构输入为 0。'
+  if (elevation === 'progression') return '没有显式认知观测时使用中性学习进程海拔并标记高不确定性；不会从活动事件补造历史。'
+  if (elevation === 'structure') return '没有可解析 prerequisite/buildsOn 的笔记结构输入为 0。'
   return 'density 使用每条笔记已归一化的 weight；不读取 mastery、activity 或 exploration。'
-}
-
-function explicitLinkedItemIds(notes: TerrainNote[], origin: TerrainNote): string[] {
-  const ids: string[] = []
-  for (const target of notes) {
-    if (target.id === origin.id) continue
-    if (wikiLinksBetween(origin, target).length) ids.push(target.id)
-  }
-  return unique(ids).sort()
 }
 
 function normalizeOptionalTimestamp(value: string | number | Date | undefined): string | undefined {

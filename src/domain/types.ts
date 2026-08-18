@@ -204,6 +204,39 @@ export interface CognitiveState {
   provenance: CognitiveStateProvenance
 }
 
+export type CognitiveObservationProvenance =
+  | 'self-assessment'
+  | 'yaml-import'
+  | 'review-outcome'
+  | 'migration'
+
+export interface CognitiveObservationBase {
+  schemaVersion: 1
+  id: string
+  itemId: string
+  observedAt: string
+  provenance: CognitiveObservationProvenance
+  reason: string
+}
+
+export type CognitiveObservation =
+  | (CognitiveObservationBase & {
+      field: 'mastery' | 'confidence' | 'exploration'
+      value: number
+    })
+  | (CognitiveObservationBase & {
+      field: 'status'
+      value: NoteStatus
+    })
+  | (CognitiveObservationBase & {
+      field: 'reviewedAt'
+      value: string
+    })
+
+export type LearningProgressionProfileVersion =
+  | 'learning-progression-v1'
+  | 'learning-progression-linear-decay-v1'
+
 export type InteractionEventType =
   | 'created'
   | 'edited'
@@ -220,7 +253,7 @@ export interface InteractionEvent {
   payload?: Record<string, unknown>
 }
 
-export type TerrainElevation = 'density' | 'mastery' | 'exploration' | 'activity' | 'structure'
+export type TerrainElevation = 'density' | 'mastery' | 'exploration' | 'activity' | 'progression' | 'structure'
 export type TerrainColor = 'area' | 'source-kind' | 'trust'
 export type TerrainOverlay = 'temperature' | 'confidence' | 'staleness' | 'gaps'
 
@@ -330,6 +363,8 @@ export interface TerrainProject {
   noteNeighbors: string[][]
   noteNeighborEvidence?: NoteNeighborEvidence[][]
   cognitiveStates: CognitiveState[]
+  cognitiveObservations?: CognitiveObservation[]
+  learningProgressionProfileVersion?: LearningProgressionProfileVersion
   interactionEvents: InteractionEvent[]
   activityHistory?: ActivityHistoryState
   terrainProfiles: TerrainProfile[]
@@ -471,7 +506,7 @@ export interface ParsedImport {
 
 export type ViewMode = '3d' | '2d'
 export type QualityLevel = 'high' | 'medium' | 'low'
-export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'activity' | 'structure' | 'temperature' | 'area'
+export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'activity' | 'progression' | 'structure' | 'temperature' | 'area'
 
 export interface ProjectSummary {
   id: string

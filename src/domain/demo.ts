@@ -3,6 +3,7 @@ import { buildPrerequisiteTopology } from './prerequisite-topology'
 import { buildTerrainData } from '../pipeline/terrain'
 import { computeNeighbors, type EmbeddingNeighborResult } from '../pipeline/neighbors'
 import { cognitiveStateFromNote } from './cognitive-state'
+import { createCognitiveObservation } from './learning-progression'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 
 interface DemoTopic {
@@ -321,7 +322,7 @@ const topics: DemoTopic[] = [
   },
 ]
 
-export function createDemoProject(): TerrainProject {
+export function createDemoProject(options: { includeProgressionEvidence?: boolean } = {}): TerrainProject {
   const notes = Array.from({ length: topics.length * articlesPerTopic }, (_, index) => createDemoNote(index))
   const bridgeStride = Math.max(1, Math.floor(topics.length / 3))
   for (let topicIndex = 0; topicIndex < topics.length; topicIndex += 1) {
@@ -366,6 +367,7 @@ export function createDemoProject(): TerrainProject {
     })),
     noteNeighbors: computeNeighbors(notes, 6),
     cognitiveStates: buildCognitiveStates(notes, timestamp),
+    cognitiveObservations: options.includeProgressionEvidence ? buildDemoProgressionObservations(notes) : [],
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
@@ -381,6 +383,29 @@ export function createDemoProject(): TerrainProject {
       updatedAt: timestamp,
     }],
   }
+}
+
+function buildDemoProgressionObservations(notes: TerrainNote[]): TerrainProject['cognitiveObservations'] {
+  return notes.slice(0, 2).flatMap((note, index) => [
+    createCognitiveObservation({
+      id: `demo-observation:${note.id}:baseline`,
+      itemId: note.id,
+      field: 'mastery',
+      value: Math.max(0, (note.mastery ?? 0.5) - 0.18),
+      observedAt: `2025-12-${String(28 + index).padStart(2, '0')}T20:00:00+08:00`,
+      provenance: 'self-assessment',
+      reason: '演示：阶段性自评',
+    }),
+    createCognitiveObservation({
+      id: `demo-observation:${note.id}:review`,
+      itemId: note.id,
+      field: 'mastery',
+      value: note.mastery ?? 0.5,
+      observedAt: '2025-12-31T20:00:00+08:00',
+      provenance: 'review-outcome',
+      reason: '演示：复习结果',
+    }),
+  ])
 }
 
 export function createProjectFromNotes(
@@ -408,6 +433,7 @@ export function createProjectFromNotes(
     noteNeighbors: neighborEvidence?.noteNeighbors ?? computeNeighbors(notes, 6),
     noteNeighborEvidence: neighborEvidence?.noteNeighborEvidence,
     cognitiveStates: buildCognitiveStates(notes, timestamp),
+    cognitiveObservations: buildYamlObservations(notes),
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
@@ -423,6 +449,28 @@ function buildCognitiveStates(notes: TerrainNote[], updatedAt: string): TerrainP
       note.reviewedAt ?? updatedAt,
     )
     return state ? [state] : []
+  })
+}
+
+function buildYamlObservations(notes: TerrainNote[]): TerrainProject['cognitiveObservations'] {
+  return notes.flatMap((note) => {
+    if (note.cognitiveStateProvenance !== 'yaml') return []
+    const fields: Array<{ field: 'mastery' | 'confidence' | 'exploration' | 'status' | 'reviewedAt'; value: unknown }> = [
+      { field: 'mastery', value: note.mastery },
+      { field: 'confidence', value: note.confidence },
+      { field: 'exploration', value: note.exploration },
+      { field: 'status', value: note.status },
+      { field: 'reviewedAt', value: note.reviewedAt },
+    ]
+    return fields.flatMap(({ field, value }) => value === undefined ? [] : [createCognitiveObservation({
+      id: `observation:${note.id}:yaml:${field}:${String(value)}`,
+      itemId: note.id,
+      field,
+      value: value as never,
+      observedAt: note.createdAt,
+      provenance: 'yaml-import',
+      reason: 'Obsidian YAML frontmatter 导入',
+    })])
   })
 }
 

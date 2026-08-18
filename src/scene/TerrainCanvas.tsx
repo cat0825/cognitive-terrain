@@ -1,6 +1,7 @@
 import { lazy, memo, Suspense, useEffect, useMemo, useState } from 'react'
 import type { QualityLevel, TerrainNote, TerrainProject, ViewMode, VisualDimension } from '../domain/types'
 import { buildActivitySummaries } from '../domain/activity-temperature'
+import { calculateProjectLearningProgression } from '../domain/learning-progression'
 import { profileIdForVisualDimension } from '../domain/terrain-profile'
 import { interpolateSnapshots, mixHeightValues } from '../pipeline/terrain'
 import { runTerrainProfile } from '../pipeline/worker-client'
@@ -44,6 +45,10 @@ export const TerrainCanvas = memo(function TerrainCanvas({
     () => buildActivitySummaries(project.notes, project.interactionEvents, activityNowMs, project.activityHistory?.aggregates),
     [activityNowMs, project.activityHistory?.aggregates, project.interactionEvents, project.notes],
   )
+  const progressionByNote = useMemo(
+    () => calculateProgressionMap(project, activityNowMs),
+    [activityNowMs, project],
+  )
   const [profileTerrain, setProfileTerrain] = useState<Pick<TerrainProject, 'snapshots' | 'peaks'> | null>(null)
   const profileId = profileIdForVisualDimension(visualDimension)
   useEffect(() => {
@@ -51,7 +56,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
       setProfileTerrain(null)
       return
     }
-    const cacheKey = `${profileId}:${project.interactionEvents.length}:${project.activityHistory?.aggregates.length ?? 0}:${activityNowMs}`
+    const cacheKey = `${profileId}:${project.interactionEvents.length}:${project.activityHistory?.aggregates.length ?? 0}:${project.cognitiveObservations?.length ?? 0}:${project.updatedAt}:${activityNowMs}`
     const cached = profileTerrainCache.get(project.notes)?.get(cacheKey)
     if (cached) {
       setProfileTerrain(cached)
@@ -66,9 +71,12 @@ export const TerrainCanvas = memo(function TerrainCanvas({
       gridSize: project.gridSize,
       timeZone: project.timeZone,
       nowMs: activityNowMs,
-      elevation: profileId === 'mastery' || profileId === 'activity' || profileId === 'structure'
+      elevation: profileId === 'mastery' || profileId === 'activity' || profileId === 'progression' || profileId === 'structure'
         ? profileId
         : 'exploration',
+      cognitiveObservations: profileId === 'progression' ? project.cognitiveObservations : undefined,
+      cognitiveStates: profileId === 'progression' ? project.cognitiveStates : undefined,
+      learningProgressionProfileVersion: profileId === 'progression' ? project.learningProgressionProfileVersion : undefined,
     })
     let active = true
     void handle.promise.then((terrain) => {
@@ -92,7 +100,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
       active = false
       handle.cancel()
     }
-  }, [activityNowMs, profileId, project.activityHistory?.aggregates, project.gridSize, project.interactionEvents, project.notes, project.timeZone])
+  }, [activityNowMs, profileId, project.activityHistory?.aggregates, project.cognitiveObservations, project.cognitiveStates, project.gridSize, project.interactionEvents, project.learningProgressionProfileVersion, project.notes, project.timeZone, project.updatedAt])
   const terrainProject = useMemo(
     () => profileTerrain && profileId !== 'density'
       ? { ...project, ...profileTerrain, activeTerrainProfileId: profileId }
@@ -113,6 +121,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
         selectedNoteId={selectedNoteId}
         visualDimension={visualDimension}
         activityByNote={activityByNote}
+        progressionByNote={progressionByNote}
         onSelectNote={onSelectNote}
       />
     )
@@ -127,6 +136,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
           selectedNoteId={selectedNoteId}
           visualDimension={visualDimension}
           activityByNote={activityByNote}
+          progressionByNote={progressionByNote}
           onSelectNote={onSelectNote}
         />
       }
@@ -138,6 +148,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
         quality={quality}
         visualDimension={visualDimension}
         activityByNote={activityByNote}
+        progressionByNote={progressionByNote}
         cameraRevision={cameraRevision}
         cameraScale={cameraScale}
         focusRequest={focusRequest}
@@ -156,9 +167,11 @@ function AnimatedTerrain2D({
   selectedNoteId,
   visualDimension,
   activityByNote,
+  progressionByNote,
   onSelectNote,
 }: Pick<TerrainCanvasProps, 'project' | 'notes' | 'selectedNoteId' | 'visualDimension' | 'onSelectNote'> & {
   activityByNote: ReturnType<typeof buildActivitySummaries>
+  progressionByNote: ReturnType<typeof calculateProgressionMap>
 }) {
   const timeline = useAppStore((state) => Math.round(state.timeline * 4) / 4)
   const pair = interpolateSnapshots(project.snapshots, timeline)
@@ -173,9 +186,14 @@ function AnimatedTerrain2D({
       visualDimension={visualDimension}
       prerequisiteTopology={project.prerequisiteTopology}
       activityByNote={activityByNote}
+      progressionByNote={progressionByNote}
       onSelectNote={onSelectNote}
     />
   )
+}
+
+function calculateProgressionMap(project: TerrainProject, evaluatedAt: number) {
+  return new Map(project.notes.map((note) => [note.id, calculateProjectLearningProgression(project, note.id, evaluatedAt)]))
 }
 
 let webglSupport: boolean | undefined

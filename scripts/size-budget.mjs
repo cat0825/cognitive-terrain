@@ -3,10 +3,10 @@ import path from 'node:path'
 
 const distDir = path.resolve('dist/assets')
 const budget = {
-  // Integrated activity, atlas-gap, exploration, evidence, write-back, and prerequisite-strata UI.
-  main: 360 * 1024,
-  totalJs: 2360 * 1024,
-  css: 47 * 1024,
+  // Integrated activity, progression, strata, exploration, evidence, and vault UI.
+  main: 365 * 1024,
+  totalJs: 2375 * 1024,
+  css: 49 * 1024,
 }
 
 const entries = await readdir(distDir)

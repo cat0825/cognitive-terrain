@@ -2,6 +2,7 @@ import type { AnalysisWorkerRequest, AnalysisWorkerResponse } from './worker-pro
 import { analyzeNotes } from './run-pipeline'
 import { buildTerrainData } from './terrain'
 import { calculateActivityElevation } from '../domain/activity-elevation'
+import { calculateProjectLearningProgression } from '../domain/learning-progression'
 
 const cancelled = new Set<string>()
 
@@ -55,6 +56,16 @@ async function runTerrainProfile(
             aggregates: request.activityAggregates,
             evaluatedAt: request.nowMs,
           }),
+        ]))
+        : undefined,
+      request.elevation === 'progression'
+        ? new Map(request.notes.map((note) => [
+          note.id,
+          calculateProjectLearningProgression({
+            cognitiveObservations: request.cognitiveObservations ?? [],
+            cognitiveStates: request.cognitiveStates ?? [],
+            learningProgressionProfileVersion: request.learningProgressionProfileVersion,
+          }, note.id, request.nowMs),
         ]))
         : undefined,
     )
