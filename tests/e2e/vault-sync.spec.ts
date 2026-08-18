@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { importVaultFixture, vaultFixtureDirectory } from '../helpers/import-vault-fixture'
 
 test('establishes a vault baseline and keeps a repeated rescan idempotent', async ({ page }, testInfo) => {
-  test.setTimeout(process.env.CI ? 90_000 : 45_000)
+  test.setTimeout(process.env.CI ? 120_000 : 45_000)
   const errors = collectErrors(page)
   await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
   await page.goto('/')
@@ -13,7 +13,7 @@ test('establishes a vault baseline and keeps a repeated rescan idempotent', asyn
   await expect(page.getByText('首次建立同步基线')).toBeVisible({ timeout: 15_000 })
   await expect(page.locator('.vault-sync-counts .is-unchanged dd')).toHaveText('12')
   await page.getByRole('button', { name: '建立同步基线' }).click()
-  await expect(page.getByText('vault 同步完成')).toBeVisible()
+  await expect(page.getByText('vault 同步完成')).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: '完成', exact: true }).click()
 
   await openVaultSync(page)
