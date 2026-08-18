@@ -51,6 +51,8 @@ export interface ActivityElevationResult {
   suppressedDuplicateEventCount: number
   suppressedDuplicateAggregateCount: number
   latestActivityAt?: string
+  rawEventIds: string[]
+  aggregateIds: string[]
   evidence: ActivityElevationEvidence[]
 }
 
@@ -108,6 +110,8 @@ export function calculateActivityElevation(input: ActivityElevationInput): Activ
     suppressedDuplicateEventCount: rawInputs.suppressedDuplicateCount,
     suppressedDuplicateAggregateCount: aggregateInputs.suppressedDuplicateCount,
     latestActivityAt,
+    rawEventIds: rawEvents.map((event) => event.id),
+    aggregateIds: aggregates.map((aggregate) => aggregate.id),
     evidence: buildEvidence(rawInputs.entries, aggregateInputs.entries, evaluatedAtMs),
   }
 }

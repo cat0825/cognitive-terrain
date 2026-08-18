@@ -274,6 +274,16 @@ const projectBundleSchema = z.object({
     }),
   ),
   noteNeighbors: z.array(z.array(z.string())).optional(),
+  noteNeighborEvidence: z.array(z.array(z.object({
+    sourceId: z.string(),
+    targetId: z.string(),
+    rank: z.number().int().positive(),
+    score: z.number().min(-1).max(1),
+    modelId: z.string(),
+    embeddingMode: z.enum(['semantic', 'fallback']),
+    formulaVersion: z.literal('embedding-cosine-neighbors-v1'),
+    provenance: z.literal('embedding'),
+  }))).optional(),
   cognitiveStates: z.array(z.object({
     itemId: z.string(),
     mastery: z.number().min(0).max(1).optional(),
@@ -374,6 +384,7 @@ export async function parseProjectBundle(file: File): Promise<TerrainProject> {
     ...parsed,
     embeddingMode: parsed.embeddingMode ?? 'fallback',
     noteNeighbors: parsed.noteNeighbors ?? [],
+    noteNeighborEvidence: parsed.noteNeighborEvidence ?? [],
     notes: parsed.notes.map((note) => ({
       ...note,
       links: note.links ?? [],

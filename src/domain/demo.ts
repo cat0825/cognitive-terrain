@@ -1,7 +1,7 @@
 import type { TerrainNote, TerrainProject } from './types'
 import { buildPrerequisiteTopology } from './prerequisite-topology'
 import { buildTerrainData } from '../pipeline/terrain'
-import { computeNeighbors } from '../pipeline/neighbors'
+import { computeNeighbors, type EmbeddingNeighborResult } from '../pipeline/neighbors'
 import { cognitiveStateFromNote } from './cognitive-state'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 
@@ -383,7 +383,12 @@ export function createDemoProject(): TerrainProject {
   }
 }
 
-export function createProjectFromNotes(name: string, notes: TerrainNote[], modelId = 'local-analysis'): TerrainProject {
+export function createProjectFromNotes(
+  name: string,
+  notes: TerrainNote[],
+  modelId = 'local-analysis',
+  neighborEvidence?: EmbeddingNeighborResult,
+): TerrainProject {
   const terrain = buildTerrainData(notes)
   const timestamp = new Date().toISOString()
   return {
@@ -400,7 +405,8 @@ export function createProjectFromNotes(name: string, notes: TerrainNote[], model
     notes,
     snapshots: terrain.snapshots,
     peaks: terrain.peaks,
-    noteNeighbors: computeNeighbors(notes, 6),
+    noteNeighbors: neighborEvidence?.noteNeighbors ?? computeNeighbors(notes, 6),
+    noteNeighborEvidence: neighborEvidence?.noteNeighborEvidence,
     cognitiveStates: buildCognitiveStates(notes, timestamp),
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),

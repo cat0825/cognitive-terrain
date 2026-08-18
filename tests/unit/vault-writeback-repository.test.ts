@@ -24,10 +24,12 @@ beforeEach(async () => {
 })
 
 describe('vault write-back recovery repository', () => {
-  it('adds exploration, vault binding, and isolated recovery stores when upgrading schema v7 to v9', async () => {
+  it('adds evidence, exploration, vault binding, and isolated recovery stores when upgrading schema v7 to v10', async () => {
     const versionSeven = await openDB(DATABASE_NAME, 7, {
       upgrade(database) {
         database.createObjectStore('sentinel')
+        const projects = database.createObjectStore('projects', { keyPath: 'id' })
+        projects.createIndex('by-updated-at', 'updatedAt')
       },
     })
     await versionSeven.put('sentinel', { preserved: true }, 'record')
@@ -36,6 +38,7 @@ describe('vault write-back recovery repository', () => {
     const upgraded = await getDatabase()
 
     expect(upgraded.version).toBe(DATABASE_VERSION)
+    expect(upgraded.objectStoreNames.contains('neighborEvidence')).toBe(true)
     expect(upgraded.objectStoreNames.contains('explorationItems')).toBe(true)
     expect(upgraded.objectStoreNames.contains('vaultBindings')).toBe(true)
     expect(upgraded.objectStoreNames.contains('vaultWritebackBatches')).toBe(true)

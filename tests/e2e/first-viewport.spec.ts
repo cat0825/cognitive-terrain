@@ -53,7 +53,7 @@ test('opens a bounded detail sheet and restores focus on dismiss', async ({ page
   const closeDetail = page.getByRole('button', { name: '关闭详情' })
   await expect(detail).toBeVisible()
   await expect(closeDetail).toBeFocused()
-  await expect(page.locator('.similarity-reasons').first()).toContainText('布局距离')
+  await expect(page.getByRole('region', { name: '邻居证据' })).toContainText('2D UMAP approximate distance')
   await expect(page.getByLabel('领域归属').locator('span')).toHaveCount(2)
   const detailBox = await detail.boundingBox()
   const viewport = page.viewportSize()

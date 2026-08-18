@@ -66,6 +66,30 @@ describe('project bundle migration', () => {
     ]))
   })
 
+  it('round-trips inspectable embedding neighbor evidence', async () => {
+    const demo = createDemoProject()
+    const source = migrateProject({
+      ...demo,
+      noteNeighborEvidence: [[{
+        sourceId: demo.notes[0].id,
+        targetId: demo.notes[1].id,
+        rank: 1,
+        score: 0.875,
+        modelId: 'Xenova/multilingual-e5-small',
+        embeddingMode: 'semantic',
+        formulaVersion: 'embedding-cosine-neighbors-v1',
+        provenance: 'embedding',
+      }]],
+    })
+    const file = new File([serializeProjectBundle(source)], 'neighbor-evidence.terrain.json', {
+      type: 'application/json',
+    })
+
+    const restored = await parseProjectBundle(file)
+
+    expect(restored.noteNeighborEvidence).toEqual(source.noteNeighborEvidence)
+  })
+
   it('round-trips taxonomy hierarchy, aliases, versions, and declared labels', async () => {
     const demo = createDemoProject()
     const root = createTaxonomyNode({ workspaceId: demo.id, label: 'Engineering', aliases: ['工程'], version: 3 }, demo.updatedAt)

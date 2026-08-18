@@ -13,6 +13,7 @@ import { NoteDetail } from './ui/NoteDetail'
 import { ReferenceGapMapOverlay } from './ui/ReferenceGapMapOverlay'
 import { Timeline } from './ui/Timeline'
 import { TopBar } from './ui/TopBar'
+import { TerrainSemanticsLegend } from './ui/TerrainSemanticsLegend'
 
 const ImportPanel = lazy(async () => import('./ui/ImportPanel').then((module) => ({ default: module.ImportPanel })))
 const VaultSyncPanel = lazy(() => import('./ui/VaultSyncPanel'))
@@ -25,6 +26,8 @@ function App() {
   const activeTags = useAppStore((state) => state.activeTags)
   const activeAreas = useAppStore((state) => state.activeAreas)
   const activeCollisionId = useAppStore((state) => state.activeCollisionId)
+  const activePeak = useAppStore((state) => state.activePeak)
+  const activeGapNodeId = useAppStore((state) => state.activeGapNodeId)
   const timelineBucket = useAppStore((state) => Math.ceil(state.timeline))
   const viewMode = useAppStore((state) => state.viewMode)
   const quality = useAppStore((state) => state.quality)
@@ -37,6 +40,7 @@ function App() {
   const lastAnalysis = useAppStore((state) => state.lastAnalysis)
   const initialize = useAppStore((state) => state.initialize)
   const selectNote = useAppStore((state) => state.selectNote)
+  const selectGap = useAppStore((state) => state.selectGap)
   const setImportOpen = useAppStore((state) => state.setImportOpen)
   const cancelAnalysis = useAppStore((state) => state.cancelAnalysis)
   const loadStudyPack = useAppStore((state) => state.loadStudyPack)
@@ -156,13 +160,27 @@ function App() {
               cameraScale={cameraScale}
               onSelectNote={selectNote}
             />
+            <TerrainSemanticsLegend
+              project={project}
+              visualDimension={visualDimension}
+              viewMode={viewMode}
+              evaluatedAt={gapEvaluatedAt}
+            />
             {activeReferenceAtlas && (
-              <ReferenceGapMapOverlay atlasLabel={activeReferenceAtlas.label} report={referenceGapReport} />
+              <ReferenceGapMapOverlay
+                atlasLabel={activeReferenceAtlas.label}
+                report={referenceGapReport}
+                selectedNodeId={activeGapNodeId}
+                onSelectGap={selectGap}
+              />
             )}
             <NoteDetail
               project={project}
               note={selectedNote}
+              peak={activePeak ?? undefined}
               collision={activeCollision}
+              gapReport={referenceGapReport}
+              gapNodeId={activeGapNodeId ?? undefined}
               visibleCount={visibleNotes.length}
               onWriteback={setWritebackCandidates}
             />

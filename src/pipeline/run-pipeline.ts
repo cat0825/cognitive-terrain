@@ -2,7 +2,8 @@ import type { AnalysisOptions, NoteInput, ProcessingProgress, TerrainNote } from
 import { areasForNote, primaryAreaForNote } from '../domain/knowledge-plates'
 import { materializePrerequisites } from '../domain/prerequisite-topology'
 import { createProjectFromNotes } from '../domain/demo'
-import { buildStableLayout, normalizeVector } from './layout'
+import { buildStableLayoutWithNeighbors, normalizeVector } from './layout'
+import { computeEmbeddingNeighbors } from './neighbors'
 
 const DEFAULT_MODEL = 'Xenova/multilingual-e5-small'
 const FALLBACK_DIMENSIONS = 384
@@ -42,18 +43,28 @@ export async function analyzeNotes(
   if (isCancelled()) throw new DOMException('分析已取消', 'AbortError')
 
   report(onProgress, 'layout', 0, 1, '正在计算稳定的二维布局')
-  const coordinates = await buildStableLayout(vectors, (completed, total) => {
+  const layout = await buildStableLayoutWithNeighbors(vectors, (completed, total) => {
     report(onProgress, 'layout', completed, total, `布局迭代 ${completed}/${total}`)
   })
   for (let index = 0; index < ordered.length; index += 1) {
-    ordered[index].x = coordinates[index]?.[0] ?? 0
-    ordered[index].y = coordinates[index]?.[1] ?? 0
+    ordered[index].x = layout.coordinates[index]?.[0] ?? 0
+    ordered[index].y = layout.coordinates[index]?.[1] ?? 0
   }
   report(onProgress, 'layout', 1, 1, '二维布局完成')
   if (isCancelled()) throw new DOMException('分析已取消', 'AbortError')
 
+  const embeddingMode = actualModelId === 'deterministic-local-fallback' ? 'fallback' : 'semantic'
+  const neighborEvidence = computeEmbeddingNeighbors(
+    ordered,
+    vectors,
+    actualModelId,
+    embeddingMode,
+    6,
+    layout.neighborIndices,
+  )
+
   report(onProgress, 'terrain', 0, 1, '正在生成密度地形与时间快照')
-  const project = createProjectFromNotes(name, ordered, actualModelId)
+  const project = createProjectFromNotes(name, ordered, actualModelId, neighborEvidence)
   report(onProgress, 'terrain', 1, 1, `${project.snapshots.length} 个时间快照已生成`)
   report(onProgress, 'cache', 1, 1, '项目已准备好，可保存到本地')
   return projectWithTimeZone(project, timeZone)

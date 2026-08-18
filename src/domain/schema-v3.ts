@@ -9,10 +9,12 @@ import {
   validateTaxonomy,
 } from './taxonomy'
 import type { ActivityHistoryState } from './activity-history'
+import { STABLE_LAYOUT_FORMULA_VERSION } from './layout-version'
 import type {
   CognitiveState,
   ExplorationLifecycleItem,
   InteractionEvent,
+  NoteNeighborEvidence,
   PrerequisiteTopology,
   ReferenceAtlasManifest,
   TerrainProfile,
@@ -170,6 +172,7 @@ export interface SchemaV3Bundle {
   interactionEvents: InteractionEvent[]
   plateMemberships: PlateMembershipV3[]
   layouts: LayoutRecordV3[]
+  neighborEvidence: NoteNeighborEvidence[]
   terrainProfiles: TerrainProfile[]
   citations: CitationV3[]
   revisions: RevisionV3[]
@@ -187,6 +190,7 @@ export interface SchemaV3MigrationReport {
   unresolvedRelationCount: number
   cognitiveStateCount: number
   layoutCount: number
+  neighborEvidenceCount: number
   citationCount: number
   revisionCount: number
   explorationItemCount: number
@@ -211,6 +215,13 @@ export function migrateTerrainProjectToV3(
   assertUniqueIds('terrain profile', (project.terrainProfiles ?? []).map((profile) => profile.id))
   const itemIds = new Set(project.notes.map((note) => note.id))
   const explorationItems = normalizeExplorationItems(project.explorationItems ?? [], itemIds)
+  const neighborEvidence = (project.noteNeighborEvidence ?? [])
+    .flat()
+    .filter((evidence) => itemIds.has(evidence.sourceId) && itemIds.has(evidence.targetId))
+  assertUniqueIds(
+    'neighbor evidence',
+    neighborEvidence.map((evidence) => `${evidence.sourceId}:${evidence.targetId}`),
+  )
   assertKnownItemReferences(
     'cognitive state',
     (project.cognitiveStates ?? []).map((state) => state.itemId),
@@ -349,7 +360,7 @@ export function migrateTerrainProjectToV3(
     itemId: note.id,
     x: note.x,
     y: note.y,
-    algorithmVersion: project.modelId,
+    algorithmVersion: STABLE_LAYOUT_FORMULA_VERSION,
     anchorVersion: 'unanchored-v2',
   }))
   const citations: CitationV3[] = []
@@ -452,6 +463,7 @@ export function migrateTerrainProjectToV3(
     interactionEvents,
     plateMemberships,
     layouts,
+    neighborEvidence,
     terrainProfiles,
     citations,
     revisions,
@@ -470,6 +482,7 @@ export function migrateTerrainProjectToV3(
       unresolvedRelationCount: relations.filter((relation) => !relation.resolved).length,
       cognitiveStateCount: cognitiveStates.length,
       layoutCount: layouts.length,
+      neighborEvidenceCount: neighborEvidence.length,
       citationCount: citations.length,
       revisionCount: revisions.length,
       explorationItemCount: explorationItems.length,
