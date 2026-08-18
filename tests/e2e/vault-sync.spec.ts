@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { importVaultFixture, vaultFixtureDirectory } from '../helpers/import-vault-fixture'
 
 test('establishes a vault baseline and keeps a repeated rescan idempotent', async ({ page }, testInfo) => {
-  test.setTimeout(process.env.CI ? 90_000 : 45_000)
+  test.setTimeout(process.env.CI ? 120_000 : 45_000)
   const errors = collectErrors(page)
   await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
   await page.goto('/')

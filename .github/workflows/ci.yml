@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: 22.12
           cache: npm
-      - run: npm ci
+      - run: node scripts/npm-ci-retry.mjs
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
@@ -24,19 +24,24 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     needs: quality
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [desktop, mobile]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22.12
           cache: npm
-      - run: npm ci
+      - run: node scripts/npm-ci-retry.mjs
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npm run test:e2e -- --project=${{ matrix.project }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-failure-artifacts
+          name: e2e-failure-artifacts-${{ matrix.project }}
           path: |
             test-results/
             playwright-report/
@@ -51,7 +56,7 @@ jobs:
         with:
           node-version: 22.12
           cache: npm
-      - run: npm ci
+      - run: node scripts/npm-ci-retry.mjs
       - run: npx playwright install --with-deps chromium
       - run: npm run test:a11y
 
@@ -64,7 +69,7 @@ jobs:
         with:
           node-version: 22.12
           cache: npm
-      - run: npm ci
+      - run: node scripts/npm-ci-retry.mjs
       - run: npx playwright install --with-deps chromium
       - run: npm run test:visual
       - uses: actions/upload-artifact@v4
