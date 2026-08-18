@@ -2,7 +2,7 @@
 
 - Issue: [#27](https://github.com/cat0825/cognitive-terrain/issues/27)
 - Reviewed: 2026-08-17
-- Status: synthetic workflow fixture implemented; mutation/deletion sync remains dependent on Issue #23
+- Status: initial import and incremental second-snapshot regression implemented
 
 ## Research boundary
 
@@ -33,6 +33,7 @@ Only links and paraphrased requirements are recorded. External pages and media r
 | Maintain an open problem | Rank `数学研究开放问题` using low mastery/confidence and high exploration | It appears as a maintenance candidate without pretending the gap is solved |
 | Return to source | Select the maintenance candidate and open its source | Produce `obsidian://open?vault=MathResearchVault&file=Research%2FOpen%20Questions` |
 | Re-import safely | Import the same vault in normal and reversed file order | IDs, fingerprints, paths, and resolved relations remain identical |
+| Reconcile a later snapshot | Modify one proof, rename one note, remove one note, and add one cross-discipline note | Stable source identity, deterministic relations, archived-source audit, and exact source return survive the sync |
 
 ## Repeatable protocol
 
@@ -49,8 +50,11 @@ The test covers:
 3. Keep exactly 21 resolved links and one deliberate unresolved lemma.
 4. Re-import an identical snapshot in reversed file order and compare stable identities and relation results.
 5. Rank the open-question note for maintenance and generate the exact Obsidian deep link back to its source.
-
-Changed, renamed, and deleted note reconciliation is deliberately not claimed here. That workflow belongs to [Issue #23](https://github.com/cat0825/cognitive-terrain/issues/23) and its current implementation [PR #33](https://github.com/cat0825/cognitive-terrain/pull/33). Once merged, this fixture should be extended with a second snapshot that changes one proof, renames one example, adds one link, and deletes one retired question.
+6. Scan the explicit second snapshot through the production vault-sync API in normal and reversed order.
+7. Reconcile exactly one add, modify, rename, and removal while preserving source and item identity.
+8. Report the removal as an archived note, removed source, and vault-sync revision while retaining auditable historical relations.
+9. Keep unchanged exploration evidence fingerprints stable and update maintenance/exploration output for changed evidence.
+10. Generate exact Obsidian deep links for surviving, renamed, and newly added notes.
 
 ## Findings
 
@@ -58,7 +62,7 @@ Changed, renamed, and deleted note reconciliation is deliberately not claimed he
 | --- | --- | --- |
 | Verified capability | Folder import preserves `vault`, nested `sourcePath`, YAML cognitive fields, path/heading WikiLinks, and deterministic identities | A mathematical workflow can be tested without external/private data |
 | Verified capability | Explicit WikiLinks provide inspectable definition/theorem/proof/example and math/physics navigation | Terrain relationships can complement Obsidian backlinks rather than replace them |
-| Missing workflow | Main does not yet reconcile changed, renamed, or deleted files during vault re-import | Full vault sync acceptance remains owned by #23/PR #33 |
+| Verified capability | A complete second scan reconciles changed, renamed, removed, and added notes deterministically | The mathematical workflow now exercises the production incremental-sync contract from #23/PR #33 |
 | Missing workflow | Open questions are ranked generically; there is no dedicated question lifecycle or proof-obligation state machine | Future work should test transitions such as `open → investigating → resolved/rejected` before adding UI |
 | Product defect threshold | A resolved WikiLink becoming unresolved, YAML fields being dropped, stable IDs changing on no-op re-import, or source return targeting the wrong file is a regression | These conditions belong in blocking automated tests |
 | Speculative preference | Plate collision, mountain ranges, ocean gaps, fog, geology, and temperature metaphors may help exploration | Keep them optional and validate task completion before changing terrain semantics |

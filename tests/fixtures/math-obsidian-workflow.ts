@@ -10,26 +10,49 @@ export interface MathWorkflowManifest {
   resolvedWikiLinkCount: number
   unresolvedWikiLinkCount: number
   openQuestionPath: string
+  secondSnapshot: {
+    noteCount: number
+    issueCount: number
+    unchangedCount: number
+    addedPath: string
+    modifiedPath: string
+    renamedFromPath: string
+    renamedToPath: string
+    removedPath: string
+  }
 }
 
 export const mathWorkflowFixtureRoot = path.resolve('tests/fixtures/math-obsidian-workflow')
 export const mathWorkflowVaultDirectory = path.join(mathWorkflowFixtureRoot, 'MathResearchVault')
+export const mathWorkflowSecondSnapshotDirectory = path.join(
+  mathWorkflowFixtureRoot,
+  'snapshots',
+  'second',
+  'MathResearchVault',
+)
 
 export function readMathWorkflowManifest(): MathWorkflowManifest {
   return JSON.parse(readFileSync(path.join(mathWorkflowFixtureRoot, 'manifest.json'), 'utf8')) as MathWorkflowManifest
 }
 
 export async function parseMathWorkflowFixture(reverse = false): Promise<ParsedImport> {
-  const files = mathWorkflowFixtureFiles()
+  const files = mathWorkflowFixtureFiles('initial')
   return parseImportFiles(reverse ? files.reverse() : files)
 }
 
-export function mathWorkflowFixtureFiles(): File[] {
-  return markdownPaths(mathWorkflowVaultDirectory).map((absolutePath) => {
-    const relativePath = path.relative(path.dirname(mathWorkflowVaultDirectory), absolutePath).split(path.sep).join('/')
+export async function parseMathWorkflowSecondSnapshot(reverse = false): Promise<ParsedImport> {
+  const files = mathWorkflowFixtureFiles('second')
+  return parseImportFiles(reverse ? files.reverse() : files)
+}
+
+export function mathWorkflowFixtureFiles(snapshot: 'initial' | 'second' = 'initial'): File[] {
+  const directory = snapshot === 'initial' ? mathWorkflowVaultDirectory : mathWorkflowSecondSnapshotDirectory
+  const lastModified = snapshot === 'initial' ? 1_735_689_600_000 : 1_776_384_000_000
+  return markdownPaths(directory).map((absolutePath) => {
+    const relativePath = path.relative(path.dirname(directory), absolutePath).split(path.sep).join('/')
     const file = new File([readFileSync(absolutePath)], path.basename(absolutePath), {
       type: 'text/markdown',
-      lastModified: 1_735_689_600_000,
+      lastModified,
     })
     Object.defineProperty(file, 'webkitRelativePath', { value: relativePath })
     return file

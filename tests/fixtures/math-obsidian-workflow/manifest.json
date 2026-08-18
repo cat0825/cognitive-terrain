@@ -4,5 +4,15 @@
   "issueCount": 0,
   "resolvedWikiLinkCount": 21,
   "unresolvedWikiLinkCount": 1,
-  "openQuestionPath": "Research/Open Questions.md"
+  "openQuestionPath": "Research/Open Questions.md",
+  "secondSnapshot": {
+    "noteCount": 7,
+    "issueCount": 0,
+    "unchangedCount": 4,
+    "addedPath": "Physics/Compact Phase Space.md",
+    "modifiedPath": "Proofs/Heine-Borel Proof.md",
+    "renamedFromPath": "Optimization/Lagrange Multipliers.md",
+    "renamedToPath": "Optimization/Constrained Extrema.md",
+    "removedPath": "Physics/Virtual Work.md"
+  }
 }
