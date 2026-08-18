@@ -50,6 +50,7 @@ export type TerrainEvidenceProvenance =
   | 'declared-taxonomy'
   | 'note-tag'
   | 'explicit-wikilink'
+  | 'explicit-prerequisite'
   | 'cognitive-state-yaml'
   | 'cognitive-state-app'
   | 'cognitive-state-migration'
@@ -571,7 +572,7 @@ function activeProfile(project: TerrainProject, requestedId?: string): TerrainPr
 function elevationProvenance(elevation: TerrainProfile['elevation']): TerrainEvidenceProvenance[] {
   if (elevation === 'density') return ['kernel-density']
   if (elevation === 'activity') return ['raw-event', 'retained-aggregate']
-  if (elevation === 'structure') return ['explicit-wikilink']
+  if (elevation === 'structure') return ['explicit-prerequisite']
   return ['terrain-profile']
 }
 
@@ -608,7 +609,7 @@ function effectiveColorEncoding(
       timeSensitive: false,
     }
   }
-  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'area') {
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'structure' || dimension === 'area') {
     return {
       formulaVersion: 'declared-taxonomy-area-color-v1',
       provenance: ['declared-taxonomy'],

@@ -31,7 +31,7 @@ test('keeps peak labels bounded and collision-free through orbit and zoom', asyn
   for (let index = 0; index < 3; index += 1) {
     await page.mouse.move(centerX, centerY)
     await page.mouse.down()
-    await page.mouse.move(centerX + 55 - index * 18, centerY - 30 + index * 12, { steps: 12 })
+    await page.mouse.move(centerX + 55 - index * 18, centerY - 30 + index * 12, { steps: 4 })
     await page.mouse.up()
     await page.mouse.wheel(0, index % 2 === 0 ? -220 : 180)
     await page.waitForTimeout(180)

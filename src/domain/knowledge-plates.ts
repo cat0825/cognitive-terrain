@@ -308,26 +308,31 @@ function explicitEdges(notes: TerrainNote[]): ExplicitEdge[] {
   const index = buildNoteIndex(notes)
   const edges: ExplicitEdge[] = []
   for (const from of notes) {
-    for (const targetTitle of from.links) {
-      const to = index.get(normalizeRelationKey(targetTitle))
+    for (const link of from.links) {
+      const candidates = index.get(normalizeRelationKey(link))
+      const to = candidates?.length === 1 ? candidates[0] : undefined
       if (!to || to.id === from.id) continue
       edges.push({
         from,
         to,
-        relationId: `relation-${stableHash(`${from.id}\n${targetTitle}`)}`,
+        relationId: `relation-${stableHash(`${from.id}\n${link}`)}`,
       })
     }
   }
   return edges
 }
 
-function buildNoteIndex(notes: TerrainNote[]): Map<string, TerrainNote> {
-  const index = new Map<string, TerrainNote>()
+function buildNoteIndex(notes: TerrainNote[]): Map<string, TerrainNote[]> {
+  const index = new Map<string, TerrainNote[]>()
   for (const note of notes) {
     for (const key of [note.title, note.sourcePath, note.sourcePath?.split('/').at(-1)]) {
       if (!key) continue
       const normalized = normalizeRelationKey(key)
-      if (normalized && !index.has(normalized)) index.set(normalized, note)
+      const candidates = index.get(normalized) ?? []
+      if (normalized && !candidates.some((candidate) => candidate.id === note.id)) {
+        candidates.push(note)
+        index.set(normalized, candidates)
+      }
     }
   }
   return index

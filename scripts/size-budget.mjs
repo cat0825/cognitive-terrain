@@ -3,11 +3,10 @@ import path from 'node:path'
 
 const distDir = path.resolve('dist/assets')
 const budget = {
-  main: 340 * 1024,
-  // Issues #8 and #22 add persisted exploration plus versioned terrain
-  // evidence. Keep startup strict while allowing #22's measured 27.8 KiB.
-  totalJs: 2250 * 1024,
-  css: 40 * 1024,
+  // Integrated activity, atlas-gap, exploration, evidence, write-back, and prerequisite-strata UI.
+  main: 360 * 1024,
+  totalJs: 2360 * 1024,
+  css: 47 * 1024,
 }
 
 const entries = await readdir(distDir)

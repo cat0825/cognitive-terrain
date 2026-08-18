@@ -4,7 +4,8 @@ import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
 import { parseProjectBundle, serializeProjectBundle } from '../../src/export/project-files'
 import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
-import type { ExplorationLifecycleItem } from '../../src/domain/types'
+import { buildPrerequisiteTopology, materializePrerequisites } from '../../src/domain/prerequisite-topology'
+import type { ExplorationLifecycleItem, TerrainProject } from '../../src/domain/types'
 
 describe('project bundle migration', () => {
   it('loads a Schema v2 bundle into the Schema v3 compatibility shape', async () => {
@@ -199,5 +200,111 @@ describe('project bundle migration', () => {
       },
       history: [expect.objectContaining({ type: 'snooze', toStatus: 'snoozed' })],
     })
+  })
+
+  it('round-trips prerequisite declarations, diagnostics, and derived evidence', async () => {
+    const demo = createDemoProject()
+    const root = { ...demo.notes[0], id: 'root', title: 'Root', prerequisites: [] }
+    const child = {
+      ...demo.notes[1],
+      id: 'child',
+      title: 'Child',
+      prerequisites: materializePrerequisites('child', [{
+        target: 'Root',
+        provenance: 'app-confirmed',
+        sourceField: 'app',
+      }]),
+    }
+    const notes = [root, child]
+    const source: TerrainProject = {
+      ...demo,
+      notes,
+      prerequisiteTopology: buildPrerequisiteTopology(notes),
+    }
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'prerequisites.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.notes[1]?.prerequisites).toEqual(child.prerequisites)
+    expect(restored.prerequisiteTopology).toEqual(source.prerequisiteTopology)
+  })
+
+  it('round-trips stable vault source identity, baselines, and sync provenance', async () => {
+    const demo = createDemoProject()
+    const note = {
+      ...demo.notes[0],
+      sourceId: 'source:vault:stable',
+      sourceKey: 'vault-main:Math/Algebra.md',
+      sourcePath: 'Math/Algebra.md',
+      vault: 'Main vault',
+    }
+    const source: TerrainProject = {
+      ...demo,
+      notes: [note],
+      vaultSync: {
+        version: 1,
+        vaults: [{
+          vaultId: 'vault-main',
+          displayName: 'Main vault',
+          accessMode: 'directory-handle',
+          lastScannedAt: '2026-08-17T12:00:00.000Z',
+        }],
+        sources: [{
+          sourceId: note.sourceId,
+          itemId: note.id,
+          vaultId: 'vault-main',
+          relativePath: 'Math/Algebra.md',
+          status: 'present',
+          rawContentHash: 'sha256:algebra',
+          entityHash: 'entity:algebra',
+          lastModifiedMs: 1_776_422_400_000,
+          size: 512,
+          acceptedFieldHashes: { title: 'field:title', content: 'field:content' },
+          acceptedNote: {
+            sourceKey: note.sourceKey,
+            title: note.title,
+            content: note.content,
+            createdAt: note.createdAt,
+            tags: [...note.tags],
+            weight: note.weight,
+            mastery: note.mastery,
+            confidence: note.confidence,
+            exploration: note.exploration,
+            status: note.status,
+            areas: [...(note.areas ?? [])],
+            declaredAreas: [...(note.declaredAreas ?? [])],
+            reviewedAt: note.reviewedAt,
+            links: [...note.links],
+          },
+          acceptedAt: '2026-08-17T12:00:00.000Z',
+        }],
+        revisions: [{
+          id: 'revision:vault-sync:algebra',
+          sourceId: note.sourceId,
+          itemId: note.id,
+          operation: 'modify',
+          rawContentHash: 'sha256:algebra',
+          previousContentHash: 'sha256:algebra-old',
+          entityHash: 'entity:algebra',
+          acceptedAt: '2026-08-17T12:00:00.000Z',
+          occurredAt: '2026-08-17T11:59:00.000Z',
+          timestampSource: 'file-last-modified',
+          provenance: 'vault-sync',
+        }],
+      },
+    }
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'vault-sync.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.notes[0]).toMatchObject({ sourceId: note.sourceId, sourceKey: note.sourceKey })
+    expect(restored.vaultSync).toEqual(source.vaultSync)
+    expect(JSON.stringify(restored)).not.toContain('vaultBindings')
   })
 })

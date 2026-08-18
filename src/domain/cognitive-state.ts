@@ -88,5 +88,6 @@ export function commitAnalyzedProject(
       baseProject.activeReferenceAtlasId,
     ),
     explorationItems: baseProject.explorationItems,
+    vaultSync: baseProject.vaultSync,
   }
 }

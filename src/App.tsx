@@ -4,6 +4,7 @@ import './App.css'
 import { visibleNotesFor } from './domain/project-view'
 import { buildPlateCollisions } from './domain/knowledge-plates'
 import { buildProjectReferenceGapReport } from './domain/reference-gaps'
+import { vaultWritebackCandidates, type VaultWritebackCandidate } from './domain/vault-writeback-candidates'
 import { TerrainCanvas } from './scene/TerrainCanvas'
 import { useAppStore } from './store/app-store'
 import { CameraRail } from './ui/CameraRail'
@@ -15,6 +16,8 @@ import { TopBar } from './ui/TopBar'
 import { TerrainSemanticsLegend } from './ui/TerrainSemanticsLegend'
 
 const ImportPanel = lazy(async () => import('./ui/ImportPanel').then((module) => ({ default: module.ImportPanel })))
+const VaultSyncPanel = lazy(() => import('./ui/VaultSyncPanel'))
+const VaultWritebackPanel = lazy(() => import('./ui/VaultWritebackPanel'))
 
 function App() {
   const project = useAppStore((state) => state.project)
@@ -76,6 +79,8 @@ function App() {
   const progressValue = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
   const [analysisToast, setAnalysisToast] = useState<typeof lastAnalysis>(null)
   const [gapEvaluatedAt] = useState(() => Date.now())
+  const [syncOpen, setSyncOpen] = useState(false)
+  const [writebackCandidates, setWritebackCandidates] = useState<VaultWritebackCandidate[] | null>(null)
   const toastTimer = useRef<number | null>(null)
   const referenceGapReport = useMemo(
     () => buildProjectReferenceGapReport(project, project.activeReferenceAtlasId ?? '', gapEvaluatedAt),
@@ -129,6 +134,8 @@ function App() {
       <div className="app-window">
         <TopBar
           onImport={() => setImportOpen(true)}
+          onSync={() => setSyncOpen(true)}
+          onWriteback={() => setWritebackCandidates(vaultWritebackCandidates(project))}
           onLoadStudyPack={() => void loadStudyPack()}
           onExportProject={() => void exportProject()}
           onExportImage={() => void exportImage()}
@@ -175,6 +182,7 @@ function App() {
               gapReport={referenceGapReport}
               gapNodeId={activeGapNodeId ?? undefined}
               visibleCount={visibleNotes.length}
+              onWriteback={setWritebackCandidates}
             />
             <CameraRail />
             <Timeline snapshots={project.snapshots} onExportImage={() => void exportImage()} />
@@ -185,6 +193,20 @@ function App() {
         <Suspense fallback={null}>
           <ImportPanel />
         </Suspense>
+        {syncOpen && (
+          <Suspense fallback={<div className="processing-overlay" role="status">正在加载 vault 同步</div>}>
+            <VaultSyncPanel open onClose={() => setSyncOpen(false)} />
+          </Suspense>
+        )}
+        {writebackCandidates && (
+          <Suspense fallback={<div className="processing-overlay" role="status">正在加载 vault 写回</div>}>
+            <VaultWritebackPanel
+              open
+              seedCandidates={writebackCandidates}
+              onClose={() => setWritebackCandidates(null)}
+            />
+          </Suspense>
+        )}
         {project.notes.length > 0 && project.notes.length <= 5 && (
           <div className="small-data-hint" role="status">
             <span className="panel-kicker">SMALL SAMPLE</span>

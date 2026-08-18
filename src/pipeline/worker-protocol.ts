@@ -27,7 +27,7 @@ export type AnalysisWorkerRequest =
       gridSize: number
       timeZone: string
       nowMs: number
-      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'activity'>
+      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'activity' | 'structure'>
     }
   | {
       type: 'cancel'

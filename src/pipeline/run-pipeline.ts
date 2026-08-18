@@ -1,5 +1,6 @@
 import type { AnalysisOptions, NoteInput, ProcessingProgress, TerrainNote } from '../domain/types'
 import { areasForNote, primaryAreaForNote } from '../domain/knowledge-plates'
+import { materializePrerequisites } from '../domain/prerequisite-topology'
 import { createProjectFromNotes } from '../domain/demo'
 import { buildStableLayoutWithNeighbors, normalizeVector } from './layout'
 import { computeEmbeddingNeighbors } from './neighbors'
@@ -124,8 +125,11 @@ function materializeInput(input: NoteInput, index: number): TerrainNote {
   const links = normalizeLinks(input.links)
   const areas = areasForNote(input)
   const fingerprint = input.id?.trim() || hash(`${title}\n${content}\n${createdAt}\n${tags.join('|')}\n${links.join('|')}`)
+  const id = input.id?.trim() || `note-${fingerprint}`
   return {
-    id: input.id?.trim() || `note-${fingerprint}`,
+    id,
+    sourceId: input.sourceId?.trim() || undefined,
+    sourceKey: input.sourceKey?.trim() || undefined,
     fingerprint,
     title,
     content,
@@ -146,6 +150,7 @@ function materializeInput(input: NoteInput, index: number): TerrainNote {
     reviewedAt: normalizeReviewedAt(input.reviewedAt),
     cognitiveStateProvenance: input.cognitiveStateProvenance,
     links,
+    prerequisites: materializePrerequisites(id, input.prerequisites),
     x: 0,
     y: 0,
   }

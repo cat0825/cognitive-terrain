@@ -64,6 +64,21 @@ describe('terrain evidence contract', () => {
     })
   })
 
+  it('attributes structure elevation to explicit prerequisite declarations while retaining area color', () => {
+    const legend = buildTerrainSemanticsLegend(projectFixture(), {
+      visualDimension: 'structure',
+      evaluatedAt,
+    })
+
+    expect(legend.entries.find((entry) => entry.kind === 'elevation')).toMatchObject({
+      provenance: ['explicit-prerequisite'],
+    })
+    expect(legend.entries.find((entry) => entry.kind === 'color')).toMatchObject({
+      formulaVersion: 'declared-taxonomy-area-color-v1',
+      provenance: ['declared-taxonomy'],
+    })
+  })
+
   it('keeps original embedding score, approximate UMAP distance, taxonomy, tags and WikiLink separate', () => {
     const project = projectFixture()
     const evidence = buildNoteNeighborEvidence(project, 'a', 'b', {

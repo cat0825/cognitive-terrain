@@ -8,6 +8,7 @@ import {
 import { cognitiveStateFromNote, normalizeActiveReferenceAtlasId } from '../domain/cognitive-state'
 import { compactActivityHistory } from '../domain/activity-history'
 import { areasForNote, plateIdForArea } from '../domain/knowledge-plates'
+import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
 import { legacyTaxonomyNodesForProject, validateTaxonomy } from '../domain/taxonomy'
 import {
   migrateTerrainProjectToV3,
@@ -36,7 +37,48 @@ import type {
 } from '../domain/types'
 
 export const DATABASE_NAME = 'cognitive-terrain'
-export const DATABASE_VERSION = 8
+export const DATABASE_VERSION = 10
+
+export type VaultWritebackBatchStatus = 'prepared' | 'in-progress' | 'completed' | 'failed'
+export type VaultWritebackOutcomeStatus = 'succeeded' | 'failed' | 'not-attempted'
+
+export interface StoredVaultWritebackOutcome {
+  requestId: string
+  sourceId: string
+  path: string
+  status: VaultWritebackOutcomeStatus
+  backupId: string
+  error?: string
+}
+
+export interface StoredVaultWritebackBatch {
+  id: string
+  workspaceId: string
+  vaultId: string
+  previewId: string
+  createdAt: string
+  updatedAt: string
+  status: VaultWritebackBatchStatus
+  outcomes: StoredVaultWritebackOutcome[]
+  error?: string
+}
+
+export interface StoredVaultWritebackRecoveryFile {
+  batchId: string
+  workspaceId: string
+  sourceId: string
+  requestIds: string[]
+  path: string
+  beforeByteHash: string
+  byteLength: number
+  originalBytes: ArrayBuffer
+}
+
+export interface StoredVaultBinding {
+  workspaceId: string
+  vaultId: string
+  handle: unknown
+}
 
 export interface StoredCognitiveState extends CognitiveState {
   workspaceId: string
@@ -203,6 +245,28 @@ export interface CognitiveTerrainDB extends DBSchema {
       'by-updated-at': [string, string]
     }
   }
+  vaultBindings: {
+    key: [string, string]
+    value: StoredVaultBinding
+    indexes: { 'by-workspace': string }
+  }
+  vaultWritebackBatches: {
+    key: string
+    value: StoredVaultWritebackBatch
+    indexes: {
+      'by-workspace': string
+      'by-created-at': string
+      'by-status': [string, VaultWritebackBatchStatus]
+    }
+  }
+  vaultWritebackRecoveryFiles: {
+    key: [string, string]
+    value: StoredVaultWritebackRecoveryFile
+    indexes: {
+      'by-batch': string
+      'by-workspace': string
+    }
+  }
 }
 
 export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] = [
@@ -223,6 +287,7 @@ export const PROJECT_TRANSACTION_STORE_NAMES: StoreNames<CognitiveTerrainDB>[] =
   'citations',
   'revisions',
   'explorationItems',
+  'vaultBindings',
 ]
 
 type DatabaseWriteMode = 'readwrite' | 'versionchange'
@@ -279,6 +344,7 @@ export function migrateProject(project: TerrainProject): TerrainProject {
       area: areas[0],
       areas: areas.length ? areas : undefined,
       links: note.links ?? [],
+      prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })) ?? [],
     }
   })
   const cognitiveStates = project.cognitiveStates ?? migratedNotes.flatMap((note) => {
@@ -338,6 +404,7 @@ export function migrateProject(project: TerrainProject): TerrainProject {
     referenceAtlases,
     activeReferenceAtlasId,
     explorationItems,
+    prerequisiteTopology: buildPrerequisiteTopology(migratedNotes),
   }
 }
 
@@ -394,6 +461,7 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
   transaction: DatabaseWriteTransaction<Mode>,
   workspaceId: string,
   includeRevisions = true,
+  includeVaultBindings = false,
 ): Promise<void> {
   await transaction.objectStore('workspaces').delete(workspaceId)
   const stores: WorkspaceStoreName[] = [
@@ -411,6 +479,7 @@ export async function clearProjectMaterialization<Mode extends DatabaseWriteMode
     'citations',
     'explorationItems',
     ...(includeRevisions ? ['revisions' as const] : []),
+    ...(includeVaultBindings ? ['vaultBindings' as const] : []),
   ]
   await Promise.all(stores.map((storeName) => clearWorkspaceStore(transaction, storeName, workspaceId)))
 }
@@ -563,10 +632,11 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
-  if (oldVersion >= 5 && oldVersion < 7) {
+  if (!database.objectStoreNames.contains('explorationItems')) {
     createExplorationItemStore(database)
   }
-  if (oldVersion >= 5 && oldVersion < 8) {
+  const needsNeighborEvidenceStore = !database.objectStoreNames.contains('neighborEvidence')
+  if (needsNeighborEvidenceStore) {
     createNeighborEvidenceStore(database)
   }
   if (oldVersion >= 5 && oldVersion < 6) {
@@ -581,6 +651,7 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
+  if (!database.objectStoreNames.contains('vaultBindings')) createVaultBindingStore(database)
   if (oldVersion >= 6 && oldVersion < 7) {
     const store = transaction.objectStore('projects')
     let cursor = await store.openCursor()
@@ -591,7 +662,7 @@ async function upgradeDatabase(
       cursor = await cursor.continue()
     }
   }
-  if (oldVersion >= 7 && oldVersion < 8) {
+  if (oldVersion >= 7 && needsNeighborEvidenceStore) {
     const store = transaction.objectStore('projects')
     let cursor = await store.openCursor()
     while (cursor) {
@@ -600,6 +671,9 @@ async function upgradeDatabase(
       await replaceProjectMaterialization(transaction, project, 3)
       cursor = await cursor.continue()
     }
+  }
+  if (!database.objectStoreNames.contains('vaultWritebackBatches')) {
+    createVaultWritebackRecoveryStores(database)
   }
 }
 
@@ -631,6 +705,24 @@ function createExplorationItemStore(database: IDBPDatabase<CognitiveTerrainDB>):
   explorationItems.createIndex('by-workspace', 'workspaceId')
   explorationItems.createIndex('by-status', ['workspaceId', 'status'])
   explorationItems.createIndex('by-updated-at', ['workspaceId', 'updatedAt'])
+}
+
+function createVaultBindingStore(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const vaultBindings = database.createObjectStore('vaultBindings', { keyPath: ['workspaceId', 'vaultId'] })
+  vaultBindings.createIndex('by-workspace', 'workspaceId')
+}
+
+function createVaultWritebackRecoveryStores(database: IDBPDatabase<CognitiveTerrainDB>): void {
+  const batches = database.createObjectStore('vaultWritebackBatches', { keyPath: 'id' })
+  batches.createIndex('by-workspace', 'workspaceId')
+  batches.createIndex('by-created-at', 'createdAt')
+  batches.createIndex('by-status', ['workspaceId', 'status'])
+
+  const files = database.createObjectStore('vaultWritebackRecoveryFiles', {
+    keyPath: ['batchId', 'sourceId'],
+  })
+  files.createIndex('by-batch', 'batchId')
+  files.createIndex('by-workspace', 'workspaceId')
 }
 
 async function clearWorkspaceStore<Mode extends DatabaseWriteMode>(
