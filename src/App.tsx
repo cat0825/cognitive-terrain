@@ -1,5 +1,5 @@
 import { AlertCircle, LoaderCircle, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { visibleNotesFor } from './domain/project-view'
 import { buildPlateCollisions } from './domain/knowledge-plates'
@@ -12,6 +12,8 @@ import { ImportPanel } from './ui/ImportPanel'
 import { NoteDetail } from './ui/NoteDetail'
 import { Timeline } from './ui/Timeline'
 import { TopBar } from './ui/TopBar'
+
+const VaultSyncPanel = lazy(() => import('./ui/VaultSyncPanel'))
 
 function App() {
   const project = useAppStore((state) => state.project)
@@ -69,6 +71,7 @@ function App() {
   const activeCollision = collisions.find((collision) => collision.id === activeCollisionId)
   const progressValue = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
   const [analysisToast, setAnalysisToast] = useState<typeof lastAnalysis>(null)
+  const [syncOpen, setSyncOpen] = useState(false)
   const toastTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -98,6 +101,7 @@ function App() {
       <div className="app-window">
         <TopBar
           onImport={() => setImportOpen(true)}
+          onSync={() => setSyncOpen(true)}
           onLoadStudyPack={() => void loadStudyPack()}
           onExportProject={() => downloadProjectBundle(project)}
           onExportImage={() => void exportImage()}
@@ -130,6 +134,11 @@ function App() {
         </main>
 
         <ImportPanel />
+        {syncOpen && (
+          <Suspense fallback={<div className="processing-overlay" role="status">正在加载 vault 同步</div>}>
+            <VaultSyncPanel open onClose={() => setSyncOpen(false)} />
+          </Suspense>
+        )}
         {project.notes.length > 0 && project.notes.length <= 5 && (
           <div className="small-data-hint" role="status">
             <span className="panel-kicker">SMALL SAMPLE</span>

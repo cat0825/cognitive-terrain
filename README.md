@@ -15,9 +15,10 @@
 - 对比模式：选中时间基准层，直接回放比较新增/消失笔记差异。
 - 编辑模式：直接修改标题、正文和标签，重新分析后保留稳定的笔记 ID。
 - 导入 JSON、CSV、TSV、Markdown、纯文本和 YAML。
+- Obsidian vault 支持本地增量同步：重新选择同一目录后预览新增、修改、重命名、移除和字段冲突；确认前创建恢复点，未变化文件不会重新解析。浏览器不能保留目录权限时会明确要求重新选择，不上传文件或自动写回 Markdown。
 - 导入/导出 `.terrain.json` 完整项目包，导出当前地图为 PNG，导出 Markdown 复盘报告。
 - 项目自动保存到 IndexedDB，支持增量合并新笔记；覆盖、改名、删除和恢复前会自动创建本地恢复点，每个项目最多保留 8 份。
-- IndexedDB v6 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、布局和 revision hash 基线；不同项目通过复合键隔离。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
+- IndexedDB v7 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、布局和 revision，并为本地 vault 授权预留独立 binding store；不同项目通过复合键隔离。目录句柄不会进入项目导出或恢复点。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
 - 活动历史按 retention policy v1 有界保存：打开/编辑/复习原始事件分别保留 30/180/365 天，每条笔记每类最多 500 条；180 天内可按日查看，最长 730 天按周聚合。项目 `timeZone` 决定日历边界，非法时间戳会被忽略。聚合保留每类事件的计数、首末时间和衰减热度；笔记自身的 `reviewedAt` 不参与裁剪，因此迁移不会丢失最近复习时间。超过 730 天的活动不再出现在历史或温度计算中，也不承诺作为审计档案。
 - 分析在 Web Worker 中运行，支持取消，不阻塞主界面。
 - 工具菜单提供“加载今日学习”，内置从 X `@MeowTsutaki1` 可见转帖整理的学习笔记（2026-08-03）；也可导入 `public/imports/x-reposts-2026-08-03.json`。
@@ -114,6 +115,16 @@ tags:
 
 `area` / `areas` 仍是用户声明的领域标签。应用按 NFKC、连续空白和大小写确定性解析 taxonomy 别名，同时在 `declaredAreas` 与 plate membership provenance 中保留导入标签；taxonomy 重命名和重挂不会改变稳定 node ID。
 
+### Obsidian vault 增量同步
+
+从项目菜单选择“同步 Obsidian vault”，每次重新选择同一个 vault 根目录。扫描会为所有 Markdown 计算 SHA-256，但只重新解析新增或内容变化的文件；隐藏目录和非 Markdown 文件会被忽略。
+
+- 原路径优先匹配；路径变化时只在 frontmatter `id` / `uid` 或原始内容 hash 唯一时保留 source/item ID。候选不唯一或归一化路径碰撞时必须先修正 vault 后重扫。
+- 应用内和 vault 同时修改同一字段时逐字段选择保留应用版本或采用 vault 版本。无效 YAML 字段保留上次已接受值，并在预览中报告。
+- 完整扫描中的移除会保留 source tombstone 并归档笔记；读取失败或多 vault 混合造成的不完整扫描不会推断删除。
+- 已接受内容生成 `vault-sync` revision。有效文件修改时间只用于事件时间；不可用或晚于确认时间时明确回退到确认时间。重复扫描和与应用内相同的编辑不会重复增加活动温度。
+- `.terrain.json` 导出/恢复保留 source 身份、同步基线和 revision provenance，但不包含浏览器目录权限。当前版本不会写回 Markdown，也不提供跨设备同步。
+
 ## 分析流程
 
 1. 规范化并按内容指纹稳定排序笔记。
@@ -171,7 +182,7 @@ tests/unit/     算法、导入与 Worker 回归测试
   - `@huggingface/transformers` 引入受影响的 `sharp`。
 
 - 演示知识点主要是确定性模板数据，不等同于有来源、可引用的知识库。
-- IndexedDB 已支持最多 8 份本地恢复点，但仍缺站点外自动备份、细粒度修订历史、回收站和跨设备同步。
+- IndexedDB 已支持最多 8 份本地恢复点和 vault-sync 内容 revision，但仍缺站点外自动备份、通用编辑修订历史、回收站和跨设备同步。
 - 搜索仍以字符串匹配为主；小规模编辑会触发全量 embedding/UMAP，布局稳定性和 10k/50k 数据规模未验证。
 - a11y 门禁当前排除了暗色 8px 等宽小字的 `color-contrast` 规则，不能据此宣称完整 WCAG 2.2 AA。
 

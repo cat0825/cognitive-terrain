@@ -83,16 +83,19 @@ function parseStructured(text: string, fileName: string, format: 'json' | 'yaml'
   }
 }
 
-function parseTextDocument(
+export function parseTextDocument(
   text: string,
   fileName: string,
   modifiedAt: number,
   location: { vault?: string; path: string } = { path: fileName },
+  fallbackCreatedAt?: string,
 ): ParsedImport {
   const { frontmatter, body, issue: frontmatterIssue } = splitFrontmatter(text)
   const cognitive = parseObsidianCognitiveFields(frontmatter)
   const title = stringValue(frontmatter.title) ?? fileName.replace(/\.[^.]+$/, '')
-  const createdAt = stringValue(frontmatter.createdAt) ?? new Date(modifiedAt).toISOString()
+  const createdAt = stringValue(frontmatter.createdAt)
+    ?? fallbackCreatedAt
+    ?? new Date(modifiedAt).toISOString()
   const tags = normalizeTags(frontmatter.tags)
   const content = body.trim() || text.trim()
   const issues: ImportIssue[] = [
@@ -102,6 +105,7 @@ function parseTextDocument(
   if (!content) issues.push({ file: fileName, message: '文件内容为空' })
   return {
     notes: [{
+      sourceKey: stringValue(frontmatter.id) ?? stringValue(frontmatter.uid),
       title,
       content,
       createdAt,
@@ -161,6 +165,8 @@ function normalizeNote(value: unknown): { note?: NoteInput; issue?: Omit<ImportI
   return {
     note: {
       id: stringValue(record.id),
+      sourceId: stringValue(record.sourceId) ?? stringValue(record.source_id),
+      sourceKey: stringValue(record.sourceKey) ?? stringValue(record.source_key) ?? stringValue(record.uid),
       title: stringValue(record.title) ?? stringValue(record.name) ?? content.slice(0, 48),
       content: content.trim(),
       createdAt: new Date(createdAt).toISOString(),

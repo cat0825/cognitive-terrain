@@ -115,6 +115,8 @@ function materializeInput(input: NoteInput, index: number): TerrainNote {
   const fingerprint = input.id?.trim() || hash(`${title}\n${content}\n${createdAt}\n${tags.join('|')}\n${links.join('|')}`)
   return {
     id: input.id?.trim() || `note-${fingerprint}`,
+    sourceId: input.sourceId?.trim() || undefined,
+    sourceKey: input.sourceKey?.trim() || undefined,
     fingerprint,
     title,
     content,
