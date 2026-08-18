@@ -6,6 +6,7 @@ import type {
   ProjectSummary,
   TerrainProject,
 } from '../domain/types'
+import { normalizeActiveReferenceAtlasId } from '../domain/cognitive-state'
 import { compactActivityHistory } from '../domain/activity-history'
 import {
   clearProjectMaterialization,
@@ -43,6 +44,35 @@ export async function saveProject(project: TerrainProject, options: SaveProjectO
     await abortTransaction(transaction, error)
   }
   if (previous && options.createBackup !== false) await pruneProjectBackups(project.id)
+}
+
+/** Persist the atlas view preference without rebuilding every materialized item. */
+export async function updateActiveReferenceAtlas(
+  projectId: string,
+  requestedAtlasId: string | undefined,
+): Promise<TerrainProject | undefined> {
+  const database = await getDatabase()
+  const transaction = database.transaction(['projects', 'workspaces'], 'readwrite')
+  try {
+    const stored = await transaction.objectStore('projects').get(projectId)
+    if (!stored) {
+      await transaction.done
+      return undefined
+    }
+    const current = migrateProject(stored)
+    const activeReferenceAtlasId = normalizeActiveReferenceAtlasId(current.referenceAtlases, requestedAtlasId)
+    const updatedAt = new Date().toISOString()
+    const project = { ...current, activeReferenceAtlasId, updatedAt }
+    await transaction.objectStore('projects').put(project)
+    const workspace = await transaction.objectStore('workspaces').get(projectId)
+    if (workspace) {
+      await transaction.objectStore('workspaces').put({ ...workspace, activeReferenceAtlasId, updatedAt })
+    }
+    await transaction.done
+    return project
+  } catch (error) {
+    return abortTransaction(transaction, error)
+  }
 }
 
 export async function appendProjectInteractionEvent(

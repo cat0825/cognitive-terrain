@@ -212,6 +212,7 @@ export interface TerrainProject {
   taxonomyNodes?: TaxonomyNode[]
   taxonomyVersion?: number
   referenceAtlases?: ReferenceAtlasManifest[]
+  activeReferenceAtlasId?: string
   vaultSync?: VaultSyncState
   prerequisiteTopology?: PrerequisiteTopology
 }
@@ -344,7 +345,7 @@ export interface ParsedImport {
 
 export type ViewMode = '3d' | '2d'
 export type QualityLevel = 'high' | 'medium' | 'low'
-export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'structure' | 'temperature' | 'area'
+export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'activity' | 'structure' | 'temperature' | 'area'
 
 export interface ProjectSummary {
   id: string

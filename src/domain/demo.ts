@@ -18,6 +18,20 @@ interface DemoTopic {
 const articlesPerTopic = 60
 const articlesPerMonth = 36
 const demoStart = new Date('2021-11-26T20:54:10+08:00')
+const DEMO_TAXONOMY_VERSION = 1
+const demoReferenceAtlasLabels = [
+  ['demo-taxonomy-platform', '平台工程'],
+  ['demo-taxonomy-hardware', '硬件与互联'],
+  ['demo-taxonomy-cuda', 'CUDA 与算子'],
+  ['demo-taxonomy-training', '训练系统'],
+  ['demo-taxonomy-inference', '推理系统'],
+  ['demo-taxonomy-architecture', '计算机体系结构'],
+  ['demo-taxonomy-safety', '安全与合规'],
+] as const
+const demoTaxonomyLabels = [
+  ...demoReferenceAtlasLabels,
+  ['demo-taxonomy-agent', 'Agent 系统'] as const,
+]
 
 const articleLenses = [
   '',
@@ -317,6 +331,16 @@ export function createDemoProject(): TerrainProject {
   }
   const terrain = buildTerrainData(notes, 128, 'Asia/Shanghai', 0.052)
   const timestamp = '2025-12-31T20:00:00+08:00'
+  const taxonomyNodes = demoTaxonomyLabels.map(([id, label]) => ({
+    id,
+    workspaceId: 'demo-ai-infra-terrain',
+    label,
+    aliases: [],
+    version: DEMO_TAXONOMY_VERSION,
+    status: 'active' as const,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }))
   return {
     schemaVersion: 3,
     id: 'demo-ai-infra-terrain',
@@ -345,6 +369,17 @@ export function createDemoProject(): TerrainProject {
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
+    taxonomyNodes,
+    taxonomyVersion: DEMO_TAXONOMY_VERSION,
+    referenceAtlases: [{
+      id: 'demo-ai-infra-reference-atlas',
+      workspaceId: 'demo-ai-infra-terrain',
+      label: 'AI Infra 核心能力参考图谱',
+      taxonomyVersion: DEMO_TAXONOMY_VERSION,
+      taxonomyNodeIds: demoReferenceAtlasLabels.map(([id]) => id),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }],
   }
 }
 

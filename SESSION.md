@@ -1,50 +1,33 @@
-# Handoff 2026-08-17 23:40 CST
+# Handoff 2026-08-18
 
-## 目标
+## 当前目标
 
-按 Issue/PR 驱动推进 Cognitive Terrain。Issue #23 的本地优先 Obsidian vault 增量同步已提交 PR #33；下一项依赖任务是 Issue #24 的 opt-in diff-first write-back。
+按依赖顺序整合已 review 的地形工作栈：活动海拔与 reference-atlas ocean/gap、探索反馈、证据检查器、learning progression；同时保持已合并的 Obsidian 增量同步、diff-first 写回、数学工作流和 prerequisite strata 契约。
 
-## 进度
+## 已落地主线能力
 
-- Issue #23：本地实现与定向验证 100%，分支 `codex/incremental-vault-sync`。
-- PR：[#33](https://github.com/cat0825/cognitive-terrain/pull/33)，base=`main`，已关联 Issue #23，合并后自动关闭；GitHub quality check 正在运行，不等待 CI 继续本地工作。
-- 路线图：[Issue #29](https://github.com/cat0825/cognitive-terrain/issues/29)。
-- Issue #24：实现已提交为 `82ece6b` 并创建 stacked [PR #34](https://github.com/cat0825/cognitive-terrain/pull/34)，base=`codex/incremental-vault-sync`。
+- Obsidian vault 首次导入、增量同步、稳定 identity、三方字段合并、恢复点和逐文件 diff-first 写回。
+- 显式 `prerequisites` / `buildsOn` 拓扑、基础层级地形和不可参与派生的诊断证据。
+- 数学双链 fixture 与初次导入/确定性 no-op 回归；增量第二快照由 Issue #36 跟踪。
+- activity history retention、`activity-elevation-v1`、temperature、reference-atlas-relative ocean/gap。
+- CI 对 `npm ci` 瞬时网络失败做有限重试；Playwright desktop/mobile 与 desktop shard 隔离软件 WebGL 负载。
 
-## 已完成
+## 集成不变量
 
-- SHA-256 增量扫描：未变文件只计算 hash；新增、修改、安全重命名、移除、partial I/O 和 stale preview 有确定性预览。
-- 稳定 source/item identity；三方字段合并；路径碰撞和模糊重命名在修正 vault 前禁止提交。
-- 首次关联会比较现有项目与 vault 内容，差异逐字段确认，不会把扫描内容静默写成 accepted baseline。
-- 重复标题 WikiLink 保持 unresolved；关系、Source、revision、activity provenance 和导出/恢复保留正确语义。
-- IndexedDB v7：同步前恢复点、record-level materialization diff 和项目更新同事务提交；目录 binding 不进入项目包或恢复点。
-- VaultSyncPanel：重新选择/重新授权目录、预览、冲突处理、不完整扫描提示、键盘焦点、桌面/移动无横向溢出。
-- README 已记录同步规则、数据边界与已知限制。
-- Issue #24 已落地：字节保真 diff planner、File System Access read/write、IndexedDB v8 recovery batch、CAS baseline commit、独立 `vault-writeback` revision、批量双确认与逐文件结果。
+- 语义平面坐标保持稳定；activity、mastery、exploration、structure、temperature 与 learning progression 不得互相冒充。
+- Ocean/gap 只能相对用户明确选择的 reference atlas；低活动不能推断为知识缺口。
+- Prerequisite 只接受显式关系；UMAP 接近、taxonomy 父子关系和 WikiLink 都不能自动冒充前置或因果关系。
+- Vault 文件写回必须显式授权、先展示 exact diff、逐文件记录结果；目录句柄不得进入项目包或恢复点。
+- 不直接推 `main`；所有整合通过 feature branch、PR 和 CI。
 
-## 验证
+## 验证基线
 
-- `npx vitest run ...`：7 files / 61 tests passed；另一次全 unit/integration：19 files / 112 tests passed。
-- `npm run typecheck`、`npm run lint`、`npm run build`、`git diff --check` 通过。
-- `npm run size:check`：主包 342.2/346 KiB，JS 2190.6/2195 KiB，CSS 38.0/40 KiB。
-- Issue #24 focused：6 files / 68 tests passed；`npm run typecheck`、定向 `oxlint`、`npm run build`、`npm run size:check`、`git diff --check` 通过。当前预算为主包 348 KiB、JS 总量 2235 KiB、CSS 40 KiB。
-- focused E2E：desktop/mobile 2/2 passed；focused a11y：desktop/mobile 2/2 passed。
-- 截图：`output/playwright/vault-sync-preview-desktop.png`、`output/playwright/vault-sync-preview-mobile.png`（忽略目录，不入库）。
+- Node.js 22.12+。
+- 提交前运行 `npm run typecheck`、`npm run lint`、`npm test`、`npm run build`、`npm run size:check`。
+- 关键用户流程运行 desktop/mobile E2E；Linux CI 使用拆分后的 shard，避免把软件 WebGL 资源饥饿误判成业务回归。
 
-## 未完成
+## 后续
 
-1. PR #33 的 GitHub CI/维护者 review 尚未完成。
-2. PR #30 仍有 E2E timeout，PR #31 仍有 a11y timeout，PR #32 仍有 E2E/a11y/visual failure；三个 PR 的 quality 均通过，失败与 Issue #23 分支无关。
-3. PR #34 的 GitHub CI/维护者 review 尚未完成，不等待长测试阻塞后续 Issue。
-
-## 下一步
-
-1. Fresh-check PR #33 的 checks/review；只处理可复现的本分支失败，不等待长耗时 CI 阻塞其他工作。
-2. Fresh-check PR #34；只处理可复现的本分支失败，不等待长 E2E。
-3. 分别处理 PR #30/#31/#32 的既有超时或断言失败，不把修复混入 PR #33。
-
-## 风险 / 红线
-
-- 当前产品流程使用 `webkitdirectory` 重新选择文件夹；持久目录句柄 store 已隔离，但 UI 尚未启用 retained handle。
-- Issue #24 已支持显式 diff-first 写回；仍受 File System Access API 无 CAS 的极小 TOCTOU 窗口限制。
-- 不直接推 `main`；一个 implementation Issue 对应一个 feature branch 和一个 PR。
+1. 完成 PR #30、#31、#32、#37 的依赖栈整合和逐层验证。
+2. 实现 Issue #36 的数学 Vault 第二快照增量同步回归。
+3. Fresh-check `main` CI、开放 PR/Issue 与仓库工作区，更新本文件中的状态证据。

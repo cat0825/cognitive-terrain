@@ -1,4 +1,4 @@
-import { cognitiveStateFromNote } from './cognitive-state'
+import { cognitiveStateFromNote, normalizeActiveReferenceAtlasId } from './cognitive-state'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 import { areasForNote, plateIdForArea } from './knowledge-plates'
 import { buildPrerequisiteTopology } from './prerequisite-topology'
@@ -31,6 +31,7 @@ export interface WorkspaceV3 {
   activeTerrainProfileId: string
   activityHistory?: ActivityHistoryState
   taxonomyVersion?: number
+  activeReferenceAtlasId?: string
   prerequisiteTopology?: PrerequisiteTopology
 }
 
@@ -433,6 +434,10 @@ export function migrateTerrainProjectToV3(
       taxonomyVersion: Math.max(
         project.taxonomyVersion ?? 0,
         taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
+      ),
+      activeReferenceAtlasId: normalizeActiveReferenceAtlasId(
+        referenceAtlases,
+        project.activeReferenceAtlasId,
       ),
       prerequisiteTopology,
     },

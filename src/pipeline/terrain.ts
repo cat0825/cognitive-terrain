@@ -1,4 +1,5 @@
 import { contours } from 'd3-contour'
+import type { NoteActivitySummary } from '../domain/activity-temperature'
 import type { TerrainElevation, TerrainNote, TerrainPeak, TerrainSnapshot } from '../domain/types'
 import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
 
@@ -18,7 +19,8 @@ export function buildTerrainData(
   gridSize = chooseGridSize(notes.length),
   timeZone = 'Asia/Shanghai',
   bandwidthOverride?: number,
-  elevation: Extract<TerrainElevation, 'density' | 'mastery' | 'exploration' | 'structure'> = 'density',
+  elevation: Extract<TerrainElevation, 'density' | 'mastery' | 'exploration' | 'activity' | 'structure'> = 'density',
+  activityByNote?: ReadonlyMap<string, Pick<NoteActivitySummary, 'score'>>,
 ): TerrainData {
   if (notes.length === 0) {
     return {
@@ -53,7 +55,11 @@ export function buildTerrainData(
       splat(densityImpulses, gridSize, note.x, note.y, note.weight)
       if (!numeratorImpulses || !evidenceImpulses) continue
       if (elevation === 'structure') continue
-      const value = elevation === 'mastery' ? note.mastery : note.exploration
+      const value = elevation === 'mastery'
+        ? note.mastery
+        : elevation === 'exploration'
+          ? note.exploration
+          : activityByNote?.get(note.id)?.score
       if (value === undefined) continue
       const confidence = elevation === 'mastery' ? note.confidence ?? 0.5 : 1
       splat(numeratorImpulses, gridSize, note.x, note.y, note.weight * confidence * value)

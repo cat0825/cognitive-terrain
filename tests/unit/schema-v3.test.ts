@@ -53,6 +53,10 @@ function migrationFixture(): TerrainProject {
     noteNeighbors: [[], []],
     cognitiveStates: [],
     interactionEvents: [],
+    taxonomyNodes: undefined,
+    taxonomyVersion: undefined,
+    referenceAtlases: undefined,
+    activeReferenceAtlasId: undefined,
   }
 }
 

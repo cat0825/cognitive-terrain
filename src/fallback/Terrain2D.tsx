@@ -227,7 +227,7 @@ function noteColor(
 ): string {
   if (dimension === 'mastery') return colorRamp(note.mastery, '#665f7a', '#d7f0df')
   if (dimension === 'exploration') return colorRamp(note.exploration, '#647078', '#e3aa66')
-  if (dimension === 'temperature') return temperatureColor(activityByNote.get(note.id)?.score ?? 0)
+  if (dimension === 'activity' || dimension === 'temperature') return temperatureColor(activityByNote.get(note.id)?.score ?? 0)
   if (dimension === 'structure') return colorRamp(structureByNote.get(note.id), '#3b82a0', '#e5a84b')
   if (dimension === 'area') {
     const area = primaryAreaForNote(note)
@@ -245,7 +245,7 @@ function noteOpacity(
 ): number {
   if (dimension === 'mastery') return 0.3 + (note.mastery ?? 0.5) * 0.7
   if (dimension === 'exploration') return 0.38 + (note.exploration ?? 0.5) * 0.62
-  if (dimension === 'temperature') return 0.32 + (activityByNote.get(note.id)?.score ?? 0) * 0.68
+  if (dimension === 'activity' || dimension === 'temperature') return 0.32 + (activityByNote.get(note.id)?.score ?? 0) * 0.68
   if (dimension === 'structure') return structureByNote.has(note.id) ? 0.92 : 0.28
   return 0.36 + height * 0.4
 }

@@ -1,8 +1,9 @@
 import { z } from 'zod'
+import { buildProjectReferenceGapReport, type ReferenceGapReport } from '../domain/reference-gaps'
 import type { TerrainProject, TerrainSnapshot } from '../domain/types'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
 import { migrateProject } from '../storage/db'
-import { renderShareCard } from './share-card'
+import { drawReferenceGapSummary, renderShareCard } from './share-card'
 
 const prerequisiteDeclarationSchema = z.object({
   target: z.string(),
@@ -239,6 +240,7 @@ const projectBundleSchema = z.object({
     updatedAt: z.string(),
   })).optional(),
   taxonomyVersion: z.number().int().nonnegative().optional(),
+  activeReferenceAtlasId: z.string().optional(),
   referenceAtlases: z.array(z.object({
     id: z.string(),
     workspaceId: z.string(),
@@ -290,11 +292,13 @@ export async function exportTerrainPng(
   root: HTMLElement,
   project: TerrainProject,
   snapshot?: TerrainSnapshot,
+  referenceGapReport?: ReferenceGapReport,
 ): Promise<void> {
+  const exportGapReport = referenceGapReportForExport(project, referenceGapReport)
   const sourceCanvas = root.querySelector('canvas')
   if (sourceCanvas) {
     sourceCanvas.dispatchEvent(new Event(TERRAIN_PREPARE_EXPORT_EVENT))
-    const blob = await renderShareCard({ sourceCanvas, project, snapshot })
+    const blob = await renderShareCard({ sourceCanvas, project, snapshot, referenceGapReport: exportGapReport })
     await exportBlobPng(blob, project.name)
     return
   }
@@ -311,7 +315,16 @@ export async function exportTerrainPng(
   context.fillRect(0, 0, canvas.width, canvas.height)
   const image = await loadSvgImage(svg)
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  drawReferenceGapSummary(context, project, exportGapReport)
   await exportCanvasPng(canvas, project.name)
+}
+
+export function referenceGapReportForExport(
+  project: TerrainProject,
+  report?: ReferenceGapReport,
+  evaluatedAt: string | number | Date = Date.now(),
+): ReferenceGapReport {
+  return report ?? buildProjectReferenceGapReport(project, project.activeReferenceAtlasId ?? '', evaluatedAt)
 }
 
 async function exportBlobPng(blob: Blob, projectName: string): Promise<void> {
@@ -359,6 +372,7 @@ export async function buildProjectReport(project: TerrainProject): Promise<strin
   const maintenance = [...project.notes].sort(maintenancePriority).slice(0, 8)
   lines.push(`- 待维护建议：${maintenance.length}`, '')
   lines.push(`- 时间层：${project.snapshots.length}`, '')
+  appendTerrainSemantics(lines, project)
   lines.push('## 主题峰值', '')
   const sortedPeaks = [...project.peaks].sort((a, b) => b.height - a.height)
   for (const peak of sortedPeaks) {
@@ -383,6 +397,21 @@ export async function buildProjectReport(project: TerrainProject): Promise<strin
   }
   lines.push('')
   return lines.join('\n')
+}
+
+function appendTerrainSemantics(lines: string[], project: TerrainProject): void {
+  lines.push('## 地形语义', '')
+  lines.push('- 活动海拔（activity-elevation-v1）：仅将近期打开、编辑和复习事件的衰减聚合映射到高度；不代表熟练度、学习进度或知识缺口。')
+  lines.push('- 温度：仅将同类近期事件的衰减热度编码为颜色；不改变海拔或语义平面坐标。')
+  lines.push('- 熟练度：来自显式 mastery 认知状态；学习进度是独立的跨时间概念，本报告不从活动海拔、温度或单次 mastery 推断。')
+  const activeAtlas = project.referenceAtlases?.find((atlas) => atlas.id === project.activeReferenceAtlasId)
+  if (activeAtlas) {
+    lines.push(`- Active reference atlas：${activeAtlas.label}（taxonomy v${activeAtlas.taxonomyVersion}）`)
+    lines.push(`- 海洋/缺口（reference-gap-v1）：enabled；仅表示当前项目相对「${activeAtlas.label}」预期 taxonomy nodes 的覆盖差距，不表示用户能力，且不由低活动推断。`)
+  } else {
+    lines.push('- 海洋/缺口（reference-gap-v1）：disabled；未选择有效的 active reference atlas，不生成知识或技能缺口声明；低活动不等于缺口。')
+  }
+  lines.push('')
 }
 
 function maintenancePriority(a: TerrainProject['notes'][number], b: TerrainProject['notes'][number]): number {

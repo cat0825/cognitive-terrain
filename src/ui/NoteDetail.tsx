@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, FilePenLine, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
-import type { TerrainNote, TerrainProject } from '../domain/types'
+import { calculateActivityElevation } from '../domain/activity-elevation'
+import type { InteractionEventType, TerrainNote, TerrainProject } from '../domain/types'
 import { buildActivitySummaries, temperatureColor } from '../domain/activity-temperature'
 import { aggregateActivityHistoryCounts } from '../domain/activity-history'
 import {
@@ -21,6 +22,8 @@ import {
 import { obsidianUri } from '../import/obsidian-uri'
 import { useAppStore } from '../store/app-store'
 import { ActivityHistory, type ActivityHistoryBucket } from './ActivityHistory'
+
+const ReferenceGapSection = lazy(async () => import('./ReferenceGapSection').then((module) => ({ default: module.ReferenceGapSection })))
 
 interface NoteDetailProps {
   project: TerrainProject
@@ -183,9 +186,22 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
   const semanticCandidates = semanticLinkCandidates(project.notes, note.id, 3)
   const pendingWriteback = vaultWritebackCandidates(project, note.id)
   const noteAreas = areasForNote(note)
+  const activityEvaluatedAt = useMemo(
+    () => evaluationTimeForProject(project.updatedAt),
+    [project.updatedAt],
+  )
   const activity = useMemo(
-    () => buildActivitySummaries([note], project.interactionEvents, Date.now(), project.activityHistory?.aggregates).get(note.id),
-    [note, project.activityHistory?.aggregates, project.interactionEvents],
+    () => buildActivitySummaries([note], project.interactionEvents, activityEvaluatedAt, project.activityHistory?.aggregates).get(note.id),
+    [activityEvaluatedAt, note, project.activityHistory?.aggregates, project.interactionEvents],
+  )
+  const activityElevation = useMemo(
+    () => calculateActivityElevation({
+      itemId: note.id,
+      events: project.interactionEvents,
+      aggregates: project.activityHistory?.aggregates,
+      evaluatedAt: activityEvaluatedAt,
+    }),
+    [activityEvaluatedAt, note.id, project.activityHistory?.aggregates, project.interactionEvents],
   )
   const activityHistory = useMemo(() => {
     const state = project.activityHistory ?? {
@@ -304,6 +320,20 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
           <div><span>知识温度</span><strong style={{ color: temperatureColor(activity?.score ?? 0) }}>{Math.round((activity?.score ?? 0) * 100)}%</strong></div>
           <small>打开 {activity?.openedCount ?? 0} · 编辑 {activity?.editedCount ?? 0} · 复习 {activity?.reviewedCount ?? 0}</small>
           <small>{activity?.lastActivityAt ? `最近活动：${relativeActivityTime(activity.lastActivityAt)}` : '尚无活动记录'}</small>
+          <small>海拔 {Math.round(activityElevation.elevation * 100)}% · {activityElevation.historyState === 'missing' ? '无历史' : activityElevation.historyState === 'sparse' ? '历史稀疏' : activityElevation.historyState === 'stale' ? '历史过期' : '历史活跃'} · {activityElevation.formulaVersion}</small>
+          <details className="activity-elevation-evidence">
+            <summary>查看活动海拔证据</summary>
+            <div>
+              <small>评估于 {formatDate(activityElevation.evaluatedAt)} · raw heat {activityElevation.rawHeat.toFixed(3)}</small>
+              <small>输入：原始事件 {activityElevation.validEventCount} · 聚合记录 {activityElevation.validAggregateCount} · 聚合事件 {activityElevation.aggregateEventCount}</small>
+              <small>近期：原始事件 {activityElevation.recentEventCount - activityElevation.recentAggregateEventCount} · 聚合事件 {activityElevation.recentAggregateEventCount} · 去重抑制 {activityElevation.suppressedDuplicateEventCount + activityElevation.suppressedDuplicateAggregateCount}</small>
+              {activityElevation.evidence.length > 0 ? activityElevation.evidence.map((evidence) => (
+                <small key={evidence.type}>
+                  {activityTypeLabel(evidence.type)}：{evidence.count} 次 · raw {evidence.rawEventCount} · aggregate {evidence.aggregateEventCount} · heat {evidence.rawHeat.toFixed(3)} · {evidence.provenance.map(provenanceLabel).join('、')}
+                </small>
+              )) : <small>没有可用的原始或聚合证据。</small>}
+            </div>
+          </details>
           <ActivityHistory daily={activityHistory.daily} weekly={activityHistory.weekly} />
         </div>
       </section>
@@ -370,6 +400,7 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
 }
 
 function ProjectOverview({ project, visibleCount }: { project: TerrainProject; visibleCount: number }) {
+  const setReferenceAtlas = useAppStore((state) => state.setReferenceAtlas)
   const timeline = useAppStore((state) => state.timeline)
   const compareRef = useAppStore((state) => state.compareRef)
   const setCompareRef = useAppStore((state) => state.setCompareRef)
@@ -432,6 +463,9 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
           </div>
         )}
       </div>
+      <Suspense fallback={<div className="reference-gap-empty" role="status">正在加载参考图谱缺口</div>}>
+        <ReferenceGapSection project={project} onSelectAtlas={(id) => void setReferenceAtlas(id || undefined)} />
+      </Suspense>
       <div className="peak-index">
         {project.peaks.slice(0, 6).map((peak) => (
           <div key={peak.id}>
@@ -519,6 +553,22 @@ function relativeActivityTime(value: string): string {
   if (hours < 24) return `${hours} 小时前`
   const days = Math.floor(hours / 24)
   return days < 30 ? `${days} 天前` : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value))
+}
+
+function evaluationTimeForProject(updatedAt: string): number {
+  const projectTime = Date.parse(updatedAt)
+  return Number.isFinite(projectTime) ? Math.max(Date.now(), projectTime) : Date.now()
+}
+
+function activityTypeLabel(type: InteractionEventType): string {
+  if (type === 'opened') return '打开'
+  if (type === 'edited') return '编辑'
+  if (type === 'reviewed') return '复习'
+  return type
+}
+
+function provenanceLabel(provenance: 'raw-event' | 'retained-aggregate'): string {
+  return provenance === 'raw-event' ? '原始事件' : '保留聚合'
 }
 
 async function copyWikiLink(title: string, reportError: (message: string) => void): Promise<boolean> {

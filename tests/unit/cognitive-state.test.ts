@@ -7,6 +7,17 @@ describe('cognitive state events', () => {
   it('commits a reanalysis without changing project identity or losing event history', () => {
     const base = createProjectFixture('stable-project-id')
     base.activeTerrainProfileId = 'mastery'
+    const referenceAtlas = {
+      id: 'atlas-engineering-v1',
+      workspaceId: base.id,
+      label: 'Engineering reference',
+      taxonomyVersion: 1,
+      taxonomyNodeIds: ['taxonomy:engineering'],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    base.referenceAtlases = [referenceAtlas]
+    base.activeReferenceAtlasId = referenceAtlas.id
     const previous = createInteractionEvent('note-a', 'opened', '2026-08-14T01:00:00.000Z')
     base.interactionEvents = [previous]
     const analyzed = createProjectFixture('new-analysis-id')
@@ -21,6 +32,27 @@ describe('cognitive state events', () => {
     expect(committed.updatedAt).toBe('2026-08-14T02:00:00.000Z')
     expect(committed.activeTerrainProfileId).toBe('mastery')
     expect(committed.interactionEvents).toEqual([previous, edited])
+    expect(committed.referenceAtlases).toEqual([referenceAtlas])
+    expect(committed.activeReferenceAtlasId).toBe(referenceAtlas.id)
+  })
+
+  it('clears a dangling active reference atlas during reanalysis', () => {
+    const base = createProjectFixture('stable-project-id')
+    base.referenceAtlases = [{
+      id: 'atlas-engineering-v1',
+      workspaceId: base.id,
+      label: 'Engineering reference',
+      taxonomyVersion: 1,
+      taxonomyNodeIds: ['taxonomy:engineering'],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }]
+    base.activeReferenceAtlasId = 'atlas-missing'
+
+    const committed = commitAnalyzedProject(createProjectFixture('new-analysis-id'), base)
+
+    expect(committed.referenceAtlases).toEqual(base.referenceAtlases)
+    expect(committed.activeReferenceAtlasId).toBeUndefined()
   })
 
   it('derives temperature from weighted recent opens, edits, and reviews', () => {

@@ -3,10 +3,10 @@ import path from 'node:path'
 
 const distDir = path.resolve('dist/assets')
 const budget = {
-  // Issues #24 and #25 add lazy write-back plus shared prerequisite-strata UI.
+  // Integrated activity, atlas-gap, write-back, and prerequisite-strata UI.
   main: 360 * 1024,
-  totalJs: 2260 * 1024,
-  css: 40 * 1024,
+  totalJs: 2290 * 1024,
+  css: 43 * 1024,
 }
 
 const entries = await readdir(distDir)

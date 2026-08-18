@@ -7,7 +7,8 @@
 - 3D 地形与 2D 等高线双视图，WebGL 不可用时自动降级。
 - 按月份回放知识积累过程，时间快照为累计数据。
 - 搜索、标签筛选、峰值标签与笔记详情联动。
-- 六种地形口径：密度、熟练度、探索度、基础层级、活动温度和领域；温度按打开、编辑、复习事件随时间衰减，不改变稳定坐标。
+- 七种可视化口径：密度、熟练度、探索度、近期活跃海拔、基础层级、活动温度和领域。近期活跃海拔（`activity-elevation-v1`）只把近期打开、编辑和复习事件的衰减聚合映射到高度；温度只把同类活动热度编码为颜色，并保持知识密度海拔。二者都不改变稳定语义平面坐标，也不代表熟练度或学习进度。
+- 熟练度来自显式 `mastery` 认知状态；学习进度是独立的跨时间概念，不能由近期活跃海拔、温度或单次熟练度推断。
 - Obsidian `area` / `areas` 多领域归属与 WikiLink 关系可生成知识板块、跨域山脊和可解释碰撞带。方向只来自已解析的 source → target WikiLink；至少 2 组唯一笔记关系且正反向计数置信度达到 60% 才显示箭头，低样本或混合方向保持无向。
 - Obsidian `prerequisites` / `buildsOn` 显式前置关系可生成基础层级地形：基础笔记位于低层，后代随 DAG 深度升高；关系 ID、声明来源、跨领域多父节点和诊断均保留，循环、自指、歧义与未解析目标不会参与结构海拔。
 - 领域维护使用版本化 taxonomy node：稳定 ID 与显示名称分离，支持父子层级、Unicode/空白/大小写归一化别名、创建、重命名、重挂和合并预览；每次确认前创建恢复点。导入时同时保留原始声明标签与解析后的 node ID，未分类和未解析标签进入维护队列。
@@ -19,8 +20,10 @@
 - Obsidian vault 支持本地增量同步：重新选择同一目录后预览新增、修改、重命名、移除和字段冲突；确认前创建恢复点，未变化文件不会重新解析。写回认知字段或逐条接受的 WikiLink 时会单独请求目录读写权限并展示 exact diff，不上传文件或静默修改 Markdown。
 - 导入/导出 `.terrain.json` 完整项目包，导出当前地图为 PNG，导出 Markdown 复盘报告。
 - 项目自动保存到 IndexedDB，支持增量合并新笔记；覆盖、改名、删除和恢复前会自动创建本地恢复点，每个项目最多保留 8 份。
-- IndexedDB v7 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、布局和 revision，并为本地 vault 授权预留独立 binding store；不同项目通过复合键隔离。目录句柄不会进入项目导出或恢复点。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
+- IndexedDB v8 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、探索活动、前置关系拓扑、布局、revision 与 vault writeback recovery；不同项目通过复合键隔离。目录句柄保存在独立 binding store，不进入项目导出或恢复点。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
+- 海洋/知识缺口（`reference-gap-v1`）只表示当前项目相对显式选中的 active reference atlas 的 taxonomy 覆盖差距。未选择有效 atlas 时该计算为 disabled，不输出用户知识或技能缺口声明；低活动不等于缺口。
 - 活动历史按 retention policy v1 有界保存：打开/编辑/复习原始事件分别保留 30/180/365 天，每条笔记每类最多 500 条；180 天内可按日查看，最长 730 天按周聚合。项目 `timeZone` 决定日历边界，非法时间戳会被忽略。聚合保留每类事件的计数、首末时间和衰减热度；笔记自身的 `reviewedAt` 不参与裁剪，因此迁移不会丢失最近复习时间。超过 730 天的活动不再出现在历史或温度计算中，也不承诺作为审计档案。
+- `activity-elevation-v1` 使用打开（weight 1，半衰期 7 天）、编辑（3，30 天）、复习（2.5，14 天）的指数衰减；`score = 1 - exp(-rawHeat / 3)`。同一事件 ID 去重，打开事件在 60 秒内只计一次；保留聚合以其首末时间、计数和 compaction heat 参与计算，raw/aggregate provenance 在详情证据中分开显示。非法、未来或不支持的输入会被忽略，评估时间固定后结果确定。
 - 分析在 Web Worker 中运行，支持取消，不阻塞主界面。
 - 工具菜单提供“加载今日学习”，内置从 X `@MeowTsutaki1` 可见转帖整理的学习笔记（2026-08-03）；也可导入 `public/imports/x-reposts-2026-08-03.json`。
 

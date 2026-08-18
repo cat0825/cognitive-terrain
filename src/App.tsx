@@ -3,17 +3,18 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { visibleNotesFor } from './domain/project-view'
 import { buildPlateCollisions } from './domain/knowledge-plates'
+import { buildProjectReferenceGapReport } from './domain/reference-gaps'
 import { vaultWritebackCandidates, type VaultWritebackCandidate } from './domain/vault-writeback-candidates'
-import { downloadProjectBundle, downloadProjectReport, exportTerrainPng } from './export/project-files'
 import { TerrainCanvas } from './scene/TerrainCanvas'
 import { useAppStore } from './store/app-store'
 import { CameraRail } from './ui/CameraRail'
 import { FilterPanel } from './ui/FilterPanel'
-import { ImportPanel } from './ui/ImportPanel'
 import { NoteDetail } from './ui/NoteDetail'
+import { ReferenceGapMapOverlay } from './ui/ReferenceGapMapOverlay'
 import { Timeline } from './ui/Timeline'
 import { TopBar } from './ui/TopBar'
 
+const ImportPanel = lazy(async () => import('./ui/ImportPanel').then((module) => ({ default: module.ImportPanel })))
 const VaultSyncPanel = lazy(() => import('./ui/VaultSyncPanel'))
 const VaultWritebackPanel = lazy(() => import('./ui/VaultWritebackPanel'))
 
@@ -73,9 +74,15 @@ function App() {
   const activeCollision = collisions.find((collision) => collision.id === activeCollisionId)
   const progressValue = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
   const [analysisToast, setAnalysisToast] = useState<typeof lastAnalysis>(null)
+  const [gapEvaluatedAt] = useState(() => Date.now())
   const [syncOpen, setSyncOpen] = useState(false)
   const [writebackCandidates, setWritebackCandidates] = useState<VaultWritebackCandidate[] | null>(null)
   const toastTimer = useRef<number | null>(null)
+  const referenceGapReport = useMemo(
+    () => buildProjectReferenceGapReport(project, project.activeReferenceAtlasId ?? '', gapEvaluatedAt),
+    [gapEvaluatedAt, project],
+  )
+  const activeReferenceAtlas = project.referenceAtlases?.find((atlas) => atlas.id === referenceGapReport.referenceAtlasId)
 
   useEffect(() => {
     if (!lastAnalysis) return
@@ -91,11 +98,30 @@ function App() {
     const root = document.getElementById('terrain-export-source')
     if (!root) return
     try {
+      const { exportTerrainPng } = await import('./export/project-files')
       const index = Math.min(timelineBucket, project.snapshots.length - 1)
       const snapshot = project.snapshots[index]
-      await exportTerrainPng(root, project, snapshot)
+      await exportTerrainPng(root, project, snapshot, referenceGapReport)
     } catch (exportError) {
       reportError(exportError instanceof Error ? exportError.message : '导出 PNG 失败')
+    }
+  }
+
+  const exportProject = async () => {
+    try {
+      const { downloadProjectBundle } = await import('./export/project-files')
+      downloadProjectBundle(project)
+    } catch (exportError) {
+      reportError(exportError instanceof Error ? exportError.message : '导出项目失败')
+    }
+  }
+
+  const exportReport = async () => {
+    try {
+      const { downloadProjectReport } = await import('./export/project-files')
+      await downloadProjectReport(project)
+    } catch (exportError) {
+      reportError(exportError instanceof Error ? exportError.message : '导出报告失败')
     }
   }
 
@@ -107,9 +133,9 @@ function App() {
           onSync={() => setSyncOpen(true)}
           onWriteback={() => setWritebackCandidates(vaultWritebackCandidates(project))}
           onLoadStudyPack={() => void loadStudyPack()}
-          onExportProject={() => downloadProjectBundle(project)}
+          onExportProject={() => void exportProject()}
           onExportImage={() => void exportImage()}
-          onExportReport={() => void downloadProjectReport(project)}
+          onExportReport={() => void exportReport()}
         />
         <main className="terrain-workspace">
           <section
@@ -130,6 +156,9 @@ function App() {
               cameraScale={cameraScale}
               onSelectNote={selectNote}
             />
+            {activeReferenceAtlas && (
+              <ReferenceGapMapOverlay atlasLabel={activeReferenceAtlas.label} report={referenceGapReport} />
+            )}
             <NoteDetail
               project={project}
               note={selectedNote}
@@ -143,7 +172,9 @@ function App() {
           </section>
         </main>
 
-        <ImportPanel />
+        <Suspense fallback={null}>
+          <ImportPanel />
+        </Suspense>
         {syncOpen && (
           <Suspense fallback={<div className="processing-overlay" role="status">正在加载 vault 同步</div>}>
             <VaultSyncPanel open onClose={() => setSyncOpen(false)} />

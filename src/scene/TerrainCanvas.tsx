@@ -36,9 +36,13 @@ export const TerrainCanvas = memo(function TerrainCanvas({
   const [webglReady, setWebglReady] = useState(false)
   const focusRequest = useAppStore((state) => state.focusRequest)
   const activePeakId = useAppStore((state) => state.activePeakId)
+  const activityNowMs = useMemo(
+    () => evaluationTimeForProject(project.updatedAt),
+    [project.updatedAt],
+  )
   const activityByNote = useMemo(
-    () => buildActivitySummaries(project.notes, project.interactionEvents, Date.now(), project.activityHistory?.aggregates),
-    [project.activityHistory?.aggregates, project.interactionEvents, project.notes],
+    () => buildActivitySummaries(project.notes, project.interactionEvents, activityNowMs, project.activityHistory?.aggregates),
+    [activityNowMs, project.activityHistory?.aggregates, project.interactionEvents, project.notes],
   )
   const [profileTerrain, setProfileTerrain] = useState<Pick<TerrainProject, 'snapshots' | 'peaks'> | null>(null)
   const profileId = profileIdForVisualDimension(visualDimension)
@@ -47,7 +51,8 @@ export const TerrainCanvas = memo(function TerrainCanvas({
       setProfileTerrain(null)
       return
     }
-    const cached = profileTerrainCache.get(project.notes)?.get(profileId)
+    const cacheKey = `${profileId}:${project.interactionEvents.length}:${project.activityHistory?.aggregates.length ?? 0}:${activityNowMs}`
+    const cached = profileTerrainCache.get(project.notes)?.get(cacheKey)
     if (cached) {
       setProfileTerrain(cached)
       return
@@ -56,9 +61,14 @@ export const TerrainCanvas = memo(function TerrainCanvas({
     const handle = runTerrainProfile({
       type: 'build-terrain-profile',
       notes: project.notes,
+      interactionEvents: project.interactionEvents,
+      activityAggregates: project.activityHistory?.aggregates,
       gridSize: project.gridSize,
       timeZone: project.timeZone,
-      elevation: profileId === 'mastery' || profileId === 'structure' ? profileId : 'exploration',
+      nowMs: activityNowMs,
+      elevation: profileId === 'mastery' || profileId === 'activity' || profileId === 'structure'
+        ? profileId
+        : 'exploration',
     })
     let active = true
     void handle.promise.then((terrain) => {
@@ -69,7 +79,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
         projectCache = new Map()
         profileTerrainCache.set(project.notes, projectCache)
       }
-      projectCache.set(profileId, result)
+      projectCache.set(cacheKey, result)
       setProfileTerrain(result)
     }).catch((error) => {
       if (!active) return
@@ -82,7 +92,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
       active = false
       handle.cancel()
     }
-  }, [profileId, project.gridSize, project.notes, project.timeZone])
+  }, [activityNowMs, profileId, project.activityHistory?.aggregates, project.gridSize, project.interactionEvents, project.notes, project.timeZone])
   const terrainProject = useMemo(
     () => profileTerrain && profileId !== 'density'
       ? { ...project, ...profileTerrain, activeTerrainProfileId: profileId }
@@ -179,4 +189,9 @@ function supportsWebgl(): boolean {
     webglSupport = false
   }
   return webglSupport
+}
+
+function evaluationTimeForProject(updatedAt: string): number {
+  const projectTime = Date.parse(updatedAt)
+  return Number.isFinite(projectTime) ? Math.max(Date.now(), projectTime) : Date.now()
 }

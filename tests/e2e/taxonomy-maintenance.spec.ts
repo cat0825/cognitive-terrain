@@ -16,7 +16,7 @@ test('previews and applies a recoverable taxonomy rename with a stable node id',
   await page.getByRole('button', { name: '打开地图筛选' }).click()
   const panel = page.getByRole('complementary', { name: '地图筛选' })
   const maintenance = panel.getByRole('region', { name: '领域维护' })
-  await expect(maintenance).toContainText('v1 · 7 个节点')
+  await expect(maintenance).toContainText('v1 · 8 个节点')
   await expect(maintenance).toContainText('暂无未解析标签')
 
   const nodeSelect = maintenance.getByLabel('重命名节点')
@@ -29,7 +29,7 @@ test('previews and applies a recoverable taxonomy rename with a stable node id',
   await expect(preview).toContainText('影响 60 条笔记、1 个节点')
   await preview.getByRole('button', { name: '确认操作' }).click()
 
-  await expect(maintenance).toContainText('v2 · 7 个节点', { timeout: 30_000 })
+  await expect(maintenance).toContainText('v2 · 8 个节点', { timeout: 30_000 })
   await expect(maintenance).toContainText('重命名完成', { timeout: 30_000 })
   await nodeSelect.selectOption({ label: 'Agent 平台' })
   await expect(nodeSelect).toHaveValue(nodeId)

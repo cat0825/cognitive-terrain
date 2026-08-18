@@ -95,7 +95,12 @@ export function layoutPeakLabels(
   const ordered = [...candidates].sort(compareCandidates)
   for (const candidate of ordered) {
     const fallback = { id: candidate.id, x: candidate.anchorX, y: candidate.anchorY, visible: false }
-    if (!candidate.depthVisible || !isAnchorNearViewport(candidate, viewportWidth, viewportHeight, offscreenTolerance)) {
+    if (
+      !candidate.depthVisible
+      || candidate.width <= 0
+      || candidate.height <= 0
+      || !isAnchorNearViewport(candidate, viewportWidth, viewportHeight, offscreenTolerance)
+    ) {
       placements.set(candidate.id, fallback)
       continue
     }

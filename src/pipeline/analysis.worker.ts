@@ -1,6 +1,7 @@
 import type { AnalysisWorkerRequest, AnalysisWorkerResponse } from './worker-protocol'
 import { analyzeNotes } from './run-pipeline'
 import { buildTerrainData } from './terrain'
+import { calculateActivityElevation } from '../domain/activity-elevation'
 
 const cancelled = new Set<string>()
 
@@ -45,6 +46,17 @@ async function runTerrainProfile(
       request.timeZone,
       undefined,
       request.elevation,
+      request.elevation === 'activity'
+        ? new Map(request.notes.map((note) => [
+          note.id,
+          calculateActivityElevation({
+            itemId: note.id,
+            events: request.interactionEvents,
+            aggregates: request.activityAggregates,
+            evaluatedAt: request.nowMs,
+          }),
+        ]))
+        : undefined,
     )
     if (cancelled.has(request.requestId)) return
     const transfer = terrain.snapshots.map((snapshot) => snapshot.values.buffer)

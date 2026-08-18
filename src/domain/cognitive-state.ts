@@ -3,9 +3,20 @@ import type {
   CognitiveStateProvenance,
   InteractionEvent,
   InteractionEventType,
+  ReferenceAtlasManifest,
   TerrainNote,
   TerrainProject,
 } from './types'
+
+export function normalizeActiveReferenceAtlasId(
+  referenceAtlases: readonly ReferenceAtlasManifest[] | undefined,
+  activeReferenceAtlasId: string | undefined,
+): string | undefined {
+  if (!activeReferenceAtlasId) return undefined
+  return referenceAtlases?.some((manifest) => manifest.id === activeReferenceAtlasId)
+    ? activeReferenceAtlasId
+    : undefined
+}
 
 export function cognitiveStateFromNote(
   note: TerrainNote,
@@ -72,6 +83,10 @@ export function commitAnalyzedProject(
     taxonomyNodes: baseProject.taxonomyNodes,
     taxonomyVersion: baseProject.taxonomyVersion,
     referenceAtlases: baseProject.referenceAtlases,
+    activeReferenceAtlasId: normalizeActiveReferenceAtlasId(
+      baseProject.referenceAtlases,
+      baseProject.activeReferenceAtlasId,
+    ),
     vaultSync: baseProject.vaultSync,
   }
 }
