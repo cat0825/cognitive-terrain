@@ -72,6 +72,38 @@ describe('cognitive state events', () => {
     expect(committed.activeReferenceAtlasId).toBeUndefined()
   })
 
+  it('keeps cognitive-state evidence time stable unless the evidence changes', () => {
+    const base = createProjectFixture('stable-project-id')
+    base.cognitiveStates = [{
+      itemId: 'unchanged',
+      mastery: 0.4,
+      status: 'gap',
+      provenance: 'yaml',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    }, {
+      itemId: 'changed',
+      confidence: 0.3,
+      provenance: 'yaml',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    }]
+    const analyzed = createProjectFixture('new-analysis-id')
+    analyzed.cognitiveStates = [{
+      ...base.cognitiveStates[0],
+      updatedAt: '2026-08-18T00:00:00.000Z',
+    }, {
+      ...base.cognitiveStates[1],
+      confidence: 0.7,
+      updatedAt: '2026-08-18T00:00:00.000Z',
+    }]
+
+    const committed = commitAnalyzedProject(analyzed, base)
+
+    expect(committed.cognitiveStates).toEqual([
+      base.cognitiveStates[0],
+      analyzed.cognitiveStates[1],
+    ])
+  })
+
   it('derives temperature from weighted recent opens, edits, and reviews', () => {
     const now = Date.parse('2026-08-15T00:00:00.000Z')
     const notes = [{ id: 'hot' }, { id: 'cold' }]

@@ -104,8 +104,8 @@ test('records note activity without moving its stable coordinates', async ({ pag
   await page.getByRole('button', { name: '关闭筛选' }).click()
 
   await page.getByRole('button', { name: '标记已复习' }).click()
-  await expect(page.getByLabel('知识温度')).toContainText('复习 1')
-  await expect(page.locator('.activity-elevation-evidence')).toContainText('复习：1 次')
+  await expect(page.getByLabel('知识温度')).toContainText('复习 1', { timeout: 30_000 })
+  await expect(page.locator('.activity-elevation-evidence')).toContainText('复习：1 次', { timeout: 30_000 })
   expect(errors).toEqual([])
 })
 

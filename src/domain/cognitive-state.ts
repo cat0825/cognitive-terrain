@@ -77,6 +77,7 @@ export function commitAnalyzedProject(
     createdAt: baseProject.createdAt,
     updatedAt,
     interactionEvents: [...baseProject.interactionEvents, ...events],
+    cognitiveStates: mergeCognitiveStates(baseProject.cognitiveStates, analyzedProject.cognitiveStates),
     cognitiveObservations: mergeCognitiveObservations(
       baseProject.cognitiveObservations,
       analyzedProject.cognitiveObservations,
@@ -95,6 +96,31 @@ export function commitAnalyzedProject(
     explorationItems: baseProject.explorationItems,
     vaultSync: baseProject.vaultSync,
   }
+}
+
+function mergeCognitiveStates(
+  base: TerrainProject['cognitiveStates'],
+  analyzed: TerrainProject['cognitiveStates'],
+): TerrainProject['cognitiveStates'] {
+  const previousByItem = new Map(base.map((state) => [state.itemId, state]))
+  return analyzed.map((state) => {
+    const previous = previousByItem.get(state.itemId)
+    return previous && sameCognitiveStateEvidence(previous, state)
+      ? { ...state, updatedAt: previous.updatedAt }
+      : state
+  })
+}
+
+function sameCognitiveStateEvidence(
+  left: TerrainProject['cognitiveStates'][number],
+  right: TerrainProject['cognitiveStates'][number],
+): boolean {
+  return left.mastery === right.mastery
+    && left.confidence === right.confidence
+    && left.exploration === right.exploration
+    && left.status === right.status
+    && left.reviewedAt === right.reviewedAt
+    && left.provenance === right.provenance
 }
 
 function mergeCognitiveObservations(

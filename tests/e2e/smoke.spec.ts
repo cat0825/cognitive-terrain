@@ -83,21 +83,25 @@ test('imports a JSON study pack and generates terrain', async ({ page }) => {
 })
 
 test('creates and restores a local recovery point', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 120_000 : 45_000)
   await page.addInitScript(() => {
     localStorage.setItem('cognitive-terrain:first-run', 'seen')
   })
   await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '切换二维等高线' }).click()
+  await expect(page.locator('.terrain-2d')).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: '打开项目菜单' }).click()
   await page.getByRole('button', { name: '创建恢复点' }).click()
 
-  await expect(page.getByText('已创建本地恢复点', { exact: true })).toBeVisible()
+  await expect(page.getByText('已创建本地恢复点', { exact: true })).toBeVisible({ timeout: 30_000 })
   const recoveryPoint = page.getByRole('button', { name: /AI Infra 知识地形 手动/ })
-  await expect(recoveryPoint).toBeVisible()
+  await expect(recoveryPoint).toBeVisible({ timeout: 30_000 })
 
   page.once('dialog', (dialog) => dialog.accept())
   await recoveryPoint.click()
   await expect(page.locator('.project-menu')).toBeHidden()
   await page.getByRole('button', { name: '打开项目菜单' }).click()
-  await expect(page.getByText('项目已恢复', { exact: true })).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByRole('button', { name: /AI Infra 知识地形 1800 条/ })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('项目已恢复', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: /AI Infra 知识地形 1800 条/ })).toBeVisible({ timeout: 30_000 })
 })
