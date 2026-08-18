@@ -65,6 +65,18 @@ describe('knowledge plates', () => {
     expect(bridges).toEqual([])
   })
 
+  it('does not invent a bridge or wikilink reason for an ambiguous title', () => {
+    const notes = [
+      note('origin', 'Origin', '数学', { links: ['Shared'] }),
+      note('first', 'Shared', '物理', { sourcePath: 'first/Shared.md' }),
+      note('second', 'Shared', '历史', { sourcePath: 'second/Shared.md' }),
+    ]
+
+    expect(buildPlateBridges(notes)).toEqual([])
+    expect(similarityReasons(notes, 'origin', 'first').map((reason) => reason.kind)).not.toContain('wikilink')
+    expect(similarityReasons(notes, 'origin', 'second').map((reason) => reason.kind)).not.toContain('wikilink')
+  })
+
   it('does not classify a WikiLink as cross-plate when notes share any membership', () => {
     const notes = [
       note('quantum', 'Quantum', '数学', { areas: ['数学', '物理'], links: ['Mechanics'] }),

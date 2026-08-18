@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoProject } from '../../src/domain/demo'
 import { plateIdForArea } from '../../src/domain/knowledge-plates'
+import { materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { DEFAULT_TERRAIN_PROFILES, profileIdForVisualDimension } from '../../src/domain/terrain-profile'
-import type { TerrainProject } from '../../src/domain/types'
+import type { TerrainProject, VaultSyncState } from '../../src/domain/types'
 
 const schemaDemoFixture = createDemoProject()
 
@@ -59,6 +60,58 @@ function migrationFixture(): TerrainProject {
   }
 }
 
+function vaultSyncFor(project: TerrainProject, relativePath: string): VaultSyncState {
+  const note = project.notes[1]
+  return {
+    version: 1,
+    vaults: [{
+      vaultId: 'vault-research',
+      displayName: 'research',
+      accessMode: 'directory-handle',
+      lastScannedAt: '2026-08-17T11:00:00.000Z',
+    }],
+    sources: [{
+      sourceId: 'source-probability-stable',
+      itemId: note.id,
+      vaultId: 'vault-research',
+      relativePath,
+      status: 'present',
+      rawContentHash: 'sha256:probability-v2',
+      entityHash: 'entity:probability-v2',
+      lastModifiedMs: 1_776_422_400_000,
+      size: 128,
+      acceptedFieldHashes: { content: 'field:content-v2' },
+      acceptedNote: {
+        sourceKey: `vault-research:${relativePath}`,
+        title: note.title,
+        content: note.content,
+        createdAt: note.createdAt,
+        tags: [...note.tags],
+        weight: note.weight,
+        areas: [],
+        declaredAreas: [],
+        links: [...note.links],
+      },
+      acceptedAt: '2026-08-17T11:00:00.000Z',
+    }],
+    revisions: [{
+      id: 'revision:vault-sync:probability-v2',
+      sourceId: 'source-probability-stable',
+      itemId: note.id,
+      operation: 'rename',
+      rawContentHash: 'sha256:probability-v2',
+      previousContentHash: 'sha256:probability-v1',
+      fromPath: 'math/probability.md',
+      toPath: relativePath,
+      entityHash: 'entity:probability-v2',
+      acceptedAt: '2026-08-17T11:00:00.000Z',
+      occurredAt: '2026-08-17T10:59:00.000Z',
+      timestampSource: 'file-last-modified',
+      provenance: 'vault-sync',
+    }],
+  }
+}
+
 describe('Schema v3 dry-run migration', () => {
   it('separates facts, cognitive state, relations, and layout without losing item identity', () => {
     const project = migrationFixture()
@@ -101,6 +154,46 @@ describe('Schema v3 dry-run migration', () => {
     expect(bundle.relations).toEqual([
       expect.objectContaining({ fromItemId: 'linear-algebra', toItemId: 'probability', resolved: true }),
       expect.objectContaining({ fromItemId: 'linear-algebra', targetTitle: '尚未创建的主题', resolved: false }),
+    ])
+  })
+
+  it('materializes prerequisite relations separately from WikiLinks with source provenance', () => {
+    const project = migrationFixture()
+    project.notes[1].prerequisites = materializePrerequisites('probability', [{
+      target: '线性代数',
+      provenance: 'yaml',
+      sourceField: 'prerequisites',
+    }])
+
+    const { bundle } = migrateTerrainProjectToV3(project)
+    const relation = bundle.relations.find((candidate) => candidate.kind === 'prerequisite')
+
+    expect(relation).toMatchObject({
+      fromItemId: 'linear-algebra',
+      toItemId: 'probability',
+      sourceNoteId: 'probability',
+      sourceField: 'prerequisites',
+      provenance: 'yaml',
+      resolved: true,
+    })
+    expect(bundle.workspace.prerequisiteTopology?.assignments.find((item) => item.itemId === 'probability'))
+      .toMatchObject({ depth: 1, branchRootIds: ['linear-algebra'] })
+  })
+
+  it('keeps a WikiLink unresolved when its normalized title matches multiple items', () => {
+    const project = migrationFixture()
+    project.notes[0] = { ...project.notes[0], links: ['线性代数'] }
+    project.notes[1] = { ...project.notes[1], title: '  线性代数  ' }
+
+    const { bundle } = migrateTerrainProjectToV3(project)
+
+    expect(bundle.relations).toEqual([
+      expect.objectContaining({
+        fromItemId: project.notes[0].id,
+        targetTitle: '线性代数',
+        toItemId: undefined,
+        resolved: false,
+      }),
     ])
   })
 
@@ -212,6 +305,44 @@ describe('Schema v3 dry-run migration', () => {
     expect(report.sourceCount).toBe(2)
   })
 
+  it('keeps a vault source id stable across rename and materializes raw sync provenance', () => {
+    const project = migrationFixture()
+    project.notes[1] = {
+      ...project.notes[1],
+      sourceId: 'source-probability-stable',
+      sourceKey: 'vault-research:math/probability.md',
+      sourcePath: 'math/probability.md',
+      vault: 'research',
+    }
+    project.vaultSync = vaultSyncFor(project, 'renamed/probability.md')
+
+    const { bundle } = migrateTerrainProjectToV3(project)
+    const source = bundle.sources.find((candidate) => candidate.id === 'source-probability-stable')
+    const revision = bundle.revisions.find((candidate) => candidate.id === 'revision:vault-sync:probability-v2')
+
+    expect(source).toMatchObject({
+      id: 'source-probability-stable',
+      sourcePath: 'renamed/probability.md',
+      contentHash: 'sha256:probability-v2',
+      lastModifiedMs: 1_776_422_400_000,
+      size: 128,
+      provenance: 'vault-sync',
+    })
+    expect(bundle.items.find((item) => item.id === project.notes[1].id)?.sourceIds).toEqual([
+      'source-probability-stable',
+    ])
+    expect(revision).toMatchObject({
+      actorId: 'vault-sync',
+      createdAt: '2026-08-17T10:59:00.000Z',
+      patch: {
+        kind: 'vault-sync',
+        operation: 'rename',
+        timestampSource: 'file-last-modified',
+        provenance: 'vault-sync',
+      },
+    })
+  })
+
   it('rejects duplicate item ids instead of silently overwriting records', () => {
     const project = migrationFixture()
     project.notes[1] = { ...project.notes[1], id: project.notes[0].id }
@@ -252,5 +383,8 @@ describe('terrain profiles', () => {
     ])
     expect(profileIdForVisualDimension('area')).toBe('density')
     expect(profileIdForVisualDimension('temperature')).toBe('density')
+    expect(profileIdForVisualDimension('structure')).toBe('structure')
+    expect(DEFAULT_TERRAIN_PROFILES.find((profile) => profile.id === 'structure')?.formulaVersion)
+      .toBe('explicit-prerequisite-strata-v1')
   })
 })

@@ -3,11 +3,10 @@ import path from 'node:path'
 
 const distDir = path.resolve('dist/assets')
 const budget = {
-  main: 340 * 1024,
-  // Issue #8 adds the persisted exploration domain, workbench, and report
-  // export. Keep startup strict while allowing its measured 31.7 KiB delta.
-  totalJs: 2220 * 1024,
-  css: 40 * 1024,
+  // Integrated activity, atlas-gap, exploration, write-back, and prerequisite-strata UI.
+  main: 360 * 1024,
+  totalJs: 2330 * 1024,
+  css: 47 * 1024,
 }
 
 const entries = await readdir(distDir)

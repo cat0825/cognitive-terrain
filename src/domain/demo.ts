@@ -1,4 +1,5 @@
 import type { TerrainNote, TerrainProject } from './types'
+import { buildPrerequisiteTopology } from './prerequisite-topology'
 import { buildTerrainData } from '../pipeline/terrain'
 import { computeNeighbors } from '../pipeline/neighbors'
 import { cognitiveStateFromNote } from './cognitive-state'
@@ -404,6 +405,7 @@ export function createProjectFromNotes(name: string, notes: TerrainNote[], model
     interactionEvents: [],
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
+    prerequisiteTopology: buildPrerequisiteTopology(notes),
   }
 }
 

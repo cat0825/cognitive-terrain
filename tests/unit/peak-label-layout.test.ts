@@ -77,6 +77,16 @@ describe('peak label layout', () => {
     expect(placements.find((placement) => placement.id === 'behind')?.visible).toBe(false)
   })
 
+  it('keeps labels hidden until their DOM dimensions are measured', () => {
+    const placements = layoutPeakLabels([
+      candidate({ id: 'zero-width', width: 0 }),
+      candidate({ id: 'zero-height', height: 0 }),
+      candidate({ id: 'measured' }),
+    ], layoutOptions())
+
+    expect(visibleIds(placements)).toEqual(['measured'])
+  })
+
   it('uses hysteresis at zoom thresholds and reduces the label budget by tier', () => {
     expect(resolvePeakLabelZoomTier(6.7, 'near')).toBe('near')
     expect(resolvePeakLabelZoomTier(6.7, 'medium')).toBe('medium')

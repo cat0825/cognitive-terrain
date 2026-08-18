@@ -7,18 +7,20 @@
 - 3D 地形与 2D 等高线双视图，WebGL 不可用时自动降级。
 - 按月份回放知识积累过程，时间快照为累计数据。
 - 搜索、标签筛选、峰值标签与笔记详情联动。
-- 六种可视化口径：密度、熟练度、探索度、近期活跃海拔、活动温度和领域。近期活跃海拔（`activity-elevation-v1`）只把近期打开、编辑和复习事件的衰减聚合映射到高度；温度只把同类活动热度编码为颜色，并保持知识密度海拔。二者都不改变稳定语义平面坐标，也不代表熟练度或学习进度。
+- 七种可视化口径：密度、熟练度、探索度、近期活跃海拔、基础层级、活动温度和领域。近期活跃海拔（`activity-elevation-v1`）只把近期打开、编辑和复习事件的衰减聚合映射到高度；温度只把同类活动热度编码为颜色，并保持知识密度海拔。二者都不改变稳定语义平面坐标，也不代表熟练度或学习进度。
 - 熟练度来自显式 `mastery` 认知状态；学习进度是独立的跨时间概念，不能由近期活跃海拔、温度或单次熟练度推断。
 - Obsidian `area` / `areas` 多领域归属与 WikiLink 关系可生成知识板块、跨域山脊和可解释碰撞带。方向只来自已解析的 source → target WikiLink；至少 2 组唯一笔记关系且正反向计数置信度达到 60% 才显示箭头，低样本或混合方向保持无向。
+- Obsidian `prerequisites` / `buildsOn` 显式前置关系可生成基础层级地形：基础笔记位于低层，后代随 DAG 深度升高；关系 ID、声明来源、跨领域多父节点和诊断均保留，循环、自指、歧义与未解析目标不会参与结构海拔。
 - 领域维护使用版本化 taxonomy node：稳定 ID 与显示名称分离，支持父子层级、Unicode/空白/大小写归一化别名、创建、重命名、重挂和合并预览；每次确认前创建恢复点。导入时同时保留原始声明标签与解析后的 node ID，未分类和未解析标签进入维护队列。
 - 焦点模式：选中笔记后一键飞行到该笔记；点击峰标签高亮该峰并绘制峰内笔记的路径连线。
 - 峰值标签按视口、缩放、重要性和碰撞占位确定显示层级；移动端同屏最多 8 个，选中标签始终优先。
 - 对比模式：选中时间基准层，直接回放比较新增/消失笔记差异。
 - 编辑模式：直接修改标题、正文和标签，重新分析后保留稳定的笔记 ID。
 - 导入 JSON、CSV、TSV、Markdown、纯文本和 YAML。
+- Obsidian vault 支持本地增量同步：重新选择同一目录后预览新增、修改、重命名、移除和字段冲突；确认前创建恢复点，未变化文件不会重新解析。写回认知字段或逐条接受的 WikiLink 时会单独请求目录读写权限并展示 exact diff，不上传文件或静默修改 Markdown。
 - 导入/导出 `.terrain.json` 完整项目包，导出当前地图为 PNG，导出 Markdown 复盘报告。
 - 项目自动保存到 IndexedDB，支持增量合并新笔记；覆盖、改名、删除和恢复前会自动创建本地恢复点，每个项目最多保留 8 份。
-- IndexedDB v7 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、探索生命周期、布局和 revision hash 基线；不同项目通过复合键隔离。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
+- IndexedDB v9 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、探索生命周期、前置关系拓扑、布局、revision 与 vault writeback recovery；不同项目通过复合键隔离。目录句柄保存在独立 binding store，不进入项目导出或恢复点。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
 - 海洋/知识缺口（`reference-gap-v1`）只表示当前项目相对显式选中的 active reference atlas 的 taxonomy 覆盖差距。未选择有效 atlas 时该计算为 disabled，不输出用户知识或技能缺口声明；低活动不等于缺口。
 - 探索工作台把所选参考缺口、陈旧复习、未解析双链、未评估/低置信度笔记和用户明确标记的 `gap` 目标转换为最多 8 条确定性建议；当前工作集最多 3 项。每条建议保留 reason code、支持项、参考边界、来源回跳、下一步动作与本地生命周期历史，活动分数不会单独触发建议。
 - 活动历史按 retention policy v1 有界保存：打开/编辑/复习原始事件分别保留 30/180/365 天，每条笔记每类最多 500 条；180 天内可按日查看，最长 730 天按周聚合。项目 `timeZone` 决定日历边界，非法时间戳会被忽略。聚合保留每类事件的计数、首末时间和衰减热度；笔记自身的 `reviewedAt` 不参与裁剪，因此迁移不会丢失最近复习时间。超过 730 天的活动不再出现在历史或温度计算中，也不承诺作为审计档案。
@@ -118,6 +120,26 @@ tags:
 
 `area` / `areas` 仍是用户声明的领域标签。应用按 NFKC、连续空白和大小写确定性解析 taxonomy 别名，同时在 `declaredAreas` 与 plate membership provenance 中保留导入标签；taxonomy 重命名和重挂不会改变稳定 node ID。
 
+### Obsidian vault 增量同步
+
+从项目菜单选择“同步 Obsidian vault”，每次重新选择同一个 vault 根目录。扫描会为所有 Markdown 计算 SHA-256，但只重新解析新增或内容变化的文件；隐藏目录和非 Markdown 文件会被忽略。
+
+- 原路径优先匹配；路径变化时只在 frontmatter `id` / `uid` 或原始内容 hash 唯一时保留 source/item ID。候选不唯一或归一化路径碰撞时必须先修正 vault 后重扫。
+- 应用内和 vault 同时修改同一字段时逐字段选择保留应用版本或采用 vault 版本。无效 YAML 字段保留上次已接受值，并在预览中报告。
+- 完整扫描中的移除会保留 source tombstone 并归档笔记；读取失败或多 vault 混合造成的不完整扫描不会推断删除。
+- 已接受内容生成 `vault-sync` revision。有效文件修改时间只用于事件时间；不可用或晚于确认时间时明确回退到确认时间。重复扫描和与应用内相同的编辑不会重复增加活动温度。
+- `.terrain.json` 导出/恢复保留 source 身份、同步基线和 revision provenance，但不包含浏览器目录权限。当前版本不提供跨设备同步。
+
+### Obsidian vault 显式写回
+
+从项目菜单选择“写回 Obsidian vault”，或在笔记详情中选择待写回字段/语义候选。写回只允许 `mastery`、`confidence`、`exploration`、`status`、`area/areas`、`reviewedAt` 与逐条确认的 WikiLink；标题、正文、标签和 weight 不会进入写回请求。
+
+- 应用先显示 vault 相对路径、同步 source hash 和 exact diff；单文件一次确认，多文件还需要第二次摘要确认。
+- 授权后及实际写入前都会重新读取原始 bytes 并检查 SHA-256。任一文件已被外部修改时整批保持 0 写入，需要先重新同步。
+- 批量写入前会把全部原始 bytes 原子保存到 IndexedDB recovery batch，然后按路径串行写入；首个失败后停止，结果明确区分成功、失败与未尝试，并保留恢复材料。
+- 写回成功会更新 source baseline，并记录独立的 `vault-writeback` revision，避免下一次增量同步把本次写回误判为外部修改。
+- 目录写入依赖浏览器 File System Access API。该 API 没有 compare-and-swap，最终 hash 校验到 `createWritable()` 之间仍存在极小的并发修改窗口；应用缩小并记录该窗口，但无法从浏览器侧彻底消除。
+
 ## 分析流程
 
 1. 规范化并按内容指纹稳定排序笔记。
@@ -175,7 +197,7 @@ tests/unit/     算法、导入与 Worker 回归测试
   - `@huggingface/transformers` 引入受影响的 `sharp`。
 
 - 演示知识点主要是确定性模板数据，不等同于有来源、可引用的知识库。
-- IndexedDB 已支持最多 8 份本地恢复点，但仍缺站点外自动备份、细粒度修订历史、回收站和跨设备同步。
+- IndexedDB 已支持最多 8 份本地恢复点和 vault-sync 内容 revision，但仍缺站点外自动备份、通用编辑修订历史、回收站和跨设备同步。
 - 搜索仍以字符串匹配为主；小规模编辑会触发全量 embedding/UMAP，布局稳定性和 10k/50k 数据规模未验证。
 - a11y 门禁当前排除了暗色 8px 等宽小字的 `color-contrast` 规则，不能据此宣称完整 WCAG 2.2 AA。
 

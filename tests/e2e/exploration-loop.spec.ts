@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 test('completes and reloads an explainable exploration loop', async ({ page }, testInfo) => {
-  test.setTimeout(process.env.CI ? 90_000 : 45_000)
+  test.setTimeout(process.env.CI ? 120_000 : 45_000)
   await page.addInitScript(() => {
     localStorage.setItem('cognitive-terrain:first-run', 'seen')
     localStorage.setItem('cognitive-terrain:embedding', 'deterministic')

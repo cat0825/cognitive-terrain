@@ -214,7 +214,7 @@ export async function deleteProject(id: string): Promise<void> {
     if (project) {
       await transaction.objectStore('backups').put(makeBackup(migrateProject(project), 'before-delete'))
     }
-    await clearProjectMaterialization(transaction, id)
+    await clearProjectMaterialization(transaction, id, true, true)
     await projects.delete(id)
     await transaction.done
   } catch (error) {

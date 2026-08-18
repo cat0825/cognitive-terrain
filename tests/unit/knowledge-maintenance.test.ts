@@ -29,6 +29,21 @@ describe('knowledge maintenance', () => {
     })
   })
 
+  it('keeps duplicate-title wikilinks unresolved', () => {
+    const notes = [
+      note('origin', 'Origin', ['Shared']),
+      note('first', 'Shared', [], { sourcePath: 'first/Shared.md' }),
+      note('second', 'Shared', [], { sourcePath: 'second/Shared.md' }),
+    ]
+
+    expect(resolveNoteRelations(notes, 'origin')).toMatchObject({
+      outgoing: [],
+      unresolved: ['Shared'],
+    })
+    expect(resolveNoteRelations(notes, 'first').incoming).toEqual([])
+    expect(resolveNoteRelations(notes, 'second').incoming).toEqual([])
+  })
+
   it('prioritizes unassessed and low-mastery notes', () => {
     const project = { notes: [note('stable', 'Stable', [], { mastery: 0.9, confidence: 0.9 }), note('unknown', 'Unknown'), note('low', 'Low', [], { mastery: 0.1 })] } as TerrainProject
     const candidates = maintenanceCandidates(project, 3)
