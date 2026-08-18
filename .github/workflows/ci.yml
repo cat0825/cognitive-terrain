@@ -28,7 +28,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [desktop, mobile]
+        include:
+          - project: desktop
+            shard: 1/2
+            artifact: desktop-1
+          - project: desktop
+            shard: 2/2
+            artifact: desktop-2
+          - project: mobile
+            shard: 1/1
+            artifact: mobile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,11 +46,11 @@ jobs:
           cache: npm
       - run: node scripts/npm-ci-retry.mjs
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e -- --project=${{ matrix.project }}
+      - run: npm run test:e2e -- --project=${{ matrix.project }} --shard=${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-failure-artifacts-${{ matrix.project }}
+          name: e2e-failure-artifacts-${{ matrix.artifact }}
           path: |
             test-results/
             playwright-report/
