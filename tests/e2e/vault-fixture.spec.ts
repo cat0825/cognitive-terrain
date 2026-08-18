@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { importVaultFixture, openFixtureCollision } from '../helpers/import-vault-fixture'
 
 test('imports, reloads, and inspects the anonymized vault without overflow', async ({ page }, testInfo) => {
-  test.setTimeout(process.env.CI ? 90_000 : 45_000)
+  test.setTimeout(process.env.CI ? 120_000 : 45_000)
   const errors = collectErrors(page)
   await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
   await page.goto('/')

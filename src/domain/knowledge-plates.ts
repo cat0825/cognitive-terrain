@@ -22,6 +22,7 @@ export interface PlateBridge {
 }
 
 export interface PlateBridgeEvidence {
+  relationId: string
   fromId: string
   toId: string
   fromArea: string
@@ -126,7 +127,7 @@ export function summarizeKnowledgePlates(notes: TerrainNote[]): KnowledgePlate[]
 export function buildPlateBridges(notes: TerrainNote[]): PlateBridge[] {
   const edges = explicitEdges(notes)
   const bridges = new Map<string, PlateBridge>()
-  for (const { from, to } of edges) {
+  for (const { from, to, relationId } of edges) {
     const fromAreas = normalizedAreasForNote(from)
     const toAreas = normalizedAreasForNote(to)
     if (!fromAreas.length || !toAreas.length || sharesArea(fromAreas, toAreas)) continue
@@ -134,7 +135,7 @@ export function buildPlateBridges(notes: TerrainNote[]): PlateBridge[] {
     const toArea = toAreas[0]
     const [firstId, secondId] = [from.id, to.id].sort()
     const id = `bridge-${firstId}-${secondId}`
-    const evidence = { fromId: from.id, toId: to.id, fromArea, toArea }
+    const evidence = { relationId, fromId: from.id, toId: to.id, fromArea, toArea }
     const current = bridges.get(id)
     if (current) {
       current.evidence.push(evidence)
@@ -300,6 +301,7 @@ function averagePoint(points: Array<{ x: number; y: number }>): { x: number; y: 
 interface ExplicitEdge {
   from: TerrainNote
   to: TerrainNote
+  relationId: string
 }
 
 function explicitEdges(notes: TerrainNote[]): ExplicitEdge[] {
@@ -307,21 +309,30 @@ function explicitEdges(notes: TerrainNote[]): ExplicitEdge[] {
   const edges: ExplicitEdge[] = []
   for (const from of notes) {
     for (const link of from.links) {
-      const to = index.get(normalizeRelationKey(link))
+      const candidates = index.get(normalizeRelationKey(link))
+      const to = candidates?.length === 1 ? candidates[0] : undefined
       if (!to || to.id === from.id) continue
-      edges.push({ from, to })
+      edges.push({
+        from,
+        to,
+        relationId: `relation-${stableHash(`${from.id}\n${link}`)}`,
+      })
     }
   }
   return edges
 }
 
-function buildNoteIndex(notes: TerrainNote[]): Map<string, TerrainNote> {
-  const index = new Map<string, TerrainNote>()
+function buildNoteIndex(notes: TerrainNote[]): Map<string, TerrainNote[]> {
+  const index = new Map<string, TerrainNote[]>()
   for (const note of notes) {
     for (const key of [note.title, note.sourcePath, note.sourcePath?.split('/').at(-1)]) {
       if (!key) continue
       const normalized = normalizeRelationKey(key)
-      if (normalized && !index.has(normalized)) index.set(normalized, note)
+      const candidates = index.get(normalized) ?? []
+      if (normalized && !candidates.some((candidate) => candidate.id === note.id)) {
+        candidates.push(note)
+        index.set(normalized, candidates)
+      }
     }
   }
   return index

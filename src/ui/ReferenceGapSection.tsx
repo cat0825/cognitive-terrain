@@ -46,7 +46,7 @@ export function ReferenceGapSection({
       ) : (
         <div className="reference-gap-list">
           {report.gaps.filter((gap) => gap.gap > 0).map((gap) => (
-            <details key={gap.nodeId} className="reference-gap-item">
+            <details key={gap.nodeId} className="reference-gap-item" data-reference-node-id={gap.nodeId}>
               <summary>
                 <span>{gap.label}</span>
                 <small>{gap.state === 'stale' ? '已过期' : gap.state === 'sparse' ? '覆盖稀疏' : '未覆盖'} · {Math.round(gap.gap * 100)}%</small>

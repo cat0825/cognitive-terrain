@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const dimensions = ['密度', '熟练度', '探索度', '活跃', '温度', '领域'] as const
+const dimensions = ['密度', '熟练度', '探索度', '活跃', '基础层级', '温度', '领域'] as const
 
-test('switches point cloud encoding across all six visual dimensions', async ({ page }) => {
-  test.setTimeout(process.env.CI ? 90_000 : 45_000)
+test('switches the point cloud and validates all seven visual dimensions', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 120_000 : 45_000)
   const errors = collectErrors(page)
 
   await page.goto('/')
@@ -19,6 +19,13 @@ test('switches point cloud encoding across all six visual dimensions', async ({ 
   )
   await expect(buttons[0]).toHaveAttribute('aria-pressed', 'true')
 
+  await buttons[1].click()
+  await expect(buttons[1]).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: '关闭筛选' }).click()
+  await page.getByRole('button', { name: '切换二维等高线' }).click()
+  await expect(page.locator('.terrain-2d')).toBeVisible()
+  await page.getByRole('button', { name: '打开地图筛选' }).click()
+
   for (const [index, label] of dimensions.entries()) {
     await buttons[index].click()
     for (const [otherIndex, otherLabel] of dimensions.entries()) {
@@ -28,7 +35,13 @@ test('switches point cloud encoding across all six visual dimensions', async ({ 
       ).toHaveAttribute('aria-pressed', String(otherIndex === index))
     }
     await expect(panel.locator('.dimension-help')).not.toBeEmpty()
-    await expect(page.locator('canvas').first()).toBeVisible()
+    await expect(page.locator('.terrain-2d')).toBeVisible()
+    if (label === '基础层级') {
+      const legend = panel.getByRole('group', { name: '基础层级图例' })
+      await expect(legend).toBeVisible()
+      await expect(legend).toHaveAttribute('data-formula-version', 'explicit-prerequisite-strata-v1')
+      await expect(legend).toContainText('没有显式 prerequisite / buildsOn 关系')
+    }
     if (label === '领域') {
       const legend = panel.getByRole('group', { name: '知识板块图例' })
       await expect(legend).toBeVisible()

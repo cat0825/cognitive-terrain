@@ -8,7 +8,9 @@ import type {
   QualityLevel,
   CognitiveObservationProvenance,
   InteractionEvent,
+  ExplorationSuggestion,
   TerrainProject,
+  TerrainPeak,
   ViewMode,
   VisualDimension,
 } from '../domain/types'
@@ -31,6 +33,7 @@ import {
   validateTaxonomy,
 } from '../domain/taxonomy'
 import { migrateTerrainProjectToV3 } from '../domain/schema-v3'
+import type { VaultSyncPreview, VaultSyncResolution } from '../domain/vault-sync'
 import { TODAY_STUDY_PACK_NAME, todayStudyPack } from '../domain/study-pack'
 import { runAnalysis, type AnalysisHandle } from '../pipeline/worker-client'
 import { parseWikiLinks } from '../import/parse'
@@ -87,7 +90,9 @@ interface AppState {
   cameraInteractionMode: CameraInteractionMode
   focusRequest: { noteId: string; revision: number } | null
   activePeakId: string | null
+  activePeak: TerrainPeak | null
   activeCollisionId: string | null
+  activeGapNodeId: string | null
   compareRef: number | null
   firstRun: boolean
   dismissFirstRun: () => void
@@ -112,8 +117,9 @@ interface AppState {
   setCameraInteractionMode: (mode: CameraInteractionMode) => void
   resetCamera: () => void
   requestFocus: (noteId: string) => void
-  setActivePeak: (peakId: string | null) => void
+  setActivePeak: (peak: TerrainPeak | null) => void
   selectCollision: (collisionId: string | null) => void
+  selectGap: (nodeId: string | null) => void
   setCompareRef: (bucketIndex: number | null) => void
   reportError: (message: string) => void
   dismissError: () => void
@@ -125,8 +131,23 @@ interface AppState {
   ) => Promise<void>
   loadStudyPack: () => Promise<void>
   mergeNotes: (newNotes: NoteInput[], options?: AnalysisOptions) => Promise<void>
+  applyVaultSync: (
+    preview: VaultSyncPreview,
+    resolutions: VaultSyncResolution[],
+  ) => Promise<boolean>
+  commitVaultWritebackProject: (previous: TerrainProject, next: TerrainProject) => Promise<void>
   updateNote: (noteId: string, patch: NoteUpdatePatch, observation?: CognitiveObservationOptions) => Promise<void>
   markNoteReviewed: (noteId: string) => Promise<void>
+  transitionExploration: (
+    suggestion: ExplorationSuggestion,
+    command:
+      | { type: 'accept' | 'start' | 'complete' | 'dismiss' | 'reject'; note?: string }
+      | { type: 'snooze'; note?: string; snoozedUntil: string },
+  ) => Promise<void>
+  editExploration: (
+    suggestion: ExplorationSuggestion,
+    patch: { actionTitle: string; actionDetail?: string; userNotes?: string },
+  ) => Promise<void>
   cancelAnalysis: () => void
   replaceProject: (project: TerrainProject) => Promise<void>
   resetDemo: () => void
@@ -146,6 +167,7 @@ interface AppState {
 interface AnalysisCommitContext {
   baseProject: TerrainProject
   events?: InteractionEvent[]
+  vaultSync?: TerrainProject['vaultSync']
 }
 
 interface CognitiveObservationOptions {
@@ -198,7 +220,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   cameraInteractionMode: 'rotate',
   focusRequest: null,
   activePeakId: null,
+  activePeak: null,
   activeCollisionId: null,
+  activeGapNodeId: null,
   compareRef: null,
   firstRun: localStorage.getItem('cognitive-terrain:first-run') === null,
   lastAnalysis: null,
@@ -241,7 +265,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       project,
       selectedNoteId,
+      activePeakId: null,
+      activePeak: null,
       activeCollisionId: null,
+      activeGapNodeId: null,
       detailsOpen: selectedNoteId !== null,
     })
     if (event) {
@@ -266,7 +293,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearAreas: () => set({ activeAreas: [] }),
   setViewMode: (viewMode) => set({ viewMode }),
   setQuality: (quality) => set({ quality }),
-  setVisualDimension: (visualDimension) => set({ visualDimension }),
+  setVisualDimension: (visualDimension) => set((state) => ({
+    visualDimension,
+    ...(state.activePeak ? {
+      activePeak: null,
+      activePeakId: null,
+      detailsOpen: false,
+    } : {}),
+  })),
   setReferenceAtlas: async (id) => {
     const current = get().project
     const nextId = normalizeActiveReferenceAtlasId(current.referenceAtlases, id)
@@ -278,7 +312,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Atlas selection is a view preference. Update the in-memory project first so
     // the map and detail report respond immediately; persistence can finish in the
     // background without making the user wait for a full materialization rewrite.
-    set({ project })
+    set({ project, activeGapNodeId: null })
     try {
       await updateActiveReferenceAtlas(project.id, nextId)
       await Promise.all([get().reloadProjects(), get().reloadBackups()])
@@ -311,11 +345,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   resetCamera: () => set((state) => ({ cameraRevision: state.cameraRevision + 1, cameraScale: 192 })),
   requestFocus: (noteId) =>
     set((state) => ({ focusRequest: { noteId, revision: (state.focusRequest?.revision ?? 0) + 1 } })),
-  setActivePeak: (activePeakId) => set({ activePeakId }),
+  setActivePeak: (activePeak) => set({
+    activePeak,
+    activePeakId: activePeak?.id ?? null,
+    activeCollisionId: null,
+    activeGapNodeId: null,
+    selectedNoteId: null,
+    detailsOpen: activePeak !== null,
+  }),
   selectCollision: (activeCollisionId) => set({
     activeCollisionId,
+    activePeakId: null,
+    activePeak: null,
     selectedNoteId: null,
+    activeGapNodeId: null,
     detailsOpen: activeCollisionId !== null,
+  }),
+  selectGap: (activeGapNodeId) => set({
+    activeGapNodeId,
+    activePeakId: null,
+    activePeak: null,
+    activeCollisionId: null,
+    selectedNoteId: null,
+    detailsOpen: activeGapNodeId !== null,
   }),
   setCompareRef: (compareRef) => set({ compareRef }),
   reportError: (error) => set({ error }),
@@ -339,17 +391,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       const project = commit
         ? commitAnalyzedProject(analyzedProject, commit.baseProject, commit.events)
         : analyzedProject
+      const committedProject = commit?.vaultSync
+        ? {
+            ...project,
+            updatedAt: commit.vaultSync.vaults.reduce(
+              (latest, vault) => vault.lastScannedAt > latest ? vault.lastScannedAt : latest,
+              commit.baseProject.updatedAt,
+            ),
+            vaultSync: commit.vaultSync,
+          }
+        : project
       const embeddingMode: 'semantic' | 'fallback' =
-        project.embeddingMode === 'semantic' ? 'semantic' : 'fallback'
+        committedProject.embeddingMode === 'semantic' ? 'semantic' : 'fallback'
       set({
         lastAnalysis: {
-          modelId: project.modelId,
+          modelId: committedProject.modelId,
           embeddingMode,
           device: options.embeddingStrategy === 'deterministic' ? 'local' : 'webgpu/wasm',
           elapsedMs: Math.round(performance.now() - startedAt),
         },
       })
-      await get().replaceProject(project)
+      if (commit?.vaultSync) {
+        const normalizedProject = migrateProject(committedProject)
+        const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
+        await saveVaultSyncProject(commit.baseProject, normalizedProject)
+        localStorage.setItem('cognitive-terrain:last-project', normalizedProject.id)
+        setProjectState(set, normalizedProject)
+        await Promise.all([get().reloadProjects(), get().reloadBackups()])
+      } else {
+        await get().replaceProject(committedProject)
+      }
       set({ isAnalyzing: false, progress: null })
     } catch (error) {
       set({
@@ -372,6 +443,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const stateProvenance = new Map(current.cognitiveStates.map((state) => [state.itemId, state.provenance]))
     const existing: NoteInput[] = current.notes.map((note) => ({
       id: note.id,
+      sourceId: note.sourceId,
+      sourceKey: note.sourceKey,
       title: note.title,
       content: note.content,
       createdAt: note.createdAt,
@@ -390,6 +463,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       reviewedAt: note.reviewedAt,
       cognitiveStateProvenance: stateProvenance.get(note.id),
       links: note.links,
+      prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
     }))
     const existingIds = new Set(existing.map((note) => note.id))
     const deduped = newNotes.filter((note) => !existingIds.has(note.id?.trim() ?? ''))
@@ -406,6 +480,71 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     await get().startAnalysis(current.name, merged, effective, { baseProject: current })
   },
+  applyVaultSync: async (preview, resolutions) => {
+    const current = get().project
+    try {
+      const { applyVaultSync: applyVaultSyncPreview } = await import('../domain/vault-sync')
+      const applied = applyVaultSyncPreview(current, preview, resolutions)
+      if (!preview.bootstrap && preview.changes.length === 0) return true
+      if (preview.changes.length === 0) {
+        const sourceByItem = new Map(applied.state.sources.map((source) => [source.itemId, source]))
+        const next: TerrainProject = {
+          ...current,
+          updatedAt: preview.scannedAt,
+          notes: current.notes.map((note) => {
+            const source = sourceByItem.get(note.id)
+            return source ? {
+              ...note,
+              sourceId: source.sourceId,
+              sourceKey: source.acceptedNote.sourceKey,
+            } : note
+          }),
+          vaultSync: applied.state,
+        }
+        const normalized = migrateProject(next)
+        const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
+        await saveVaultSyncProject(current, normalized)
+        setProjectState(set, normalized)
+        await Promise.all([get().reloadProjects(), get().reloadBackups()])
+        return true
+      }
+      const effective = {
+        embeddingStrategy: (current.embeddingMode === 'semantic' ? 'transformers' : 'deterministic') as
+          | 'transformers'
+          | 'deterministic',
+      }
+      await get().startAnalysis(current.name, applied.inputs, effective, {
+        baseProject: current,
+        events: applied.events,
+        vaultSync: applied.state,
+      })
+      return get().error === null
+    } catch (error) {
+      set({ error: `Vault 同步失败：${error instanceof Error ? error.message : String(error)}` })
+      return false
+    }
+  },
+  commitVaultWritebackProject: async (previous, next) => {
+    const current = get().project
+    if (current.id !== previous.id || current.updatedAt !== previous.updatedAt) {
+      throw new Error('项目已变化，请重新生成写回预览')
+    }
+    try {
+      const { saveVaultWritebackProject } = await import('../storage/vault-sync-repository')
+      await saveVaultWritebackProject(previous, next)
+      const latest = get().project
+      if (latest.id !== previous.id || latest.updatedAt !== previous.updatedAt) {
+        throw new Error('项目在写回提交期间发生变化，请重新打开项目核对已保存状态')
+      }
+      localStorage.setItem('cognitive-terrain:last-project', next.id)
+      setProjectState(set, migrateProject(next))
+      await Promise.all([get().reloadProjects(), get().reloadBackups()])
+    } catch (error) {
+      const message = `Vault 写回状态保存失败：${error instanceof Error ? error.message : String(error)}`
+      set({ error: message })
+      throw new Error(message, { cause: error })
+    }
+  },
   updateNote: async (noteId, patch, observationOptions = {}) => {
     const current = get().project
     const target = current.notes.find((note) => note.id === noteId)
@@ -420,6 +559,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (note.id !== noteId) {
         return {
           id: note.id,
+          sourceId: note.sourceId,
+          sourceKey: note.sourceKey,
           title: note.title,
           content: note.content,
           createdAt: note.createdAt,
@@ -438,6 +579,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           reviewedAt: note.reviewedAt,
           cognitiveStateProvenance: stateProvenance.get(note.id),
           links: note.links,
+          prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
         }
       }
       const nextAreas = 'areas' in patch
@@ -447,6 +589,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           : areasForNote(note)
       return {
         id: note.id,
+        sourceId: note.sourceId,
+        sourceKey: note.sourceKey,
         title: patch.title ?? note.title,
         content: patch.content ?? note.content,
         createdAt: note.createdAt,
@@ -465,6 +609,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         reviewedAt: 'reviewedAt' in patch ? patch.reviewedAt ?? undefined : note.reviewedAt,
         cognitiveStateProvenance: changesCognitiveState ? 'app' : stateProvenance.get(note.id),
         links: patch.content === undefined ? note.links : parseWikiLinks(patch.content),
+        prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
       }
     })
     const effective = {
@@ -528,6 +673,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       await Promise.all([get().reloadProjects(), get().reloadBackups()])
     } catch (error) {
       set({ error: `复习记录保存失败：${error instanceof Error ? error.message : String(error)}` })
+    }
+  },
+  transitionExploration: async (suggestion, command) => {
+    const current = get().project
+    try {
+      const { transitionExplorationProject } = await import('./exploration-actions')
+      const project = await transitionExplorationProject(current, suggestion, command)
+      if (get().project.id === current.id) set({ project })
+      await get().reloadProjects()
+    } catch (error) {
+      set({ error: `探索记录保存失败：${error instanceof Error ? error.message : String(error)}` })
+    }
+  },
+  editExploration: async (suggestion, patch) => {
+    const current = get().project
+    try {
+      const { editExplorationProject } = await import('./exploration-actions')
+      const project = await editExplorationProject(current, suggestion, patch)
+      if (get().project.id === current.id) set({ project })
+      await get().reloadProjects()
+    } catch (error) {
+      set({ error: `探索动作保存失败：${error instanceof Error ? error.message : String(error)}` })
     }
   },
   cancelAnalysis: () => {
@@ -728,7 +895,9 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
     detailsOpen: false,
     focusRequest: null,
     activePeakId: null,
+    activePeak: null,
     activeCollisionId: null,
+    activeGapNodeId: null,
     compareRef: null,
     cameraRevision: Date.now(),
     cameraScale: 192,

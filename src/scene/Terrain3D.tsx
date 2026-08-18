@@ -72,6 +72,7 @@ export default function Terrain3D({
         selectedNoteId={selectedNoteId}
         quality={quality}
         visualDimension={visualDimension}
+        prerequisiteTopology={project.prerequisiteTopology}
         activityByNote={activityByNote}
         progressionByNote={progressionByNote}
         cameraRevision={cameraRevision}

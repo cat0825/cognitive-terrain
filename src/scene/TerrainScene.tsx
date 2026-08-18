@@ -28,12 +28,13 @@ import {
   TOUCH,
 } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import type { QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot, VisualDimension } from '../domain/types'
+import type { PrerequisiteTopology, QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot, VisualDimension } from '../domain/types'
 import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
 import type { LearningProgressionResult } from '../domain/learning-progression'
 import { buildPlateCollisions, plateColor, primaryAreaForNote, type PlateBridge, type PlateCollision } from '../domain/knowledge-plates'
 import { sampleHeight } from '../pipeline/terrain'
 import { linkedNotes } from '../domain/knowledge-maintenance'
+import { prerequisiteDepthValues } from '../domain/prerequisite-topology'
 import { getLiveTimeline } from '../store/app-store'
 import {
   TERRAIN_CAMERA_POSITION,
@@ -67,6 +68,7 @@ interface TerrainSceneProps {
   cameraScale: number
   cameraInteractionMode: 'rotate' | 'pan'
   visualDimension: VisualDimension
+  prerequisiteTopology?: PrerequisiteTopology
   activityByNote: ReadonlyMap<string, NoteActivitySummary>
   progressionByNote: ReadonlyMap<string, LearningProgressionResult>
   focusRequest: { noteId: string; revision: number } | null
@@ -342,6 +344,7 @@ function TerrainSurface({
   onSelectNote,
   reducedMotion,
   visualDimension,
+  prerequisiteTopology,
   activityByNote,
   progressionByNote,
 }: TerrainSceneProps & { compactLabels: boolean; peakLabelLimit: number; reducedMotion: boolean }) {
@@ -388,6 +391,7 @@ function TerrainSurface({
         selectedNoteId={selectedNoteId}
         onSelectNote={onSelectNote}
         visualDimension={visualDimension}
+        prerequisiteTopology={prerequisiteTopology}
         activityByNote={activityByNote}
         progressionByNote={progressionByNote}
       />
@@ -408,7 +412,6 @@ function TerrainSurface({
           labelLimit={peakLabelLimit}
           compact={compactLabels}
           reducedMotion={reducedMotion}
-          onSelectNote={onSelectNote}
         />
       )}
     </group>
@@ -694,9 +697,10 @@ function NotePoints({
   selectedNoteId,
   onSelectNote,
   visualDimension,
+  prerequisiteTopology,
   activityByNote,
   progressionByNote,
-}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'activityByNote' | 'progressionByNote'> & {
+}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'prerequisiteTopology' | 'activityByNote' | 'progressionByNote'> & {
   heightAtlas: HeightAtlas
   peaks: TerrainPeak[]
   reducedMotion: boolean
@@ -710,6 +714,7 @@ function NotePoints({
     [gridSize, notes, snapshots],
   )
   const birthFrames = useMemo(() => resolveNoteBirthFrames(notes, snapshots), [notes, snapshots])
+  const structureByNote = useMemo(() => prerequisiteDepthValues(prerequisiteTopology), [prerequisiteTopology])
   const geometry = useMemo(
     () =>
       buildNoteGeometry(
@@ -722,8 +727,9 @@ function NotePoints({
         visualDimension,
         activityByNote,
         progressionByNote,
+        structureByNote,
       ),
-    [activityByNote, birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, progressionByNote, visualDimension],
+    [activityByNote, birthFrames, heightFrames, initialFrame.aIndex, initialFrame.bIndex, initialFrame.mix, notes, peaks, progressionByNote, structureByNote, visualDimension],
   )
   const material = useMemo(() => makeNoteMaterial(heightAtlas, quality), [heightAtlas, quality])
   const lastRaycastBucket = useRef(Number.NaN)
@@ -913,7 +919,6 @@ function PeakField({
   labelLimit,
   compact,
   reducedMotion,
-  onSelectNote,
 }: {
   snapshots: TerrainSnapshot[]
   gridSize: number
@@ -923,7 +928,6 @@ function PeakField({
   labelLimit: number
   compact: boolean
   reducedMotion: boolean
-  onSelectNote: (id: string | null) => void
 }) {
   const labels = useRef<Array<HTMLDivElement | null>>([])
   const labelLayer = useRef<HTMLDivElement | null>(null)
@@ -1123,11 +1127,9 @@ function PeakField({
                     event.stopPropagation()
                     if (activePeakId === peak.id) {
                       setActivePeak(null)
-                      onSelectNote(null)
                       return
                     }
-                    setActivePeak(peak.id)
-                    onSelectNote(peak.noteIds[0] ?? null)
+                    setActivePeak(peak)
                   }}
                 >
                   <span>{peak.label}</span>
@@ -1382,6 +1384,7 @@ function buildNoteGeometry(
   visualDimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
   progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
+  structureByNote: ReadonlyMap<string, number>,
 ): BufferGeometry {
   const geometry = new BufferGeometry()
   const positions = new Float32Array(notes.length * 3)
@@ -1412,9 +1415,9 @@ function buildNoteGeometry(
     )
     peakAffinity[index] = resolvePeakAffinity(note, peaks)
     mastery[index] = note.mastery ?? 0.5
-    visualValue[index] = dimensionValue(note, visualDimension, activityByNote, progressionByNote)
+    visualValue[index] = dimensionValue(note, visualDimension, activityByNote, progressionByNote, structureByNote)
     visualMode[index] = dimensionMode(visualDimension)
-    const color = dimensionColor(note, visualDimension, activityByNote)
+    const color = dimensionColor(note, visualDimension, activityByNote, structureByNote)
     visualColor[offset] = color.r
     visualColor[offset + 1] = color.g
     visualColor[offset + 2] = color.b
@@ -1550,7 +1553,7 @@ function makeNoteMaterial(atlas: HeightAtlas, quality: QualityLevel): ShaderMate
           * mix(0.88, 1.18, peakAffinity);
         float pulse = 1.0 + freshness * (0.025 + peakAffinity * 0.035)
           * sin(uTime * 0.55 + seed * 6.2831853);
-        float pointPixels = uPointSize * (uScale / max(0.1, -mvPosition.z)) * hierarchy * pulse * mix(0.92, 1.08, mastery);
+        float pointPixels = uPointSize * (uScale / max(0.1, -mvPosition.z)) * hierarchy * pulse;
         gl_PointSize = vVisible * clamp(pointPixels, uMinimumPixels, uMaximumPixels);
         vDepthFade = 1.0 - smoothstep(7.0, 14.0, -mvPosition.z);
         #include <fog_vertex>
@@ -1749,19 +1752,19 @@ function dimensionValue(
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
   progressionByNote: ReadonlyMap<string, LearningProgressionResult>,
+  structureByNote: ReadonlyMap<string, number>,
 ): number {
   if (dimension === 'mastery') return note.mastery ?? 0.5
   if (dimension === 'exploration') return note.exploration ?? 0.5
   if (dimension === 'progression') return progressionByNote.get(note.id)?.elevation ?? 0.5
   if (dimension === 'activity' || dimension === 'temperature') return activityByNote.get(note.id)?.score ?? 0
+  if (dimension === 'structure') return structureByNote.get(note.id) ?? 0
   return 0.5
 }
 
 function dimensionMode(dimension: VisualDimension): number {
-  if (dimension === 'mastery' || dimension === 'progression') return 1
-  if (dimension === 'exploration') return 2
-  if (dimension === 'area') return 3
-  if (dimension === 'activity' || dimension === 'temperature') return 4
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'progression' || dimension === 'structure' || dimension === 'area') return 3
+  if (dimension === 'temperature') return 4
   return 0
 }
 
@@ -1769,9 +1772,10 @@ function dimensionColor(
   note: TerrainNote,
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  _structureByNote: ReadonlyMap<string, number>,
 ): Color {
-  if (dimension === 'activity' || dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
-  if (dimension === 'area') {
+  if (dimension === 'temperature') return new Color(temperatureColor(activityByNote.get(note.id)?.score ?? 0))
+  if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'progression' || dimension === 'structure' || dimension === 'area') {
     const area = primaryAreaForNote(note)
     return new Color(area ? plateColor(area) : '#767673')
   }

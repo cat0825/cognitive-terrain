@@ -44,10 +44,11 @@ export const DEFAULT_TERRAIN_PROFILES = [
   },
   {
     id: 'structure',
-    label: '结构桥接',
+    label: '基础层级',
     elevation: 'structure',
     color: 'area',
-    formulaVersion: 'bridge-score-v1',
+    overlay: 'gaps',
+    formulaVersion: 'explicit-prerequisite-strata-v1',
   },
 ] as const satisfies readonly TerrainProfile[]
 

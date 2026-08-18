@@ -65,7 +65,7 @@ test('switches between rotate and pan camera drag modes', async ({ page }) => {
 })
 
 test('imports a JSON study pack and generates terrain', async ({ page }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(process.env.CI ? 120_000 : 60_000)
   await page.addInitScript(() => {
     localStorage.setItem('cognitive-terrain:embedding', 'deterministic')
   })

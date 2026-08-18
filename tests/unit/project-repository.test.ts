@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { openDB } from 'idb'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { TerrainProject } from '../../src/domain/types'
+import type { ExplorationLifecycleItem, TerrainProject, VaultSyncState } from '../../src/domain/types'
 import { createDemoProject } from '../../src/domain/demo'
 import {
   appendProjectInteractionEvent,
@@ -15,7 +15,15 @@ import {
   restoreProjectBackup,
   saveProject,
   updateActiveReferenceAtlas,
+  updateProjectExplorationItems,
 } from '../../src/storage/project-repository'
+import {
+  deleteVaultBinding,
+  getVaultBinding,
+  saveVaultBinding,
+  saveVaultSyncProject,
+  saveVaultWritebackProject,
+} from '../../src/storage/vault-sync-repository'
 import { createInteractionEvent } from '../../src/domain/cognitive-state'
 import { createCognitiveObservation } from '../../src/domain/learning-progression'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
@@ -62,6 +70,88 @@ function smallProject(id: string, name: string): TerrainProject {
   }
 }
 
+function explorationItemFor(project: TerrainProject): ExplorationLifecycleItem {
+  return {
+    id: `${project.id}:explore`,
+    suggestion: {
+      id: `${project.id}:suggestion`,
+      reason: { code: 'low-confidence-note', detail: '置信度较低，建议回到原笔记核对' },
+      supportingItemIds: [project.notes[0].id],
+      sourceRoute: { kind: 'note', noteId: project.notes[0].id },
+      evidenceFingerprint: 'evidence-v1',
+      priority: 0.7,
+      action: { title: '核对论据' },
+    },
+    status: 'accepted',
+    action: { title: '核对论据', detail: '补充原始来源' },
+    updatedAt: project.updatedAt,
+    history: [{
+      id: `${project.id}:accept`,
+      type: 'accept',
+      occurredAt: project.updatedAt,
+      fromStatus: 'proposed',
+      toStatus: 'accepted',
+      evidenceFingerprint: 'evidence-v1',
+      action: { title: '核对论据', detail: '补充原始来源' },
+    }],
+  }
+}
+
+function withVaultSync(project: TerrainProject, relativePath = 'Notes/Source.md'): TerrainProject {
+  const note = {
+    ...project.notes[0],
+    sourceId: 'vault-source-stable',
+    sourceKey: `vault-main:${relativePath}`,
+    source: relativePath.split('/').at(-1),
+    sourcePath: relativePath,
+    vault: 'Main vault',
+  }
+  const vaultSync: VaultSyncState = {
+    version: 1,
+    vaults: [{
+      vaultId: 'vault-main',
+      displayName: 'Main vault',
+      accessMode: 'directory-handle',
+      lastScannedAt: project.updatedAt,
+    }],
+    sources: [{
+      sourceId: note.sourceId,
+      itemId: note.id,
+      vaultId: 'vault-main',
+      relativePath,
+      status: 'present',
+      rawContentHash: `sha256:${note.content.length}`,
+      entityHash: `entity:${note.fingerprint}`,
+      lastModifiedMs: Date.parse(project.updatedAt),
+      size: note.content.length,
+      acceptedFieldHashes: { content: `field:${note.content.length}` },
+      acceptedNote: {
+        sourceKey: note.sourceKey,
+        title: note.title,
+        content: note.content,
+        createdAt: note.createdAt,
+        tags: [...note.tags],
+        weight: note.weight,
+        mastery: note.mastery,
+        confidence: note.confidence,
+        exploration: note.exploration,
+        status: note.status,
+        areas: [...(note.areas ?? [])],
+        declaredAreas: [...(note.declaredAreas ?? [])],
+        reviewedAt: note.reviewedAt,
+        links: [...note.links],
+      },
+      acceptedAt: project.updatedAt,
+    }],
+    revisions: [],
+  }
+  return {
+    ...project,
+    notes: [note, ...project.notes.slice(1)],
+    vaultSync,
+  }
+}
+
 beforeEach(async () => {
   await closeDatabase()
   const keys = (await indexedDB.databases()) ?? []
@@ -102,6 +192,50 @@ describe('project repository', () => {
       .toBe(project.referenceAtlases?.[0]?.id)
   })
 
+  it('persists embedding neighbor evidence in the project and materialized object store', async () => {
+    const project = smallProject('p-neighbor-evidence', '邻居证据')
+    const evidence = {
+      sourceId: project.notes[0].id,
+      targetId: project.notes[1].id,
+      rank: 1,
+      score: 0.84,
+      modelId: 'Xenova/multilingual-e5-small',
+      embeddingMode: 'semantic' as const,
+      formulaVersion: 'embedding-cosine-neighbors-v1' as const,
+      provenance: 'embedding' as const,
+    }
+    project.noteNeighbors = [[project.notes[1].id], [project.notes[0].id]]
+    project.noteNeighborEvidence = [[evidence], []]
+
+    await saveProject(project)
+
+    expect((await getProject(project.id))?.noteNeighborEvidence).toEqual([[evidence], []])
+    expect((await getProjectObjectBundle(project.id))?.neighborEvidence).toEqual([evidence])
+    expect(await (await getDatabase()).get('neighborEvidence', [project.id, evidence.sourceId, evidence.targetId]))
+      .toMatchObject(evidence)
+  })
+
+  it('updates exploration lifecycle state without backups or rebuilding note records', async () => {
+    const project = smallProject('p-exploration-update', '探索状态')
+    await saveProject(project)
+    const database = await getDatabase()
+    const revisionCount = await database.countFromIndex('revisions', 'by-workspace', project.id)
+    const updatedAt = '2026-08-17T08:00:00.000Z'
+
+    const updated = await updateProjectExplorationItems(
+      project.id,
+      [explorationItemFor(project)],
+      updatedAt,
+    )
+
+    expect(updated?.updatedAt).toBe(updatedAt)
+    expect((await getProject(project.id))?.explorationItems).toEqual(updated?.explorationItems)
+    expect((await getProjectObjectBundle(project.id))?.explorationItems).toEqual(updated?.explorationItems)
+    expect(await database.countFromIndex('items', 'by-workspace', project.id)).toBe(project.notes.length)
+    expect(await database.countFromIndex('revisions', 'by-workspace', project.id)).toBe(revisionCount)
+    expect(await listProjectBackups(project.id)).toEqual([])
+  })
+
   it('persists v1 to v3 migrations during the IndexedDB upgrade', async () => {
     const legacy = oldV1Project('legacy-1', '旧项目')
     legacy.notes[0] = { ...legacy.notes[0], reviewedAt: '2025-08-15T00:00:00.000Z' }
@@ -121,6 +255,11 @@ describe('project repository', () => {
     expect(upgraded.objectStoreNames.contains('backups')).toBe(true)
     expect(upgraded.objectStoreNames.contains('workspaces')).toBe(true)
     expect(upgraded.objectStoreNames.contains('cognitiveObservations')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('neighborEvidence')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('explorationItems')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('vaultBindings')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('vaultWritebackBatches')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('vaultWritebackRecoveryFiles')).toBe(true)
     expect(stored?.schemaVersion).toBe(3)
     expect(stored?.embeddingMode).toBe('fallback')
     expect(stored?.noteNeighbors).toEqual([])
@@ -244,6 +383,145 @@ describe('project repository', () => {
     expect((await getProject(project.id))?.interactionEvents).toEqual([event])
     expect((await getProjectObjectBundle(project.id))?.interactionEvents).toEqual([event])
     expect(await listProjectBackups(project.id)).toEqual([])
+  })
+
+  it('stores a structured-clone vault handle outside project backups and deletes it explicitly', async () => {
+    const project = withVaultSync(smallProject('p-vault-binding', '目录授权'))
+    const handle = { kind: 'directory', name: 'Main vault', nested: { token: 7 } }
+    await saveProject(project)
+
+    await saveVaultBinding(project.id, 'vault-main', handle)
+    expect(await getVaultBinding(project.id, 'vault-main')).toEqual(handle)
+
+    const backup = await createProjectBackup(project)
+    expect(JSON.stringify(backup)).not.toContain('nested')
+    expect(serializeForAssertion(project)).not.toContain('nested')
+
+    await deleteVaultBinding(project.id, 'vault-main')
+    expect(await getVaultBinding(project.id, 'vault-main')).toBeUndefined()
+
+    await saveVaultBinding(project.id, 'vault-main', handle)
+    await deleteProject(project.id)
+    expect(await getVaultBinding(project.id, 'vault-main')).toBeUndefined()
+  })
+
+  it('commits a vault sync with one recovery point and leaves unrelated object records untouched', async () => {
+    const previous = withVaultSync(smallProject('p-vault-sync', '增量同步'))
+    await saveProject(previous, { createBackup: false })
+    const database = await getDatabase()
+    const unaffected = (await getProjectObjectBundle(previous.id))!.items[1]
+    await database.put('items', { ...unaffected, untouchedMarker: 'preserve-me' } as never)
+
+    const changedContent = `${previous.notes[0].content}\n同步新增内容`
+    const next = withVaultSync({
+      ...previous,
+      updatedAt: '2026-08-17T12:00:00.000Z',
+      notes: previous.notes.map((note, index) => index === 0
+        ? { ...note, content: changedContent, fingerprint: 'fingerprint:changed' }
+        : note),
+    }, 'Renamed/Source.md')
+    next.vaultSync!.revisions = [{
+      id: 'revision:vault-sync:changed',
+      sourceId: 'vault-source-stable',
+      itemId: next.notes[0].id,
+      operation: 'modify',
+      rawContentHash: next.vaultSync!.sources[0].rawContentHash,
+      previousContentHash: previous.vaultSync!.sources[0].rawContentHash,
+      fromPath: 'Notes/Source.md',
+      toPath: 'Renamed/Source.md',
+      entityHash: next.vaultSync!.sources[0].entityHash,
+      acceptedAt: next.updatedAt,
+      occurredAt: next.updatedAt,
+      timestampSource: 'accepted-at',
+      provenance: 'vault-sync',
+    }]
+
+    await saveVaultSyncProject(previous, next)
+
+    expect((await database.get('items', [previous.id, unaffected.id]) as typeof unaffected & { untouchedMarker?: string })
+      .untouchedMarker).toBe('preserve-me')
+    expect((await database.get('sources', [previous.id, 'vault-source-stable']))?.sourcePath)
+      .toBe('Renamed/Source.md')
+    expect((await database.get('revisions', [previous.id, 'revision:vault-sync:changed']))?.actorId)
+      .toBe('vault-sync')
+    const [backup] = await listProjectBackups(previous.id)
+    expect(backup.reason).toBe('before-vault-sync')
+    const restored = await restoreProjectBackup(backup.id)
+    expect(restored?.vaultSync?.sources[0].relativePath).toBe('Notes/Source.md')
+  })
+
+  it('rolls back the backup, project, and object records when a vault sync write fails', async () => {
+    const previous = withVaultSync(smallProject('p-vault-sync-rollback', '同步回滚'))
+    await saveProject(previous, { createBackup: false })
+    const next = withVaultSync({
+      ...previous,
+      name: '不应保存',
+      updatedAt: '2026-08-17T12:30:00.000Z',
+      notes: previous.notes.map((note, index) => index === 0 ? { ...note, title: '不应写入 object store' } : note),
+    })
+    ;(next.vaultSync!.sources[0].acceptedNote as unknown as { title: unknown }).title = () => 'not cloneable'
+
+    await expect(saveVaultSyncProject(previous, next)).rejects.toBeDefined()
+
+    expect((await getProject(previous.id))?.name).toBe('同步回滚')
+    expect((await getProjectObjectBundle(previous.id))?.items[0].title).toBe(previous.notes[0].title)
+    expect(await listProjectBackups(previous.id)).toEqual([])
+  })
+
+  it('commits a vault write-back revision with CAS and a write-back recovery point', async () => {
+    const previous = withVaultSync(smallProject('p-vault-writeback', '写回持久化'))
+    await saveProject(previous, { createBackup: false })
+    const source = previous.vaultSync!.sources[0]
+    const acceptedAt = '2026-08-17T12:20:00.000Z'
+    const revision = {
+      id: 'revision:vault-writeback:changed',
+      sourceId: source.sourceId,
+      itemId: source.itemId,
+      path: source.relativePath,
+      beforeRawContentHash: source.rawContentHash,
+      afterRawContentHash: 'sha256:writeback-after',
+      requestIds: ['field:vault-source-stable:mastery'],
+      acceptedAt,
+      provenance: 'vault-writeback' as const,
+    }
+    const next: TerrainProject = {
+      ...previous,
+      updatedAt: acceptedAt,
+      vaultSync: {
+        ...previous.vaultSync!,
+        sources: previous.vaultSync!.sources.map((candidate) => candidate.sourceId === source.sourceId
+          ? { ...candidate, rawContentHash: revision.afterRawContentHash, acceptedAt }
+          : candidate),
+        writebackRevisions: [revision],
+      },
+    }
+
+    await saveVaultWritebackProject(previous, next)
+
+    await expect((await getDatabase()).get('revisions', [previous.id, revision.id]).then((value) => value?.actorId))
+      .resolves.toBe('vault-writeback')
+    expect((await listProjectBackups(previous.id))[0]?.reason).toBe('before-vault-writeback')
+  })
+
+  it('rejects a stale vault preview instead of overwriting a concurrent project save', async () => {
+    const previous = withVaultSync(smallProject('p-vault-sync-stale', '同步并发保护'))
+    await saveProject(previous, { createBackup: false })
+    const concurrent = {
+      ...previous,
+      name: '并发保存版本',
+      updatedAt: '2026-08-17T12:40:00.000Z',
+    }
+    await saveProject(concurrent, { createBackup: false })
+    const staleNext = withVaultSync({
+      ...previous,
+      name: '过期预览版本',
+      updatedAt: '2026-08-17T12:41:00.000Z',
+    }, 'Renamed/Stale.md')
+
+    await expect(saveVaultSyncProject(previous, staleNext)).rejects.toThrow(/preview is stale/)
+
+    expect((await getProject(previous.id))?.name).toBe('并发保存版本')
+    expect(await listProjectBackups(previous.id)).toEqual([])
   })
 
   it('compacts high-volume interaction events while preserving review timestamps', async () => {
@@ -388,6 +666,18 @@ describe('project repository', () => {
 
   it('backs up the previous version before save and restores it', async () => {
     const original = smallProject('p-backup', '初始版本')
+    original.explorationItems = [explorationItemFor(original)]
+    const neighborEvidence = {
+      sourceId: original.notes[0].id,
+      targetId: original.notes[1].id,
+      rank: 1,
+      score: 0.72,
+      modelId: 'semantic-backup-model',
+      embeddingMode: 'semantic' as const,
+      formulaVersion: 'embedding-cosine-neighbors-v1' as const,
+      provenance: 'embedding' as const,
+    }
+    original.noteNeighborEvidence = [[neighborEvidence], []]
     await saveProject(original)
     await saveProject({ ...original, name: '修改版本', updatedAt: '2026-08-14T08:00:00.000Z' })
 
@@ -396,7 +686,11 @@ describe('project repository', () => {
 
     const restored = await restoreProjectBackup(backup.id)
     expect(restored?.name).toBe('初始版本')
+    expect(restored?.explorationItems).toEqual(original.explorationItems)
+    expect(restored?.noteNeighborEvidence).toEqual(original.noteNeighborEvidence)
     expect((await getProject('p-backup'))?.name).toBe('初始版本')
+    expect((await getProjectObjectBundle('p-backup'))?.explorationItems).toEqual(original.explorationItems)
+    expect((await getProjectObjectBundle('p-backup'))?.neighborEvidence).toEqual([neighborEvidence])
     expect((await listProjectBackups('p-backup')).some((item) => item.reason === 'before-restore')).toBe(true)
   })
 
@@ -489,3 +783,7 @@ describe('project repository', () => {
     expect(await listProjectBackups(project.id)).toHaveLength(8)
   })
 })
+
+function serializeForAssertion(value: unknown): string {
+  return JSON.stringify(value)
+}

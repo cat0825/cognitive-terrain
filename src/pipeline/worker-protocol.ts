@@ -28,7 +28,7 @@ export type AnalysisWorkerRequest =
       gridSize: number
       timeZone: string
       nowMs: number
-      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'activity' | 'progression'>
+      elevation: Extract<TerrainElevation, 'mastery' | 'exploration' | 'activity' | 'progression' | 'structure'>
       cognitiveObservations?: CognitiveObservation[]
       cognitiveStates?: CognitiveState[]
       learningProgressionProfileVersion?: LearningProgressionProfileVersion

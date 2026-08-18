@@ -1,4 +1,5 @@
 import type {
+  ExplorationLifecycleItem,
   InteractionEvent,
   ProjectBackup,
   ProjectBackupReason,
@@ -6,6 +7,7 @@ import type {
   ProjectSummary,
   TerrainProject,
 } from '../domain/types'
+import { normalizeExplorationItems } from '../domain/schema-v3'
 import { normalizeActiveReferenceAtlasId } from '../domain/cognitive-state'
 import { compactActivityHistory } from '../domain/activity-history'
 import {
@@ -68,6 +70,45 @@ export async function updateActiveReferenceAtlas(
     if (workspace) {
       await transaction.objectStore('workspaces').put({ ...workspace, activeReferenceAtlasId, updatedAt })
     }
+    await transaction.done
+    return project
+  } catch (error) {
+    return abortTransaction(transaction, error)
+  }
+}
+
+/** Persist exploration decisions without rebuilding notes, layouts, or revision history. */
+export async function updateProjectExplorationItems(
+  projectId: string,
+  explorationItems: readonly ExplorationLifecycleItem[],
+  updatedAt: string,
+): Promise<TerrainProject | undefined> {
+  if (!Number.isFinite(Date.parse(updatedAt))) throw new Error('invalid exploration update timestamp')
+  const database = await getDatabase()
+  const transaction = database.transaction(['projects', 'workspaces', 'explorationItems'], 'readwrite')
+  try {
+    const projects = transaction.objectStore('projects')
+    const stored = await projects.get(projectId)
+    if (!stored) {
+      await transaction.done
+      return undefined
+    }
+    const current = migrateProject(stored)
+    const normalizedItems = normalizeExplorationItems(
+      explorationItems,
+      new Set(current.notes.map((note) => note.id)),
+    )
+    const project = { ...current, explorationItems: normalizedItems, updatedAt }
+    const explorationStore = transaction.objectStore('explorationItems')
+    const existingKeys = await explorationStore.index('by-workspace').getAllKeys(projectId)
+    await Promise.all(existingKeys.map((key) => explorationStore.delete(key)))
+    await Promise.all(normalizedItems.map((item) => explorationStore.put({
+      ...item,
+      workspaceId: projectId,
+    })))
+    await projects.put(project)
+    const workspace = await transaction.objectStore('workspaces').get(projectId)
+    if (workspace) await transaction.objectStore('workspaces').put({ ...workspace, updatedAt })
     await transaction.done
     return project
   } catch (error) {
@@ -173,7 +214,7 @@ export async function deleteProject(id: string): Promise<void> {
     if (project) {
       await transaction.objectStore('backups').put(makeBackup(migrateProject(project), 'before-delete'))
     }
-    await clearProjectMaterialization(transaction, id)
+    await clearProjectMaterialization(transaction, id, true, true)
     await projects.delete(id)
     await transaction.done
   } catch (error) {

@@ -5,6 +5,7 @@ import {
 } from './learning-progression'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
 import { areasForNote, plateIdForArea } from './knowledge-plates'
+import { buildPrerequisiteTopology } from './prerequisite-topology'
 import {
   legacyTaxonomyNodesForProject,
   normalizeTaxonomyAlias,
@@ -12,14 +13,20 @@ import {
   validateTaxonomy,
 } from './taxonomy'
 import type { ActivityHistoryState } from './activity-history'
+import { STABLE_LAYOUT_FORMULA_VERSION } from './layout-version'
 import type {
   CognitiveState,
   CognitiveObservation,
+  ExplorationLifecycleItem,
   InteractionEvent,
+  NoteNeighborEvidence,
+  PrerequisiteTopology,
   ReferenceAtlasManifest,
   TerrainProfile,
   TerrainProject,
   TaxonomyNode,
+  VaultSourceState,
+  VaultSyncRevision,
 } from './types'
 
 export interface WorkspaceV3 {
@@ -34,6 +41,7 @@ export interface WorkspaceV3 {
   taxonomyVersion?: number
   activeReferenceAtlasId?: string
   learningProgressionProfileVersion?: TerrainProject['learningProgressionProfileVersion']
+  prerequisiteTopology?: PrerequisiteTopology
 }
 
 export interface KnowledgeItemV3 {
@@ -61,6 +69,10 @@ export interface SourceV3 {
   vault?: string
   canonicalUrl?: string
   contentHash: string
+  sourceKey?: string
+  lastModifiedMs?: number
+  size?: number
+  provenance: 'import' | 'vault-sync'
   retrievedAt: string
 }
 
@@ -70,9 +82,11 @@ export interface RelationV3 {
   fromItemId: string
   toItemId?: string
   targetTitle: string
-  kind: 'wikilink'
+  kind: 'wikilink' | 'prerequisite'
   resolved: boolean
-  provenance: 'import'
+  provenance: 'import' | 'yaml' | 'app-confirmed'
+  sourceNoteId?: string
+  sourceField?: 'prerequisites' | 'buildsOn' | 'app'
 }
 
 export interface PlateMembershipV3 {
@@ -113,18 +127,45 @@ export interface CitationV3 {
   contentHash: string
 }
 
+export interface MigrationBaselinePatchV3 {
+  kind: 'migration-baseline'
+  entityHash: string
+  contentHash: string
+  sourceSchemaVersion: number
+}
+
+export interface VaultSyncPatchV3 {
+  kind: 'vault-sync'
+  sourceId: string
+  operation: VaultSyncRevision['operation']
+  rawContentHash: string
+  previousContentHash?: string
+  fromPath?: string
+  toPath?: string
+  entityHash: string
+  acceptedAt: string
+  timestampSource: VaultSyncRevision['timestampSource']
+  provenance: 'vault-sync'
+}
+
+export interface VaultWritebackPatchV3 {
+  kind: 'vault-writeback'
+  sourceId: string
+  path: string
+  beforeRawContentHash: string
+  afterRawContentHash: string
+  requestIds: string[]
+  acceptedAt: string
+  provenance: 'vault-writeback'
+}
+
 export interface RevisionV3 {
   id: string
   workspaceId: string
   entityId: string
   entityType: 'item'
-  patch: {
-    kind: 'migration-baseline'
-    entityHash: string
-    contentHash: string
-    sourceSchemaVersion: number
-  }
-  actorId: 'migration'
+  patch: MigrationBaselinePatchV3 | VaultSyncPatchV3 | VaultWritebackPatchV3
+  actorId: 'migration' | 'vault-sync' | 'vault-writeback'
   createdAt: string
 }
 
@@ -138,11 +179,13 @@ export interface SchemaV3Bundle {
   interactionEvents: InteractionEvent[]
   plateMemberships: PlateMembershipV3[]
   layouts: LayoutRecordV3[]
+  neighborEvidence: NoteNeighborEvidence[]
   terrainProfiles: TerrainProfile[]
   citations: CitationV3[]
   revisions: RevisionV3[]
   taxonomyNodes: TaxonomyNode[]
   referenceAtlases: ReferenceAtlasManifest[]
+  explorationItems: ExplorationLifecycleItem[]
 }
 
 export interface SchemaV3MigrationReport {
@@ -155,8 +198,10 @@ export interface SchemaV3MigrationReport {
   cognitiveStateCount: number
   cognitiveObservationCount: number
   layoutCount: number
+  neighborEvidenceCount: number
   citationCount: number
   revisionCount: number
+  explorationItemCount: number
   warnings: string[]
 }
 
@@ -179,6 +224,14 @@ export function migrateTerrainProjectToV3(
   assertUniqueIds('interaction event', (project.interactionEvents ?? []).map((event) => event.id))
   assertUniqueIds('terrain profile', (project.terrainProfiles ?? []).map((profile) => profile.id))
   const itemIds = new Set(project.notes.map((note) => note.id))
+  const explorationItems = normalizeExplorationItems(project.explorationItems ?? [], itemIds)
+  const neighborEvidence = (project.noteNeighborEvidence ?? [])
+    .flat()
+    .filter((evidence) => itemIds.has(evidence.sourceId) && itemIds.has(evidence.targetId))
+  assertUniqueIds(
+    'neighbor evidence',
+    neighborEvidence.map((evidence) => `${evidence.sourceId}:${evidence.targetId}`),
+  )
   assertKnownItemReferences(
     'cognitive state',
     (project.cognitiveStates ?? []).map((state) => state.itemId),
@@ -195,29 +248,42 @@ export function migrateTerrainProjectToV3(
     itemIds,
   )
   const titleIndex = buildTitleIndex(project)
+  const prerequisiteTopology = buildPrerequisiteTopology(project.notes)
+  const vaultSources = vaultSourcesForProject(project)
   const taxonomyNodes = taxonomyNodesForProject(project)
   validateTaxonomy(taxonomyNodes)
   const referenceAtlases = referenceAtlasesForProject(project, taxonomyNodes)
   const sources = project.notes.flatMap((note) => {
-    if (!hasSourceMetadata(note)) return []
+    const vaultSource = vaultSourceForNote(note, vaultSources)
+    if (!hasSourceMetadata(note, vaultSource)) return []
     const sourceIdentity = sourceIdentityForNote(note)
+    const sourceId = note.sourceId ?? vaultSource?.sourceId ?? `source-${stableHash(sourceIdentity)}`
+    const sourcePath = vaultSource?.relativePath ?? note.sourcePath
+    const vault = vaultSource
+      ? project.vaultSync?.vaults.find((candidate) => candidate.vaultId === vaultSource.vaultId)?.displayName ?? note.vault
+      : note.vault
     return [{
-      id: `source-${stableHash(sourceIdentity)}`,
+      id: sourceId,
       workspaceId: project.id,
-      kind: sourceKind(note.source),
-      title: note.source ?? note.sourcePath ?? note.title,
-      sourcePath: note.sourcePath,
-      vault: note.vault,
+      kind: sourceKind(note.source, sourcePath),
+      title: note.source ?? sourcePath ?? note.title,
+      sourcePath,
+      vault,
       canonicalUrl: isHttpUrl(note.source) ? note.source : undefined,
-      contentHash: stableHash(sourceIdentity),
-      retrievedAt: project.updatedAt,
+      contentHash: vaultSource?.rawContentHash ?? stableHash(note.content),
+      sourceKey: note.sourceKey ?? vaultSource?.acceptedNote.sourceKey,
+      lastModifiedMs: vaultSource?.lastModifiedMs,
+      size: vaultSource?.size,
+      provenance: vaultSource ? 'vault-sync' : 'import',
+      retrievedAt: vaultSource?.acceptedAt ?? project.updatedAt,
     } satisfies SourceV3]
   })
   const uniqueSources = dedupeById(sources)
 
   const items = project.notes.map((note) => {
-    const sourceId = hasSourceMetadata(note)
-      ? `source-${stableHash(sourceIdentityForNote(note))}`
+    const vaultSource = vaultSourceForNote(note, vaultSources)
+    const sourceId = hasSourceMetadata(note, vaultSource)
+      ? note.sourceId ?? vaultSource?.sourceId ?? `source-${stableHash(sourceIdentityForNote(note))}`
       : undefined
     return {
       id: note.id,
@@ -231,12 +297,12 @@ export function migrateTerrainProjectToV3(
       areas: note.areas ? [...note.areas] : undefined,
       declaredAreas: note.declaredAreas ? [...note.declaredAreas] : undefined,
       createdAt: note.createdAt,
-      updatedAt: project.updatedAt,
+      updatedAt: vaultSource?.acceptedAt ?? project.updatedAt,
       status: note.status === 'archived' ? 'archived' : sourceId ? 'active' : 'draft',
     } satisfies KnowledgeItemV3
   })
 
-  const relations = dedupeById(project.notes.flatMap((note) => note.links.map((targetTitle) => {
+  const wikiLinkRelations = project.notes.flatMap((note) => note.links.map((targetTitle) => {
     const toItemId = titleIndex.get(normalizeTitle(targetTitle))
     return {
       id: `relation-${stableHash(`${note.id}\n${targetTitle}`)}`,
@@ -248,7 +314,20 @@ export function migrateTerrainProjectToV3(
       resolved: toItemId !== undefined,
       provenance: 'import',
     } satisfies RelationV3
-  })))
+  }))
+  const prerequisiteRelations = prerequisiteTopology.relations.map((relation) => ({
+    id: relation.id,
+    workspaceId: project.id,
+    fromItemId: relation.fromItemId,
+    toItemId: relation.toItemId,
+    targetTitle: relation.declaredTarget,
+    kind: 'prerequisite' as const,
+    resolved: true,
+    provenance: relation.provenance,
+    sourceNoteId: relation.sourceNoteId,
+    sourceField: relation.sourceField,
+  } satisfies RelationV3))
+  const relations = dedupeById([...wikiLinkRelations, ...prerequisiteRelations])
 
   const cognitiveStatesByItem = new Map(
     (project.cognitiveStates ?? []).map((state) => [state.itemId, state]),
@@ -296,11 +375,11 @@ export function migrateTerrainProjectToV3(
     itemId: note.id,
     x: note.x,
     y: note.y,
-    algorithmVersion: project.modelId,
+    algorithmVersion: STABLE_LAYOUT_FORMULA_VERSION,
     anchorVersion: 'unanchored-v2',
   }))
   const citations: CitationV3[] = []
-  const revisions = items.map((item) => {
+  const migrationRevisions = items.map((item) => {
     const entityHash = stableHash(JSON.stringify({
       title: item.title,
       contentHash: item.contentHash,
@@ -325,9 +404,52 @@ export function migrateTerrainProjectToV3(
       createdAt: item.updatedAt,
     } satisfies RevisionV3
   })
+  const vaultSyncRevisions = (project.vaultSync?.revisions ?? []).map((revision) => ({
+    id: revision.id,
+    workspaceId: project.id,
+    entityId: revision.itemId,
+    entityType: 'item' as const,
+    patch: {
+      kind: 'vault-sync' as const,
+      sourceId: revision.sourceId,
+      operation: revision.operation,
+      rawContentHash: revision.rawContentHash,
+      previousContentHash: revision.previousContentHash,
+      fromPath: revision.fromPath,
+      toPath: revision.toPath,
+      entityHash: revision.entityHash,
+      acceptedAt: revision.acceptedAt,
+      timestampSource: revision.timestampSource,
+      provenance: revision.provenance,
+    },
+    actorId: 'vault-sync' as const,
+    createdAt: revision.occurredAt,
+  } satisfies RevisionV3))
+  const vaultWritebackRevisions = (project.vaultSync?.writebackRevisions ?? []).map((revision) => ({
+    id: revision.id,
+    workspaceId: project.id,
+    entityId: revision.itemId,
+    entityType: 'item' as const,
+    patch: {
+      kind: 'vault-writeback' as const,
+      sourceId: revision.sourceId,
+      path: revision.path,
+      beforeRawContentHash: revision.beforeRawContentHash,
+      afterRawContentHash: revision.afterRawContentHash,
+      requestIds: [...revision.requestIds],
+      acceptedAt: revision.acceptedAt,
+      provenance: revision.provenance,
+    },
+    actorId: 'vault-writeback' as const,
+    createdAt: revision.acceptedAt,
+  } satisfies RevisionV3))
+  const revisions = dedupeById([...migrationRevisions, ...vaultSyncRevisions, ...vaultWritebackRevisions])
   const warnings = [
     ...(uniqueSources.length === 0 ? ['项目没有可迁移的来源；所有条目均标记为 draft'] : []),
-    ...(relations.some((relation) => !relation.resolved) ? ['部分 WikiLink 无法解析，已保留目标标题'] : []),
+    ...(relations.some((relation) => relation.kind === 'wikilink' && !relation.resolved) ? ['部分 WikiLink 无法解析，已保留目标标题'] : []),
+    ...(prerequisiteTopology.diagnostics.length
+      ? [`${prerequisiteTopology.diagnostics.length} 条 prerequisite 声明未参与结构派生；请检查拓扑诊断`]
+      : []),
   ]
   const bundle: SchemaV3Bundle = {
     workspace: {
@@ -349,6 +471,7 @@ export function migrateTerrainProjectToV3(
       ),
       learningProgressionProfileVersion: project.learningProgressionProfileVersion
         ?? DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION,
+      prerequisiteTopology,
     },
     items,
     sources: uniqueSources,
@@ -358,11 +481,13 @@ export function migrateTerrainProjectToV3(
     interactionEvents,
     plateMemberships,
     layouts,
+    neighborEvidence,
     terrainProfiles,
     citations,
     revisions,
     taxonomyNodes,
     referenceAtlases,
+    explorationItems,
   }
   return {
     bundle,
@@ -376,18 +501,85 @@ export function migrateTerrainProjectToV3(
       cognitiveStateCount: cognitiveStates.length,
       cognitiveObservationCount: cognitiveObservations.length,
       layoutCount: layouts.length,
+      neighborEvidenceCount: neighborEvidence.length,
       citationCount: citations.length,
       revisionCount: revisions.length,
+      explorationItemCount: explorationItems.length,
       warnings,
     },
   }
 }
 
+export function normalizeExplorationItems(
+  values: readonly ExplorationLifecycleItem[],
+  knownItemIds: ReadonlySet<string>,
+): ExplorationLifecycleItem[] {
+  assertUniqueIds('exploration item', values.map((item) => item.id))
+  assertUniqueIds('exploration suggestion', values.map((item) => item.suggestion.id))
+  assertUniqueIds(
+    'exploration lifecycle event',
+    values.flatMap((item) => item.history.map((event) => event.id)),
+  )
+  return values.map((item) => {
+    if (!Number.isFinite(item.suggestion.priority)) {
+      throw new Error(`Schema v3 migration rejected invalid exploration priority: ${item.id}`)
+    }
+    return {
+      ...item,
+      suggestion: {
+        ...item.suggestion,
+        reason: { ...item.suggestion.reason },
+        supportingItemIds: [...new Set(item.suggestion.supportingItemIds)]
+          .filter((itemId) => knownItemIds.has(itemId)),
+        sourceRoute: normalizeExplorationSourceRoute(item.suggestion.sourceRoute, knownItemIds),
+        action: { ...item.suggestion.action },
+        referenceBoundary: item.suggestion.referenceBoundary
+          ? { ...item.suggestion.referenceBoundary }
+          : undefined,
+        reopenReason: item.suggestion.reopenReason ? { ...item.suggestion.reopenReason } : undefined,
+        previousDecision: item.suggestion.previousDecision
+          ? { ...item.suggestion.previousDecision }
+          : undefined,
+      },
+      action: { ...item.action },
+      history: item.history.map((event) => ({
+        ...event,
+        action: event.action ? { ...event.action } : undefined,
+      })),
+    }
+  })
+}
+
+function normalizeExplorationSourceRoute(
+  route: ExplorationLifecycleItem['suggestion']['sourceRoute'],
+  knownItemIds: ReadonlySet<string>,
+): ExplorationLifecycleItem['suggestion']['sourceRoute'] {
+  if (route.kind === 'note' && !knownItemIds.has(route.noteId)) {
+    return { kind: 'unavailable', originalKind: 'note', detail: 'source note no longer exists' }
+  }
+  if (route.kind === 'relationship'
+    && (!knownItemIds.has(route.fromItemId) || (route.toItemId !== undefined && !knownItemIds.has(route.toItemId)))) {
+    return { kind: 'unavailable', originalKind: 'relationship', detail: 'relationship endpoint no longer exists' }
+  }
+  if (route.kind === 'goal' && route.noteId !== undefined && !knownItemIds.has(route.noteId)) {
+    const { noteId: _noteId, ...goalRoute } = route
+    return goalRoute
+  }
+  return { ...route }
+}
+
 function buildTitleIndex(project: TerrainProject): Map<string, string> {
   const index = new Map<string, string>()
+  const ambiguousTitles = new Set<string>()
   for (const note of project.notes) {
     const title = normalizeTitle(note.title)
-    if (!index.has(title)) index.set(title, note.id)
+    if (ambiguousTitles.has(title)) continue
+    if (index.has(title)) {
+      index.delete(title)
+      ambiguousTitles.add(title)
+      continue
+    }
+    index.set(title, note.id)
   }
   return index
 }
@@ -437,13 +629,34 @@ function normalizeTitle(value: string): string {
   return value.trim().toLocaleLowerCase()
 }
 
-function sourceKind(source: string | undefined): SourceV3['kind'] {
+function sourceKind(source: string | undefined, sourcePath?: string): SourceV3['kind'] {
   if (isHttpUrl(source)) return 'web'
-  return source ? 'note' : 'unknown'
+  return source || sourcePath ? 'note' : 'unknown'
 }
 
-function hasSourceMetadata(note: TerrainProject['notes'][number]): boolean {
-  return Boolean(note.source || note.sourcePath || note.vault)
+function vaultSourcesForProject(project: TerrainProject): {
+  byId: ReadonlyMap<string, VaultSourceState>
+  byItemId: ReadonlyMap<string, VaultSourceState>
+} {
+  const sources = project.vaultSync?.sources ?? []
+  return {
+    byId: new Map(sources.map((source) => [source.sourceId, source])),
+    byItemId: new Map(sources.map((source) => [source.itemId, source])),
+  }
+}
+
+function vaultSourceForNote(
+  note: TerrainProject['notes'][number],
+  sources: ReturnType<typeof vaultSourcesForProject>,
+): VaultSourceState | undefined {
+  return note.sourceId ? sources.byId.get(note.sourceId) ?? sources.byItemId.get(note.id) : sources.byItemId.get(note.id)
+}
+
+function hasSourceMetadata(
+  note: TerrainProject['notes'][number],
+  vaultSource?: VaultSourceState,
+): boolean {
+  return Boolean(note.sourceId || note.source || note.sourcePath || note.vault || vaultSource)
 }
 
 function sourceIdentityForNote(note: TerrainProject['notes'][number]): string {

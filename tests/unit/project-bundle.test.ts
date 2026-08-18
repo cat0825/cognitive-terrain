@@ -5,6 +5,8 @@ import { parseProjectBundle, serializeProjectBundle } from '../../src/export/pro
 import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { createCognitiveObservation } from '../../src/domain/learning-progression'
+import { buildPrerequisiteTopology, materializePrerequisites } from '../../src/domain/prerequisite-topology'
+import type { ExplorationLifecycleItem, TerrainProject } from '../../src/domain/types'
 
 describe('project bundle migration', () => {
   it('round-trips learning observations while snapshot-only projects stay history-free', async () => {
@@ -97,6 +99,30 @@ describe('project bundle migration', () => {
     ]))
   })
 
+  it('round-trips inspectable embedding neighbor evidence', async () => {
+    const demo = createDemoProject()
+    const source = migrateProject({
+      ...demo,
+      noteNeighborEvidence: [[{
+        sourceId: demo.notes[0].id,
+        targetId: demo.notes[1].id,
+        rank: 1,
+        score: 0.875,
+        modelId: 'Xenova/multilingual-e5-small',
+        embeddingMode: 'semantic',
+        formulaVersion: 'embedding-cosine-neighbors-v1',
+        provenance: 'embedding',
+      }]],
+    })
+    const file = new File([serializeProjectBundle(source)], 'neighbor-evidence.terrain.json', {
+      type: 'application/json',
+    })
+
+    const restored = await parseProjectBundle(file)
+
+    expect(restored.noteNeighborEvidence).toEqual(source.noteNeighborEvidence)
+  })
+
   it('round-trips taxonomy hierarchy, aliases, versions, and declared labels', async () => {
     const demo = createDemoProject()
     const root = createTaxonomyNode({ workspaceId: demo.id, label: 'Engineering', aliases: ['工程'], version: 3 }, demo.updatedAt)
@@ -160,5 +186,158 @@ describe('project bundle migration', () => {
     expect(bundle.workspace.activeReferenceAtlasId).toBeUndefined()
     expect(restored.referenceAtlases).toEqual(project.referenceAtlases)
     expect(restored.activeReferenceAtlasId).toBeUndefined()
+  })
+
+  it('round-trips exploration lifecycle state and removes dangling supporting note ids', async () => {
+    const demo = createDemoProject()
+    const lifecycle: ExplorationLifecycleItem = {
+      id: 'explore-linear-algebra',
+      suggestion: {
+        id: 'suggestion-linear-algebra',
+        reason: { code: 'unassessed-note', detail: '该笔记尚未完成自评' },
+        supportingItemIds: [demo.notes[0].id, 'deleted-note'],
+        sourceRoute: { kind: 'note', noteId: 'deleted-note' },
+        evidenceFingerprint: 'evidence-v1',
+        priority: 0.8,
+        action: { title: '补充熟练度自评', detail: '回到原笔记记录当前掌握程度' },
+      },
+      status: 'snoozed',
+      action: { title: '补充熟练度自评', detail: '回到原笔记记录当前掌握程度' },
+      userNotes: '周末处理',
+      snoozedUntil: '2026-08-22T00:00:00.000Z',
+      updatedAt: demo.updatedAt,
+      history: [{
+        id: 'explore-event-1',
+        type: 'snooze',
+        occurredAt: demo.updatedAt,
+        fromStatus: 'accepted',
+        toStatus: 'snoozed',
+        evidenceFingerprint: 'evidence-v1',
+        note: '等待周末',
+      }],
+    }
+    const source = migrateProject({ ...demo, explorationItems: [lifecycle] })
+    const file = new File([serializeProjectBundle(source)], 'exploration.terrain.json', {
+      type: 'application/json',
+    })
+
+    const restored = await parseProjectBundle(file)
+
+    expect(restored.explorationItems).toHaveLength(1)
+    expect(restored.explorationItems?.[0]).toMatchObject({
+      status: 'snoozed',
+      userNotes: '周末处理',
+      suggestion: {
+        supportingItemIds: [demo.notes[0].id],
+        sourceRoute: { kind: 'unavailable', originalKind: 'note' },
+      },
+      history: [expect.objectContaining({ type: 'snooze', toStatus: 'snoozed' })],
+    })
+  })
+
+  it('round-trips prerequisite declarations, diagnostics, and derived evidence', async () => {
+    const demo = createDemoProject()
+    const root = { ...demo.notes[0], id: 'root', title: 'Root', prerequisites: [] }
+    const child = {
+      ...demo.notes[1],
+      id: 'child',
+      title: 'Child',
+      prerequisites: materializePrerequisites('child', [{
+        target: 'Root',
+        provenance: 'app-confirmed',
+        sourceField: 'app',
+      }]),
+    }
+    const notes = [root, child]
+    const source: TerrainProject = {
+      ...demo,
+      notes,
+      prerequisiteTopology: buildPrerequisiteTopology(notes),
+    }
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'prerequisites.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.notes[1]?.prerequisites).toEqual(child.prerequisites)
+    expect(restored.prerequisiteTopology).toEqual(source.prerequisiteTopology)
+  })
+
+  it('round-trips stable vault source identity, baselines, and sync provenance', async () => {
+    const demo = createDemoProject()
+    const note = {
+      ...demo.notes[0],
+      sourceId: 'source:vault:stable',
+      sourceKey: 'vault-main:Math/Algebra.md',
+      sourcePath: 'Math/Algebra.md',
+      vault: 'Main vault',
+    }
+    const source: TerrainProject = {
+      ...demo,
+      notes: [note],
+      vaultSync: {
+        version: 1,
+        vaults: [{
+          vaultId: 'vault-main',
+          displayName: 'Main vault',
+          accessMode: 'directory-handle',
+          lastScannedAt: '2026-08-17T12:00:00.000Z',
+        }],
+        sources: [{
+          sourceId: note.sourceId,
+          itemId: note.id,
+          vaultId: 'vault-main',
+          relativePath: 'Math/Algebra.md',
+          status: 'present',
+          rawContentHash: 'sha256:algebra',
+          entityHash: 'entity:algebra',
+          lastModifiedMs: 1_776_422_400_000,
+          size: 512,
+          acceptedFieldHashes: { title: 'field:title', content: 'field:content' },
+          acceptedNote: {
+            sourceKey: note.sourceKey,
+            title: note.title,
+            content: note.content,
+            createdAt: note.createdAt,
+            tags: [...note.tags],
+            weight: note.weight,
+            mastery: note.mastery,
+            confidence: note.confidence,
+            exploration: note.exploration,
+            status: note.status,
+            areas: [...(note.areas ?? [])],
+            declaredAreas: [...(note.declaredAreas ?? [])],
+            reviewedAt: note.reviewedAt,
+            links: [...note.links],
+          },
+          acceptedAt: '2026-08-17T12:00:00.000Z',
+        }],
+        revisions: [{
+          id: 'revision:vault-sync:algebra',
+          sourceId: note.sourceId,
+          itemId: note.id,
+          operation: 'modify',
+          rawContentHash: 'sha256:algebra',
+          previousContentHash: 'sha256:algebra-old',
+          entityHash: 'entity:algebra',
+          acceptedAt: '2026-08-17T12:00:00.000Z',
+          occurredAt: '2026-08-17T11:59:00.000Z',
+          timestampSource: 'file-last-modified',
+          provenance: 'vault-sync',
+        }],
+      },
+    }
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'vault-sync.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.notes[0]).toMatchObject({ sourceId: note.sourceId, sourceKey: note.sourceKey })
+    expect(restored.vaultSync).toEqual(source.vaultSync)
+    expect(JSON.stringify(restored)).not.toContain('vaultBindings')
   })
 })

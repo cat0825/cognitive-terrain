@@ -2,6 +2,7 @@ import { Check, RotateCcw, X } from 'lucide-react'
 import { lazy, Suspense, useMemo } from 'react'
 import { buildPlateCollisions, normalizeArea, summarizeKnowledgePlates } from '../domain/knowledge-plates'
 import { buildActivitySummaries, TEMPERATURE_COLORS } from '../domain/activity-temperature'
+import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
 import { projectTagCounts } from '../domain/project-view'
 import type { QualityLevel, VisualDimension } from '../domain/types'
 import { useAppStore } from '../store/app-store'
@@ -17,6 +18,7 @@ export function FilterPanel() {
   const activeAreas = useAppStore((state) => state.activeAreas)
   const quality = useAppStore((state) => state.quality)
   const visualDimension = useAppStore((state) => state.visualDimension)
+  const selectedNoteId = useAppStore((state) => state.selectedNoteId)
   const filtersOpen = useAppStore((state) => state.filtersOpen)
   const toggleTag = useAppStore((state) => state.toggleTag)
   const clearTags = useAppStore((state) => state.clearTags)
@@ -45,6 +47,17 @@ export function FilterPanel() {
       reviewedCount: result.reviewedCount + summary.reviewedCount,
     }), { activeNotes: 0, eventCount: 0, openedCount: 0, editedCount: 0, reviewedCount: 0 })
   }, [project.activityHistory?.aggregates, project.interactionEvents, project.notes])
+  const prerequisiteTopology = useMemo(
+    () => project.prerequisiteTopology ?? buildPrerequisiteTopology(project.notes),
+    [project.notes, project.prerequisiteTopology],
+  )
+  const selectedPrerequisiteAssignment = prerequisiteTopology.assignments.find((assignment) => assignment.itemId === selectedNoteId)
+  const selectedNote = project.notes.find((note) => note.id === selectedNoteId)
+  const prerequisiteMaxDepth = Math.max(0, ...prerequisiteTopology.assignments.map((assignment) => assignment.depth ?? 0))
+  const prerequisiteRelationById = useMemo(
+    () => new Map(prerequisiteTopology.relations.map((relation) => [relation.id, relation])),
+    [prerequisiteTopology.relations],
+  )
 
   if (!filtersOpen) return null
   return (
@@ -90,7 +103,7 @@ export function FilterPanel() {
       <section className="filter-section">
         <span className="filter-heading">地形口径</span>
         <div className="visual-dimension-control">
-          {(['density', 'mastery', 'exploration', 'activity', 'progression', 'temperature', 'area'] as VisualDimension[]).map((dimension) => (
+          {(['density', 'mastery', 'exploration', 'activity', 'progression', 'structure', 'temperature', 'area'] as VisualDimension[]).map((dimension) => (
             <button
               type="button"
               key={dimension}
@@ -146,6 +159,42 @@ export function FilterPanel() {
             </p>
           </div>
         )}
+        {visualDimension === 'structure' && (
+          <div
+            className="prerequisite-legend"
+            role="group"
+            aria-label="基础层级图例"
+            data-formula-version={project.terrainProfiles.find((profile) => profile.id === 'structure')?.formulaVersion}
+          >
+            <div className="prerequisite-scale" aria-hidden="true">
+              <span><i className="is-foundation" />基础层</span>
+              <span><i className="is-branch" />延伸层</span>
+              <span><i className="is-peak" />峰层</span>
+            </div>
+            <p>
+              {prerequisiteTopology.relations.length} 条显式关系 · {prerequisiteTopology.assignments.filter((assignment) => assignment.status === 'derived').length} 条参与分层
+              {prerequisiteTopology.diagnostics.length > 0 ? ` · ${prerequisiteTopology.diagnostics.length} 条诊断` : ''}
+            </p>
+            {selectedPrerequisiteAssignment && selectedNote && (
+              <div className="prerequisite-evidence" data-note-id={selectedNote.id}>
+                <strong>{selectedNote.title}</strong>
+                {selectedPrerequisiteAssignment.status === 'derived' ? (
+                  <small>
+                    第 {selectedPrerequisiteAssignment.depth ?? 0} 层 · {selectedPrerequisiteAssignment.branchRootIds.length} 个基础分支 · {selectedPrerequisiteAssignment.relationIds.length} 条证据
+                    {selectedPrerequisiteAssignment.relationIds.slice(0, 3).map((relationId) => {
+                      const relation = prerequisiteRelationById.get(relationId)
+                      return relation ? <span key={relationId}>关系 {relation.id} · 来源 {relation.sourceNoteId}</span> : null
+                    })}
+                  </small>
+                ) : (
+                  <small>{selectedPrerequisiteAssignment.status === 'excluded' ? '因循环依赖排除' : '没有显式 prerequisite 证据'}</small>
+                )}
+              </div>
+            )}
+            {prerequisiteTopology.relations.length === 0 && <small>没有显式 prerequisite / buildsOn 关系，结构海拔保持中性。</small>}
+            {prerequisiteMaxDepth > 0 && <small>最高层级 {prerequisiteMaxDepth}；深度只来自显式关系，不改变平面坐标。</small>}
+          </div>
+        )}
       </section>
       <section className="filter-section">
         <span className="filter-heading">渲染质量</span>
@@ -181,6 +230,7 @@ function dimensionLabel(dimension: VisualDimension): string {
   if (dimension === 'exploration') return '探索度'
   if (dimension === 'activity') return '活跃'
   if (dimension === 'progression') return '学习进程'
+  if (dimension === 'structure') return '基础层级'
   if (dimension === 'temperature') return '温度'
   if (dimension === 'area') return '领域'
   return '密度'
@@ -191,6 +241,7 @@ function dimensionHelp(dimension: VisualDimension): string {
   if (dimension === 'exploration') return '海拔：知识密度 × 探索度；暖色节点表示更高探索意愿。'
   if (dimension === 'activity') return '海拔：activity-elevation-v1 按显式评估时间衰减活动事件；只改变高度，不改变语义平面坐标。'
   if (dimension === 'progression') return '海拔：只重放带时区的显式认知观测；无历史、冲突或仅快照时使用中性海拔并提高不确定性。'
+  if (dimension === 'structure') return '海拔：显式 prerequisite/buildsOn DAG 的层级；基础层较低，后代按深度升高，循环与未解析关系不参与。'
   if (dimension === 'temperature') return '颜色：打开、编辑和复习事件按时间衰减叠加；保持稳定坐标与知识密度海拔。'
   if (dimension === 'area') return '海拔保持知识密度；颜色来自 YAML area/areas，多选板块按任一归属筛选，跨域金色山脊表示可追溯的 WikiLink。'
   return '海拔：笔记在稳定语义坐标中的局部密度。'

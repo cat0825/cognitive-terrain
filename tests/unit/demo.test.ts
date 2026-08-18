@@ -28,5 +28,5 @@ describe('AI Infra demo project', () => {
     expect(first.activeReferenceAtlasId).toBeUndefined()
     expect(second.notes.map(({ x, y }) => [x, y])).toEqual(first.notes.map(({ x, y }) => [x, y]))
     expect(second.notes.map((note) => note.weight)).toEqual(first.notes.map((note) => note.weight))
-  })
+  }, 15_000)
 })

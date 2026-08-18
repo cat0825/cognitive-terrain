@@ -65,3 +65,43 @@ test('note detail sheet is accessible', async ({ page }) => {
 
   expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
 })
+
+test('exploration workbench is accessible', async ({ page }) => {
+  test.setTimeout(60_000)
+  await page.addInitScript(() => {
+    localStorage.setItem('cognitive-terrain:first-run', 'seen')
+    localStorage.setItem('cognitive-terrain:embedding', 'deterministic')
+  })
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 20_000 })
+  await page.getByRole('button', { name: '打开项目菜单' }).click()
+  await page.getByRole('button', { name: '加载今日学习' }).click()
+  await expect(page.getByRole('button', { name: '当前时间层' })).toContainText('2026年8月', { timeout: 30_000 })
+  await page.getByRole('button', { name: '打开知识概览' }).click()
+  await expect(page.getByRole('region', { name: '探索工作台' })).toBeVisible()
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa'])
+    .include('.exploration-workbench')
+    .disableRules(['color-contrast'])
+    .analyze()
+
+  expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
+})
+
+test('prerequisite strata legend is accessible', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开地图筛选' }).click()
+  const panel = page.getByRole('complementary', { name: '地图筛选' })
+  await panel.getByRole('button', { name: '基础层级', exact: true }).click()
+  await expect(panel.getByRole('group', { name: '基础层级图例' })).toBeVisible()
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa'])
+    .include('.prerequisite-legend')
+    .disableRules(['color-contrast'])
+    .analyze()
+
+  expect(results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious')).toEqual([])
+})

@@ -71,7 +71,9 @@ export const TerrainCanvas = memo(function TerrainCanvas({
       gridSize: project.gridSize,
       timeZone: project.timeZone,
       nowMs: activityNowMs,
-      elevation: profileId === 'mastery' || profileId === 'activity' || profileId === 'progression' ? profileId : 'exploration',
+      elevation: profileId === 'mastery' || profileId === 'activity' || profileId === 'progression' || profileId === 'structure'
+        ? profileId
+        : 'exploration',
       cognitiveObservations: profileId === 'progression' ? project.cognitiveObservations : undefined,
       cognitiveStates: profileId === 'progression' ? project.cognitiveStates : undefined,
       learningProgressionProfileVersion: profileId === 'progression' ? project.learningProgressionProfileVersion : undefined,
@@ -182,6 +184,7 @@ function AnimatedTerrain2D({
       peaks={project.peaks}
       selectedNoteId={selectedNoteId}
       visualDimension={visualDimension}
+      prerequisiteTopology={project.prerequisiteTopology}
       activityByNote={activityByNote}
       progressionByNote={progressionByNote}
       onSelectNote={onSelectNote}

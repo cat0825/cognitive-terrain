@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, FilePenLine, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
 import { calculateActivityElevation } from '../domain/activity-elevation'
 import { calculateProjectLearningProgression } from '../domain/learning-progression'
 import type { CognitiveObservation, InteractionEventType, TerrainNote, TerrainProject } from '../domain/types'
@@ -10,27 +10,48 @@ import {
   COLLISION_DIRECTION_MIN_CONFIDENCE,
   COLLISION_DIRECTION_MIN_RELATIONS,
   plateColor,
-  similarityReasons,
   type PlateCollision,
 } from '../domain/knowledge-plates'
+import type { ReferenceGapReport } from '../domain/reference-gaps'
 import { findNeighbors } from '../pipeline/neighbors'
-import { maintenanceCandidates, resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
+import {
+  buildCollisionEvidence,
+  buildGapEvidence,
+  buildNoteNeighborEvidence,
+  buildPeakEvidence,
+  type TerrainNeighborEvidence,
+} from '../domain/terrain-evidence'
+import { profileIdForVisualDimension } from '../domain/terrain-profile'
+import { resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
+import {
+  vaultWikiLinkCandidate,
+  vaultWritebackCandidates,
+  type VaultWritebackCandidate,
+} from '../domain/vault-writeback-candidates'
+import { obsidianUri } from '../import/obsidian-uri'
 import { useAppStore } from '../store/app-store'
 import { ActivityHistory, type ActivityHistoryBucket } from './ActivityHistory'
 
 const ReferenceGapSection = lazy(async () => import('./ReferenceGapSection').then((module) => ({ default: module.ReferenceGapSection })))
+const ExplorationWorkbench = lazy(async () => import('./ExplorationWorkbench').then((module) => ({ default: module.ExplorationWorkbench })))
+const GapEvidenceContent = lazy(async () => import('./GapEvidenceContent').then((module) => ({ default: module.GapEvidenceContent })))
 
 interface NoteDetailProps {
   project: TerrainProject
   note: TerrainNote | undefined
+  peak?: TerrainProject['peaks'][number]
   collision?: PlateCollision
+  gapReport?: ReferenceGapReport
+  gapNodeId?: string
   visibleCount: number
+  onWriteback: (candidates: VaultWritebackCandidate[]) => void
 }
 
-export function NoteDetail({ project, note, collision, visibleCount }: NoteDetailProps) {
+export function NoteDetail({ project, note, peak, collision, gapReport, gapNodeId, visibleCount, onWriteback }: NoteDetailProps) {
   const detailsOpen = useAppStore((state) => state.detailsOpen)
   const selectNote = useAppStore((state) => state.selectNote)
   const closeButton = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLElement>(null)
   const returnFocus = useRef<HTMLElement | SVGElement | null>(null)
   const [collapsed, setCollapsed] = useState(false)
 
@@ -60,19 +81,23 @@ export function NoteDetail({ project, note, collision, visibleCount }: NoteDetai
     }
   }, [detailsOpen, selectNote])
 
-  useEffect(() => setCollapsed(false), [collision?.id, note?.id])
+  useEffect(() => {
+    setCollapsed(false)
+    if (panel.current) panel.current.scrollTop = 0
+  }, [collision?.id, gapNodeId, note?.id, peak?.id])
 
   if (!detailsOpen) return null
 
   return (
     <aside
-      className={collapsed ? 'note-detail is-collapsed' : 'note-detail'}
-      aria-label={collision ? '板块碰撞详情' : note ? '笔记详情' : '知识概览'}
+      ref={panel}
+      className={`${collapsed ? 'note-detail is-collapsed' : 'note-detail'}${!collision && !gapNodeId && !peak && !note ? ' note-detail--overview' : ''}`}
+      aria-label={collision ? '板块碰撞详情' : gapNodeId ? '知识缺口证据详情' : peak ? '峰值证据详情' : note ? '笔记详情' : '知识概览'}
     >
       <div className="detail-grip" aria-hidden="true" />
       <header>
         <span className="panel-kicker">
-          {collision ? 'PLATE COLLISION' : note ? 'SELECTED NOTE' : 'PROJECT OVERVIEW'}
+          {collision ? 'PLATE COLLISION' : gapNodeId ? 'REFERENCE GAP' : peak ? 'SELECTED PEAK' : note ? 'SELECTED NOTE' : 'PROJECT OVERVIEW'}
           <span className={`mode-badge mode-badge--${project.embeddingMode}`}>
             {embeddingModeLabel(project.embeddingMode)}
           </span>
@@ -102,11 +127,28 @@ export function NoteDetail({ project, note, collision, visibleCount }: NoteDetai
       <div id="note-detail-body" className="detail-body" hidden={collapsed}>
         {collision
           ? <CollisionContent collision={collision} project={project} />
-          : note
-            ? <NoteContent key={note.id} note={note} />
-            : <ProjectOverview project={project} visibleCount={visibleCount} />}
+          : gapNodeId && gapReport
+            ? <GapContent project={project} report={gapReport} nodeId={gapNodeId} />
+            : peak
+            ? <PeakContent peak={peak} project={project} />
+            : note
+              ? <NoteContent key={note.id} note={note} onWriteback={onWriteback} />
+              : <ProjectOverview project={project} visibleCount={visibleCount} />}
       </div>
     </aside>
+  )
+}
+
+function GapContent({ project, report, nodeId }: { project: TerrainProject; report: ReferenceGapReport; nodeId: string }) {
+  const selectNote = useAppStore((state) => state.selectNote)
+  const evidence = buildGapEvidence(report, nodeId)
+  if (!evidence.enabled || !evidence.node) {
+    return <p role="status">{evidence.reason === 'no-reference-atlas' ? '未选择参考图谱。' : '参考图谱节点不存在。'}</p>
+  }
+  return (
+    <Suspense fallback={<p role="status">正在加载缺口证据</p>}>
+      <GapEvidenceContent evidence={{ ...evidence, enabled: true, node: evidence.node }} notes={project.notes} onSelectNote={selectNote} />
+    </Suspense>
   )
 }
 
@@ -130,6 +172,7 @@ function CollisionContent({ collision, project }: { collision: PlateCollision; p
       : '方向证据不足，保持无向'
   const confidence = Math.round(collision.directionConfidence * 100)
   const confidenceThreshold = Math.round(COLLISION_DIRECTION_MIN_CONFIDENCE * 100)
+  const evidence = buildCollisionEvidence(collision)
   return (
     <div className="collision-content">
       <span className="panel-kicker">板块碰撞带</span>
@@ -146,7 +189,15 @@ function CollisionContent({ collision, project }: { collision: PlateCollision; p
         <span>双向配对: {collision.bidirectionalCount}</span>
       </div>
       <p className="collision-method">当前判定：{directionLabel}（方向置信度 {confidence}%）。至少需要 {COLLISION_DIRECTION_MIN_RELATIONS} 组跨域关系且置信度达到 {confidenceThreshold}% 才显示方向标记；未达阈值时 2D/3D 均保持无向。</p>
-      <p className="collision-method">仅统计当前可见笔记中可解析的源笔记 → 目标笔记 WikiLink。共享任一领域时不计为跨域，完全不相交时按双方主领域聚合。方向只描述链接证据，带宽只表示唯一笔记对数量；不推断因果、先修顺序或语义方向。</p>
+      <p className="collision-method">仅统计当前搜索/领域筛选后的最终时间层中可解析的源笔记 → 目标笔记 WikiLink。共享任一领域时不计为跨域，完全不相交时按双方主领域聚合。方向只描述链接证据，带宽只表示唯一笔记对数量；不推断因果、先修顺序或语义方向。</p>
+      <details className="activity-elevation-evidence terrain-evidence-details">
+        <summary>查看碰撞证据契约</summary>
+        <div>
+          <small>公式 {evidence.formulaVersion} · 方向 {evidence.summary.directionFormulaVersion} · 强度 {evidence.summary.strengthFormulaVersion}</small>
+          <small>来源：{evidence.provenance.join('、')}</small>
+          <small>证据 IDs：{evidence.supportingIds.join('、')}</small>
+        </div>
+      </details>
       <section className="collision-pairs">
         <span className="panel-kicker">方向证据</span>
         <ul>
@@ -170,7 +221,52 @@ function CollisionContent({ collision, project }: { collision: PlateCollision; p
   )
 }
 
-function NoteContent({ note }: { note: TerrainNote }) {
+function PeakContent({ peak, project }: { peak: TerrainProject['peaks'][number]; project: TerrainProject }) {
+  const selectNote = useAppStore((state) => state.selectNote)
+  const visualDimension = useAppStore((state) => state.visualDimension)
+  const profileId = profileIdForVisualDimension(visualDimension)
+  const evaluatedAt = evaluationTimeForProject(project.updatedAt)
+  const evidence = buildPeakEvidence(project, peak, { profileId, evaluatedAt })
+  if (!evidence) return <p role="status">峰值证据不可用。</p>
+  const notesById = new Map(project.notes.map((note) => [note.id, note]))
+  const missingInputs = evidence.activeHeight.inputs.filter((input) => input.missing).length
+  return (
+    <div className="peak-evidence-content" data-evidence-kind="peak" data-formula-version={evidence.formulaVersion}>
+      <span className="panel-kicker">峰值证据</span>
+      <h2>{peak.label}</h2>
+      <div className="collision-metric"><strong>{evidence.memberItemIds.length}</strong><span>条成员笔记</span></div>
+      <p className="collision-method">全项目最终时间层的局部极大值；成员是峰顶半径内最多 24 条笔记，不是互斥 cluster，也不随筛选或历史时间层重算。</p>
+      <div className="reference-gap-evidence peak-evidence-grid">
+        <small>峰值公式：{evidence.formulaVersion}</small>
+        <small>局部密度：{evidence.localDensity.formulaVersion}</small>
+        <small>当前海拔：{evidence.activeHeight.formulaVersion} · {evidence.activeHeight.elevation}</small>
+        <small>命名来源：{peakLabelSource(evidence.labelEvidence.source)} · {evidence.labelEvidence.supportingItemIds.length} 条支持</small>
+        <small>缺失输入：{missingInputs} · {evidence.activeHeight.missingInputBehavior}</small>
+        {evidence.evaluatedAt && <small>评估于 {formatDate(evidence.evaluatedAt)}</small>}
+        <small>来源：{evidence.provenance.join('、')}</small>
+        <small>证据 IDs：{evidence.supportingIds.join('、')}</small>
+      </div>
+      <section className="collision-pairs" aria-label="峰值成员笔记">
+        <span className="panel-kicker">成员与密度贡献</span>
+        <ul>
+          {evidence.localDensity.contributions.slice(0, 8).map((contribution) => {
+            const member = notesById.get(contribution.itemId)
+            return member ? (
+              <li key={member.id}>
+                <button type="button" onClick={() => selectNote(member.id)}>
+                  <span>{member.title}</span>
+                  <small>weight {contribution.noteWeight.toFixed(2)} · 投影距离 {contribution.projectedDistance.toFixed(4)}</small>
+                </button>
+              </li>
+            ) : null
+          })}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (candidates: VaultWritebackCandidate[]) => void }) {
   const project = useAppStore((state) => state.project)
   const selectNote = useAppStore((state) => state.selectNote)
   const requestFocus = useAppStore((state) => state.requestFocus)
@@ -178,6 +274,7 @@ function NoteContent({ note }: { note: TerrainNote }) {
   const markNoteReviewed = useAppStore((state) => state.markNoteReviewed)
   const neighbors = findNeighbors(project, note.id, 6)
   const semanticCandidates = semanticLinkCandidates(project.notes, note.id, 3)
+  const pendingWriteback = vaultWritebackCandidates(project, note.id)
   const noteAreas = areasForNote(note)
   const activityEvaluatedAt = useMemo(
     () => evaluationTimeForProject(project.updatedAt),
@@ -400,21 +497,28 @@ function NoteContent({ note }: { note: TerrainNote }) {
           <CheckCircle2 size={13} />
           {isReviewing ? '记录中…' : '标记已复习'}
         </button>
+        {pendingWriteback.length > 0 && (
+          <button type="button" className="focus-button" onClick={() => onWriteback(pendingWriteback)}>
+            <FilePenLine size={13} />
+            写回 Obsidian ({pendingWriteback.length})
+          </button>
+        )}
       </div>
       {neighbors.length > 0 && (
-        <section className="neighbor-section">
+        <section className="neighbor-section" aria-label="邻居证据">
           <span className="panel-kicker">相关笔记</span>
+          <small>各信号独立展示；2D 投影接近不等于显式关系。</small>
           <ul className="neighbor-list">
             {neighbors.map((neighbor) => {
-              const reasons = similarityReasons(project.notes, note.id, neighbor.id)
+              const evidence = buildNoteNeighborEvidence(project, note.id, neighbor.id)
               return <li key={neighbor.id}>
                 <button
                   type="button"
                   onClick={() => selectNote(neighbor.id)}
+                  aria-label={`查看邻居 ${neighbor.title}${evidence ? `；${neighborEvidenceAriaLabel(evidence)}` : ''}`}
                 >
                   <strong>{neighbor.title}</strong>
-                  <small>{neighbor.tags.slice(0, 3).map((tag) => `#${tag}`).join(' ')}</small>
-                  <small className="similarity-reasons">{reasons.map((reason) => reason.label).join(' · ')}</small>
+                  {evidence && <NeighborEvidence evidence={evidence} />}
                 </button>
               </li>
             })}
@@ -422,7 +526,7 @@ function NoteContent({ note }: { note: TerrainNote }) {
         </section>
       )}
       <RelationSection note={note} />
-      {semanticCandidates.length > 0 && <SemanticCandidateSection candidates={semanticCandidates} originId={note.id} project={project} />}
+      {semanticCandidates.length > 0 && <SemanticCandidateSection candidates={semanticCandidates} originId={note.id} project={project} onWriteback={onWriteback} />}
       {note.source?.startsWith('http') && (
         <a href={note.source} target="_blank" rel="noreferrer">
           打开来源
@@ -436,6 +540,10 @@ function NoteContent({ note }: { note: TerrainNote }) {
 
 function ProjectOverview({ project, visibleCount }: { project: TerrainProject; visibleCount: number }) {
   const setReferenceAtlas = useAppStore((state) => state.setReferenceAtlas)
+  const selectNote = useAppStore((state) => state.selectNote)
+  const transitionExploration = useAppStore((state) => state.transitionExploration)
+  const editExploration = useAppStore((state) => state.editExploration)
+  const isAnalyzing = useAppStore((state) => state.isAnalyzing)
   const timeline = useAppStore((state) => state.timeline)
   const compareRef = useAppStore((state) => state.compareRef)
   const setCompareRef = useAppStore((state) => state.setCompareRef)
@@ -450,7 +558,6 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
           added: project.notes.filter((note) => note.createdAtMs > referenceCutoff && note.createdAtMs <= currentCutoff).length,
           removed: project.notes.filter((note) => note.createdAtMs <= referenceCutoff && note.createdAtMs > currentCutoff).length,
         }
-  const maintenance = maintenanceCandidates(project, 5)
   return (
     <div className="project-overview">
       <h2>{project.name}</h2>
@@ -501,6 +608,15 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
       <Suspense fallback={<div className="reference-gap-empty" role="status">正在加载参考图谱缺口</div>}>
         <ReferenceGapSection project={project} onSelectAtlas={(id) => void setReferenceAtlas(id || undefined)} />
       </Suspense>
+      <Suspense fallback={<section className="exploration-workbench" aria-label="探索工作台" aria-busy="true"><p className="exploration-empty" role="status">正在加载探索工作台</p></section>}>
+        <ExplorationWorkbench
+          project={project}
+          isLoading={isAnalyzing}
+          onCommand={transitionExploration}
+          onEdit={editExploration}
+          onSelectNote={selectNote}
+        />
+      </Suspense>
       <div className="peak-index">
         {project.peaks.slice(0, 6).map((peak) => (
           <div key={peak.id}>
@@ -509,12 +625,6 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
           </div>
         ))}
       </div>
-      <section className="maintenance-section">
-        <div className="section-heading"><span className="panel-kicker">待维护</span><small>按当前标注排序</small></div>
-        <ul className="maintenance-list">
-          {maintenance.map(({ note, reasons }) => <li key={note.id}><button type="button" onClick={() => useAppStore.getState().selectNote(note.id)}><strong>{note.title}</strong><small>{reasons.slice(0, 2).join(' · ')}</small></button></li>)}
-        </ul>
-      </section>
     </div>
   )
 }
@@ -531,7 +641,7 @@ function RelationList({ icon, label, notes, onSelect }: { icon: ReactNode; label
   return <div className="relation-group"><span>{icon}{label}</span><ul className="relation-list">{notes.slice(0, 5).map((linked) => <li key={linked.id}><button type="button" onClick={() => onSelect(linked.id)}>{linked.title}</button></li>)}</ul></div>
 }
 
-function SemanticCandidateSection({ candidates, originId, project }: { candidates: Array<{ note: TerrainNote; distance: number }>; originId: string; project: TerrainProject }) {
+function SemanticCandidateSection({ candidates, originId, project, onWriteback }: { candidates: Array<{ note: TerrainNote; distance: number }>; originId: string; project: TerrainProject; onWriteback: (candidates: VaultWritebackCandidate[]) => void }) {
   const reportError = useAppStore((state) => state.reportError)
   const [copied, setCopied] = useState<string | null>(null)
   const copiedTimer = useRef<number | null>(null)
@@ -545,7 +655,57 @@ function SemanticCandidateSection({ candidates, originId, project }: { candidate
     if (copiedTimer.current) window.clearTimeout(copiedTimer.current)
     copiedTimer.current = window.setTimeout(() => setCopied(null), 2400)
   }
-  return <section className="relation-section semantic-candidates"><span className="panel-kicker">语义候选补链</span><small>模型投影位置接近，但当前没有明确双链</small><ul className="relation-list">{candidates.map(({ note }) => { const reasons = similarityReasons(project.notes, originId, note.id); return <li key={note.id}><button type="button" onClick={() => void copy(note.title)}><strong>{note.title}</strong><small>{copied === note.title ? '已复制 wikilink' : reasons.map((reason) => reason.label).join(' · ')}</small></button></li> })}</ul><small aria-live="polite" className={copied ? 'copy-status is-copied' : 'copy-status'}>{copied ? `已复制 [[${copied}]]，确认后再写回 Obsidian。` : '点击候选可复制 [[笔记名]]，确认后再写回 Obsidian。'}</small></section>
+  return <section className="relation-section semantic-candidates"><span className="panel-kicker">语义候选补链</span><small>候选只表示模型邻居或投影接近，不是显式关系；确认后再写回 Obsidian。</small><ul className="relation-list">{candidates.map(({ note }) => { const evidence = buildNoteNeighborEvidence(project, originId, note.id); const writeback = vaultWikiLinkCandidate(project, originId, note.id); return <li key={note.id}><button type="button" aria-label={`${writeback ? '预览写回' : '复制'} ${note.title} 的 WikiLink${evidence ? `；${neighborEvidenceAriaLabel(evidence)}` : ''}`} onClick={() => writeback ? onWriteback([writeback]) : void copy(note.title)}><strong>{note.title}</strong>{evidence && <NeighborEvidence evidence={evidence} />}{copied === note.title && <small>已复制 wikilink</small>}{writeback && <small>点击后预览 exact diff</small>}</button></li> })}</ul><small aria-live="polite" className={copied ? 'copy-status is-copied' : 'copy-status'}>{copied ? `已复制 [[${copied}]]。` : 'Vault 内候选会先显示 exact diff；其他来源只复制 WikiLink。'}</small></section>
+}
+
+function NeighborEvidence({ evidence }: { evidence: TerrainNeighborEvidence }) {
+  return (
+    <>
+      <small className="similarity-reasons">Embedding：{embeddingEvidenceLabel(evidence)}</small>
+      <small className="similarity-reasons">2D UMAP approximate distance：{evidence.projection.distance.toFixed(4)} · {evidence.projection.formulaVersion}（投影近似，不代表关系）</small>
+      <small className="similarity-reasons">共享 taxonomy：{evidence.taxonomy.sharedLabels.length ? evidence.taxonomy.sharedLabels.join('、') : '无'}</small>
+      <small className="similarity-reasons">共享 tags：{evidence.tags.sharedTags.length ? evidence.tags.sharedTags.map((tag) => `#${tag}`).join(' ') : '无'}</small>
+      <small className="similarity-reasons">显式 WikiLink：{wikiLinkLabel(evidence)}</small>
+      <small className="similarity-reasons">证据 IDs：{evidence.supportingIds.join('、')}</small>
+    </>
+  )
+}
+
+function neighborEvidenceAriaLabel(evidence: TerrainNeighborEvidence): string {
+  return [
+    `Embedding ${embeddingEvidenceLabel(evidence)}`,
+    `2D UMAP approximate distance ${evidence.projection.distance.toFixed(4)}，${evidence.projection.formulaVersion}，投影近似不代表关系`,
+    `共享 taxonomy ${evidence.taxonomy.sharedLabels.length ? evidence.taxonomy.sharedLabels.join('、') : '无'}`,
+    `共享 tags ${evidence.tags.sharedTags.length ? evidence.tags.sharedTags.join('、') : '无'}`,
+    `显式 WikiLink ${wikiLinkLabel(evidence)}`,
+  ].join('；')
+}
+
+function embeddingEvidenceLabel(evidence: TerrainNeighborEvidence): string {
+  const embedding = evidence.embedding
+  const score = embedding.score === null ? '原始分数未持久化' : `cosine ${embedding.score.toFixed(4)}`
+  const formula = ` · ${embedding.formulaVersion}`
+  const rank = evidence.storedNeighborRank === null ? 'rank 未持久化' : `rank ${evidence.storedNeighborRank}`
+  if (embedding.mode === 'fallback') {
+    return `deterministic fallback · ${embedding.modelId} · ${score} · ${rank}${formula} · 非等价语义证据`
+  }
+  if (embedding.mode === 'demo') return `演示布局 · ${embedding.modelId} · 无原始模型分数 · ${rank}`
+  return `${embedding.modelId} · ${score} · ${rank}${formula}`
+}
+
+function wikiLinkLabel(evidence: TerrainNeighborEvidence): string {
+  const outgoing = evidence.wikiLink.links.some((link) => link.fromItemId === evidence.originItemId)
+  const incoming = evidence.wikiLink.links.some((link) => link.toItemId === evidence.originItemId)
+  if (outgoing && incoming) return '双向'
+  if (outgoing) return '当前笔记 → 邻居'
+  if (incoming) return '邻居 → 当前笔记'
+  return '无'
+}
+
+function peakLabelSource(source: 'dominant-tag' | 'nearest-note-title' | 'stored-label'): string {
+  if (source === 'dominant-tag') return '成员高频标签'
+  if (source === 'nearest-note-title') return '最近成员标题'
+  return '已存峰标签'
 }
 
 function snapshotCutoff(project: TerrainProject, index: number): number {
@@ -648,15 +808,6 @@ async function copyWikiLink(title: string, reportError: (message: string) => voi
     reportError('无法写入剪贴板，请手动复制笔记标题')
     return false
   }
-}
-
-/**
- * 有 vault 时用 Obsidian 官方的 vault + file 参数，跨 vault 才能准确定位。
- * 没有 vault 只能退回 path，由 Obsidian 自行猜测所属 vault。
- */
-function obsidianUri(path: string, vault?: string): string {
-  if (!vault) return `obsidian://open?path=${encodeURIComponent(path)}`
-  return `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(path.replace(/\.md$/i, ''))}`
 }
 
 function formatDate(value: string): string {
