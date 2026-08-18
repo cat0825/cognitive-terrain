@@ -3,8 +3,9 @@ import path from 'node:path'
 
 const distDir = path.resolve('dist/assets')
 const budget = {
-  main: 346 * 1024,
-  totalJs: 2195 * 1024,
+  // Issue #25 adds shared 2D/3D prerequisite-strata evidence and legend code.
+  main: 360 * 1024,
+  totalJs: 2220 * 1024,
   css: 40 * 1024,
 }
 

@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
-import type { TerrainNote, TerrainPeak, VisualDimension } from '../domain/types'
+import type { PrerequisiteTopology, TerrainNote, TerrainPeak, VisualDimension } from '../domain/types'
 import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
 import { buildPlateCollisions, plateColor, primaryAreaForNote } from '../domain/knowledge-plates'
 import { linkedNotes } from '../domain/knowledge-maintenance'
+import { prerequisiteDepthValues } from '../domain/prerequisite-topology'
 import { buildContourPaths, sampleHeight } from '../pipeline/terrain'
 import { useAppStore } from '../store/app-store'
 
@@ -13,6 +14,7 @@ interface Terrain2DProps {
   peaks: TerrainPeak[]
   selectedNoteId: string | null
   visualDimension: VisualDimension
+  prerequisiteTopology?: PrerequisiteTopology
   activityByNote: ReadonlyMap<string, NoteActivitySummary>
   onSelectNote: (id: string | null) => void
 }
@@ -24,6 +26,7 @@ export function Terrain2D({
   peaks,
   selectedNoteId,
   visualDimension,
+  prerequisiteTopology,
   activityByNote,
   onSelectNote,
 }: Terrain2DProps) {
@@ -51,6 +54,7 @@ export function Terrain2D({
   const sparseBridges = collisions.filter((collision) => collision.mode === 'lines').flatMap((collision) => collision.bridges)
   const collisionBands = collisions.filter((collision) => collision.mode === 'band')
   const notesById = useMemo(() => new Map(notes.map((note) => [note.id, note])), [notes])
+  const structureByNote = useMemo(() => prerequisiteDepthValues(prerequisiteTopology), [prerequisiteTopology])
   const activeCollisionId = useAppStore((state) => state.activeCollisionId)
   const selectCollision = useAppStore((state) => state.selectCollision)
 
@@ -169,8 +173,8 @@ export function Terrain2D({
                 cx={note.x * 2.8}
                 cy={-note.y * 2.8}
                 r={selected ? 0.07 : 0.024 + height * 0.022}
-                fill={selected ? '#fff2bd' : noteColor(note, height, visualDimension, activityByNote)}
-                opacity={selected ? 1 : noteOpacity(note, height, visualDimension, activityByNote)}
+                fill={selected ? '#fff2bd' : noteColor(note, height, visualDimension, activityByNote, structureByNote)}
+                opacity={selected ? 1 : noteOpacity(note, height, visualDimension, activityByNote, structureByNote)}
                 filter={selected ? 'url(#selected-glow)' : undefined}
                 role="button"
                 aria-label={note.title}
@@ -219,10 +223,12 @@ function noteColor(
   height: number,
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  structureByNote: ReadonlyMap<string, number>,
 ): string {
   if (dimension === 'mastery') return colorRamp(note.mastery, '#665f7a', '#d7f0df')
   if (dimension === 'exploration') return colorRamp(note.exploration, '#647078', '#e3aa66')
   if (dimension === 'temperature') return temperatureColor(activityByNote.get(note.id)?.score ?? 0)
+  if (dimension === 'structure') return colorRamp(structureByNote.get(note.id), '#3b82a0', '#e5a84b')
   if (dimension === 'area') {
     const area = primaryAreaForNote(note)
     return area ? plateColor(area) : '#767673'
@@ -235,10 +241,12 @@ function noteOpacity(
   height: number,
   dimension: VisualDimension,
   activityByNote: ReadonlyMap<string, NoteActivitySummary>,
+  structureByNote: ReadonlyMap<string, number>,
 ): number {
   if (dimension === 'mastery') return 0.3 + (note.mastery ?? 0.5) * 0.7
   if (dimension === 'exploration') return 0.38 + (note.exploration ?? 0.5) * 0.62
   if (dimension === 'temperature') return 0.32 + (activityByNote.get(note.id)?.score ?? 0) * 0.68
+  if (dimension === 'structure') return structureByNote.has(note.id) ? 0.92 : 0.28
   return 0.36 + height * 0.4
 }
 

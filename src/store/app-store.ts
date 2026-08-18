@@ -361,6 +361,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       reviewedAt: note.reviewedAt,
       cognitiveStateProvenance: stateProvenance.get(note.id),
       links: note.links,
+      prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
     }))
     const existingIds = new Set(existing.map((note) => note.id))
     const deduped = newNotes.filter((note) => !existingIds.has(note.id?.trim() ?? ''))
@@ -455,6 +456,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           reviewedAt: note.reviewedAt,
           cognitiveStateProvenance: stateProvenance.get(note.id),
           links: note.links,
+          prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
         }
       }
       const nextAreas = 'areas' in patch
@@ -484,6 +486,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         reviewedAt: 'reviewedAt' in patch ? patch.reviewedAt ?? undefined : note.reviewedAt,
         cognitiveStateProvenance: changesCognitiveState ? 'app' : stateProvenance.get(note.id),
         links: patch.content === undefined ? note.links : parseWikiLinks(patch.content),
+        prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
       }
     })
     const effective = {
