@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const dimensions = ['密度', '熟练度', '探索度', '活跃', '学习进程', '温度', '领域'] as const
+const dimensions = ['密度', '熟练度', '探索度', '活跃', '温度', '领域'] as const
 
 test('switches point cloud encoding across all six visual dimensions', async ({ page }) => {
   test.setTimeout(process.env.CI ? 90_000 : 45_000)
@@ -29,9 +29,6 @@ test('switches point cloud encoding across all six visual dimensions', async ({ 
     }
     await expect(panel.locator('.dimension-help')).not.toBeEmpty()
     await expect(page.locator('canvas').first()).toBeVisible()
-    if (label === '学习进程') {
-      await expect(panel.locator('.dimension-help')).toContainText('显式认知观测')
-    }
     if (label === '领域') {
       const legend = panel.getByRole('group', { name: '知识板块图例' })
       await expect(legend).toBeVisible()
@@ -105,6 +102,13 @@ test('replays learning progression evidence and checkpoint comparison', async ({
   await page.addInitScript(() => localStorage.setItem('cognitive-terrain:first-run', 'seen'))
   await page.goto('/')
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '打开地图筛选' }).click()
+  const panel = page.getByRole('complementary', { name: '地图筛选' })
+  const progression = panel.locator('.visual-dimension-control').getByRole('button', { name: '学习进程', exact: true })
+  await progression.click()
+  await expect(progression).toHaveAttribute('aria-pressed', 'true')
+  await expect(panel.locator('.dimension-help')).toContainText('显式认知观测')
+  await page.getByRole('button', { name: '关闭筛选' }).click()
   await page.getByRole('button', { name: '切换二维等高线' }).click()
 
   const note = page.getByRole('button', { name: 'SM 与 Tensor Core', exact: true })
