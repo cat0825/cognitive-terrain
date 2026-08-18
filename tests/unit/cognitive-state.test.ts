@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildActivitySummaries, shouldRecordOpenedEvent, temperatureColor } from '../../src/domain/activity-temperature'
 import { commitAnalyzedProject, createInteractionEvent, eventTypeForNoteUpdate } from '../../src/domain/cognitive-state'
+import { createExplorationItem } from '../../src/domain/exploration-lifecycle'
+import { generateExplorationSuggestions } from '../../src/domain/exploration-loop'
 import type { TerrainProject } from '../../src/domain/types'
 
 describe('cognitive state events', () => {
@@ -20,6 +22,9 @@ describe('cognitive state events', () => {
     base.activeReferenceAtlasId = referenceAtlas.id
     const previous = createInteractionEvent('note-a', 'opened', '2026-08-14T01:00:00.000Z')
     base.interactionEvents = [previous]
+    base.explorationItems = [createExplorationItem(generateExplorationSuggestions({
+      userMarkedGoals: [{ goalId: 'goal-a', label: 'Review the proof' }],
+    })[0]!, '2026-08-14T01:30:00.000Z')]
     const analyzed = createProjectFixture('new-analysis-id')
     const edited = createInteractionEvent('note-a', 'edited', '2026-08-14T02:00:00.000Z', {
       changedFields: ['content'],
@@ -34,6 +39,7 @@ describe('cognitive state events', () => {
     expect(committed.interactionEvents).toEqual([previous, edited])
     expect(committed.referenceAtlases).toEqual([referenceAtlas])
     expect(committed.activeReferenceAtlasId).toBe(referenceAtlas.id)
+    expect(committed.explorationItems).toEqual(base.explorationItems)
   })
 
   it('clears a dangling active reference atlas during reanalysis', () => {

@@ -87,6 +87,7 @@ export function commitAnalyzedProject(
       baseProject.referenceAtlases,
       baseProject.activeReferenceAtlasId,
     ),
+    explorationItems: baseProject.explorationItems,
     vaultSync: baseProject.vaultSync,
   }
 }

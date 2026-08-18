@@ -7,6 +7,7 @@ import type {
   ProjectSummary,
   QualityLevel,
   InteractionEvent,
+  ExplorationSuggestion,
   TerrainProject,
   ViewMode,
   VisualDimension,
@@ -118,6 +119,16 @@ interface AppState {
   commitVaultWritebackProject: (previous: TerrainProject, next: TerrainProject) => Promise<void>
   updateNote: (noteId: string, patch: { title?: string; content?: string; tags?: string[]; mastery?: number | null; confidence?: number | null; exploration?: number | null; status?: TerrainProject['notes'][number]['status'] | null; area?: string | null; areas?: string[] | null; reviewedAt?: string | null }) => Promise<void>
   markNoteReviewed: (noteId: string) => Promise<void>
+  transitionExploration: (
+    suggestion: ExplorationSuggestion,
+    command:
+      | { type: 'accept' | 'start' | 'complete' | 'dismiss' | 'reject'; note?: string }
+      | { type: 'snooze'; note?: string; snoozedUntil: string },
+  ) => Promise<void>
+  editExploration: (
+    suggestion: ExplorationSuggestion,
+    patch: { actionTitle: string; actionDetail?: string; userNotes?: string },
+  ) => Promise<void>
   cancelAnalysis: () => void
   replaceProject: (project: TerrainProject) => Promise<void>
   resetDemo: () => void
@@ -593,6 +604,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       await Promise.all([get().reloadProjects(), get().reloadBackups()])
     } catch (error) {
       set({ error: `复习记录保存失败：${error instanceof Error ? error.message : String(error)}` })
+    }
+  },
+  transitionExploration: async (suggestion, command) => {
+    const current = get().project
+    try {
+      const { transitionExplorationProject } = await import('./exploration-actions')
+      const project = await transitionExplorationProject(current, suggestion, command)
+      if (get().project.id === current.id) set({ project })
+      await get().reloadProjects()
+    } catch (error) {
+      set({ error: `探索记录保存失败：${error instanceof Error ? error.message : String(error)}` })
+    }
+  },
+  editExploration: async (suggestion, patch) => {
+    const current = get().project
+    try {
+      const { editExplorationProject } = await import('./exploration-actions')
+      const project = await editExplorationProject(current, suggestion, patch)
+      if (get().project.id === current.id) set({ project })
+      await get().reloadProjects()
+    } catch (error) {
+      set({ error: `探索动作保存失败：${error instanceof Error ? error.message : String(error)}` })
     }
   },
   cancelAnalysis: () => {

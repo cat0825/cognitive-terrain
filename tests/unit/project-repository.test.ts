@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { openDB } from 'idb'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { TerrainProject, VaultSyncState } from '../../src/domain/types'
+import type { ExplorationLifecycleItem, TerrainProject, VaultSyncState } from '../../src/domain/types'
 import { createDemoProject } from '../../src/domain/demo'
 import {
   appendProjectInteractionEvent,
@@ -15,6 +15,7 @@ import {
   restoreProjectBackup,
   saveProject,
   updateActiveReferenceAtlas,
+  updateProjectExplorationItems,
 } from '../../src/storage/project-repository'
 import {
   deleteVaultBinding,
@@ -65,6 +66,33 @@ function smallProject(id: string, name: string): TerrainProject {
     cognitiveStates: project.cognitiveStates.slice(0, 2),
     taxonomyNodes: project.taxonomyNodes?.map((node) => ({ ...node, workspaceId: id })),
     referenceAtlases: project.referenceAtlases?.map((manifest) => ({ ...manifest, workspaceId: id })),
+  }
+}
+
+function explorationItemFor(project: TerrainProject): ExplorationLifecycleItem {
+  return {
+    id: `${project.id}:explore`,
+    suggestion: {
+      id: `${project.id}:suggestion`,
+      reason: { code: 'low-confidence-note', detail: '置信度较低，建议回到原笔记核对' },
+      supportingItemIds: [project.notes[0].id],
+      sourceRoute: { kind: 'note', noteId: project.notes[0].id },
+      evidenceFingerprint: 'evidence-v1',
+      priority: 0.7,
+      action: { title: '核对论据' },
+    },
+    status: 'accepted',
+    action: { title: '核对论据', detail: '补充原始来源' },
+    updatedAt: project.updatedAt,
+    history: [{
+      id: `${project.id}:accept`,
+      type: 'accept',
+      occurredAt: project.updatedAt,
+      fromStatus: 'proposed',
+      toStatus: 'accepted',
+      evidenceFingerprint: 'evidence-v1',
+      action: { title: '核对论据', detail: '补充原始来源' },
+    }],
   }
 }
 
@@ -141,6 +169,27 @@ describe('project repository', () => {
       .toBe(project.referenceAtlases?.[0]?.id)
   })
 
+  it('updates exploration lifecycle state without backups or rebuilding note records', async () => {
+    const project = smallProject('p-exploration-update', '探索状态')
+    await saveProject(project)
+    const database = await getDatabase()
+    const revisionCount = await database.countFromIndex('revisions', 'by-workspace', project.id)
+    const updatedAt = '2026-08-17T08:00:00.000Z'
+
+    const updated = await updateProjectExplorationItems(
+      project.id,
+      [explorationItemFor(project)],
+      updatedAt,
+    )
+
+    expect(updated?.updatedAt).toBe(updatedAt)
+    expect((await getProject(project.id))?.explorationItems).toEqual(updated?.explorationItems)
+    expect((await getProjectObjectBundle(project.id))?.explorationItems).toEqual(updated?.explorationItems)
+    expect(await database.countFromIndex('items', 'by-workspace', project.id)).toBe(project.notes.length)
+    expect(await database.countFromIndex('revisions', 'by-workspace', project.id)).toBe(revisionCount)
+    expect(await listProjectBackups(project.id)).toEqual([])
+  })
+
   it('persists v1 to v3 migrations during the IndexedDB upgrade', async () => {
     const legacy = oldV1Project('legacy-1', '旧项目')
     legacy.notes[0] = { ...legacy.notes[0], reviewedAt: '2025-08-15T00:00:00.000Z' }
@@ -159,7 +208,10 @@ describe('project repository', () => {
     expect(upgraded.version).toBe(DATABASE_VERSION)
     expect(upgraded.objectStoreNames.contains('backups')).toBe(true)
     expect(upgraded.objectStoreNames.contains('workspaces')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('explorationItems')).toBe(true)
     expect(upgraded.objectStoreNames.contains('vaultBindings')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('vaultWritebackBatches')).toBe(true)
+    expect(upgraded.objectStoreNames.contains('vaultWritebackRecoveryFiles')).toBe(true)
     expect(stored?.schemaVersion).toBe(3)
     expect(stored?.embeddingMode).toBe('fallback')
     expect(stored?.noteNeighbors).toEqual([])
@@ -563,6 +615,7 @@ describe('project repository', () => {
 
   it('backs up the previous version before save and restores it', async () => {
     const original = smallProject('p-backup', '初始版本')
+    original.explorationItems = [explorationItemFor(original)]
     await saveProject(original)
     await saveProject({ ...original, name: '修改版本', updatedAt: '2026-08-14T08:00:00.000Z' })
 
@@ -571,7 +624,9 @@ describe('project repository', () => {
 
     const restored = await restoreProjectBackup(backup.id)
     expect(restored?.name).toBe('初始版本')
+    expect(restored?.explorationItems).toEqual(original.explorationItems)
     expect((await getProject('p-backup'))?.name).toBe('初始版本')
+    expect((await getProjectObjectBundle('p-backup'))?.explorationItems).toEqual(original.explorationItems)
     expect((await listProjectBackups('p-backup')).some((item) => item.reason === 'before-restore')).toBe(true)
   })
 

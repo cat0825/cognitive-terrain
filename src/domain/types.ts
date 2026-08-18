@@ -27,6 +27,119 @@ export interface ReferenceAtlasManifest {
   updatedAt: string
 }
 
+export type ExplorationReasonCode =
+  | 'reference-gap'
+  | 'stale-reviewed-item'
+  | 'unresolved-bridge'
+  | 'unassessed-note'
+  | 'low-confidence-note'
+  | 'user-marked-goal'
+
+export type ExplorationReason = ExplorationReasonCode extends infer Code
+  ? Code extends ExplorationReasonCode
+    ? { code: Code; detail: string }
+    : never
+  : never
+
+export type ExplorationSourceRoute =
+  | { kind: 'note'; noteId: string }
+  | {
+      kind: 'relationship'
+      bridgeId: string
+      fromItemId: string
+      toItemId?: string
+      targetTitle?: string
+    }
+  | { kind: 'reference-node'; atlasId: string; taxonomyNodeId: string }
+  | { kind: 'goal'; goalId: string; noteId?: string }
+  | {
+      kind: 'unavailable'
+      originalKind: 'note' | 'relationship' | 'reference-node' | 'goal'
+      detail?: string
+    }
+
+export interface ExplorationAction {
+  title: string
+  detail?: string
+}
+
+export interface ExplorationReferenceBoundary {
+  atlasId: string
+  taxonomyNodeId: string
+  label?: string
+  taxonomyVersion?: string | number
+}
+
+export interface ExplorationReopenReason {
+  code:
+    | 'fresh-evidence-after-completed'
+    | 'fresh-evidence-after-dismissed'
+    | 'fresh-evidence-after-rejected'
+  previousEvidenceFingerprint: string
+  previousDecidedAt: string
+}
+
+export interface ExplorationPreviousDecision {
+  status: 'completed' | 'dismissed' | 'rejected'
+  decidedAt: string
+  evidenceFingerprint: string
+}
+
+export interface ExplorationSuggestion {
+  id: string
+  reason: ExplorationReason
+  supportingItemIds: string[]
+  sourceRoute: ExplorationSourceRoute
+  evidenceFingerprint: string
+  priority: number
+  action: ExplorationAction
+  referenceBoundary?: ExplorationReferenceBoundary
+  reopenReason?: ExplorationReopenReason
+  previousDecision?: ExplorationPreviousDecision
+}
+
+export type ExplorationLifecycleStatus =
+  | 'proposed'
+  | 'accepted'
+  | 'in-progress'
+  | 'completed'
+  | 'snoozed'
+  | 'dismissed'
+  | 'rejected'
+
+export type ExplorationLifecycleEventType =
+  | 'edit'
+  | 'accept'
+  | 'start'
+  | 'complete'
+  | 'snooze'
+  | 'dismiss'
+  | 'reject'
+
+export interface ExplorationLifecycleEvent {
+  id: string
+  type: ExplorationLifecycleEventType
+  occurredAt: string
+  fromStatus: ExplorationLifecycleStatus
+  toStatus: ExplorationLifecycleStatus
+  evidenceFingerprint: string
+  action?: ExplorationAction
+  snoozedUntil?: string
+  note?: string
+}
+
+export interface ExplorationLifecycleItem {
+  id: string
+  suggestion: ExplorationSuggestion
+  status: ExplorationLifecycleStatus
+  action: ExplorationAction
+  userNotes?: string
+  snoozedUntil?: string
+  lastExploredAt?: string
+  updatedAt: string
+  history: ExplorationLifecycleEvent[]
+}
+
 export type CognitiveStateProvenance = 'yaml' | 'app' | 'migration'
 
 export type PrerequisiteProvenance = 'yaml' | 'app-confirmed'
@@ -213,6 +326,7 @@ export interface TerrainProject {
   taxonomyVersion?: number
   referenceAtlases?: ReferenceAtlasManifest[]
   activeReferenceAtlasId?: string
+  explorationItems?: ExplorationLifecycleItem[]
   vaultSync?: VaultSyncState
   prerequisiteTopology?: PrerequisiteTopology
 }
