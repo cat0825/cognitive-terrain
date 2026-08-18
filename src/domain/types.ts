@@ -29,6 +29,57 @@ export interface ReferenceAtlasManifest {
 
 export type CognitiveStateProvenance = 'yaml' | 'app' | 'migration'
 
+export type PrerequisiteProvenance = 'yaml' | 'app-confirmed'
+export type PrerequisiteSourceField = 'prerequisites' | 'buildsOn' | 'app'
+
+export interface PrerequisiteInput {
+  target: string
+  provenance: PrerequisiteProvenance
+  sourceField: PrerequisiteSourceField
+}
+
+export interface PrerequisiteDeclaration extends PrerequisiteInput {
+  relationId: string
+}
+
+export interface PrerequisiteRelation {
+  id: string
+  sourceNoteId: string
+  fromItemId: string
+  toItemId: string
+  declaredTarget: string
+  provenance: PrerequisiteProvenance
+  sourceField: PrerequisiteSourceField
+}
+
+export type PrerequisiteDiagnosticKind = 'self-link' | 'unresolved-target' | 'ambiguous-title' | 'cycle'
+
+export interface PrerequisiteDiagnostic {
+  id: string
+  kind: PrerequisiteDiagnosticKind
+  sourceNoteId: string
+  relationIds: string[]
+  declaredTarget?: string
+  itemIds: string[]
+}
+
+export interface FoundationAssignment {
+  itemId: string
+  status: 'neutral' | 'derived' | 'excluded'
+  depth?: number
+  branchRootIds: string[]
+  relationIds: string[]
+  sourceNoteIds: string[]
+}
+
+export interface PrerequisiteTopology {
+  version: 1
+  formulaVersion: 'explicit-prerequisite-dag-v1'
+  relations: PrerequisiteRelation[]
+  diagnostics: PrerequisiteDiagnostic[]
+  assignments: FoundationAssignment[]
+}
+
 export interface CognitiveState {
   itemId: string
   mastery?: number
@@ -71,6 +122,8 @@ export interface TerrainProfile {
 
 export interface NoteInput {
   id?: string
+  sourceId?: string
+  sourceKey?: string
   title?: string
   content: string
   createdAt: string
@@ -89,10 +142,13 @@ export interface NoteInput {
   reviewedAt?: string
   cognitiveStateProvenance?: CognitiveStateProvenance
   links?: string[]
+  prerequisites?: PrerequisiteInput[]
 }
 
 export interface TerrainNote {
   id: string
+  sourceId?: string
+  sourceKey?: string
   fingerprint: string
   title: string
   content: string
@@ -113,6 +169,7 @@ export interface TerrainNote {
   reviewedAt?: string
   cognitiveStateProvenance?: CognitiveStateProvenance
   links: string[]
+  prerequisites?: PrerequisiteDeclaration[]
   x: number
   y: number
 }
@@ -156,6 +213,99 @@ export interface TerrainProject {
   taxonomyVersion?: number
   referenceAtlases?: ReferenceAtlasManifest[]
   activeReferenceAtlasId?: string
+  vaultSync?: VaultSyncState
+  prerequisiteTopology?: PrerequisiteTopology
+}
+
+export type VaultSyncField =
+  | 'title'
+  | 'content'
+  | 'createdAt'
+  | 'tags'
+  | 'weight'
+  | 'mastery'
+  | 'confidence'
+  | 'exploration'
+  | 'status'
+  | 'areas'
+  | 'reviewedAt'
+  | 'links'
+  | 'prerequisites'
+
+export interface VaultSyncNoteSnapshot {
+  sourceKey?: string
+  title: string
+  content: string
+  createdAt: string
+  tags: string[]
+  weight: number
+  mastery?: number
+  confidence?: number
+  exploration?: number
+  status?: NoteStatus
+  areas: string[]
+  declaredAreas: string[]
+  reviewedAt?: string
+  links: string[]
+  prerequisites?: PrerequisiteDeclaration[]
+}
+
+export interface VaultSyncVault {
+  vaultId: string
+  displayName: string
+  accessMode: 'directory-handle' | 'reselect-files'
+  lastScannedAt: string
+}
+
+export interface VaultSourceState {
+  sourceId: string
+  itemId: string
+  vaultId: string
+  relativePath: string
+  status: 'present' | 'removed'
+  rawContentHash: string
+  entityHash: string
+  lastModifiedMs?: number
+  size?: number
+  acceptedFieldHashes: Partial<Record<VaultSyncField, string>>
+  acceptedNote: VaultSyncNoteSnapshot
+  acceptedAt: string
+}
+
+export interface VaultSyncRevision {
+  id: string
+  sourceId: string
+  itemId: string
+  operation: 'add' | 'modify' | 'rename' | 'remove'
+  rawContentHash: string
+  previousContentHash?: string
+  fromPath?: string
+  toPath?: string
+  entityHash: string
+  acceptedAt: string
+  occurredAt: string
+  timestampSource: 'file-last-modified' | 'accepted-at'
+  provenance: 'vault-sync'
+}
+
+export interface VaultWritebackRevision {
+  id: string
+  sourceId: string
+  itemId: string
+  path: string
+  beforeRawContentHash: string
+  afterRawContentHash: string
+  requestIds: string[]
+  acceptedAt: string
+  provenance: 'vault-writeback'
+}
+
+export interface VaultSyncState {
+  version: 1
+  vaults: VaultSyncVault[]
+  sources: VaultSourceState[]
+  revisions: VaultSyncRevision[]
+  writebackRevisions?: VaultWritebackRevision[]
 }
 
 export interface AnalysisOptions {
@@ -195,7 +345,7 @@ export interface ParsedImport {
 
 export type ViewMode = '3d' | '2d'
 export type QualityLevel = 'high' | 'medium' | 'low'
-export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'activity' | 'temperature' | 'area'
+export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'activity' | 'structure' | 'temperature' | 'area'
 
 export interface ProjectSummary {
   id: string
@@ -204,7 +354,13 @@ export interface ProjectSummary {
   noteCount: number
 }
 
-export type ProjectBackupReason = 'manual' | 'before-save' | 'before-delete' | 'before-restore'
+export type ProjectBackupReason =
+  | 'manual'
+  | 'before-save'
+  | 'before-delete'
+  | 'before-restore'
+  | 'before-vault-sync'
+  | 'before-vault-writeback'
 
 export interface ProjectBackup {
   id: string

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TerrainNote } from '../../src/domain/types'
 import { buildActivitySummaries } from '../../src/domain/activity-temperature'
+import { materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import {
   buildTerrainData,
   interpolateSnapshots,
@@ -116,6 +117,32 @@ describe('terrain pipeline', () => {
 
     expect(sampleHeight(values, 48, hot.x, hot.y)).toBeGreaterThan(sampleHeight(values, 48, cold.x, cold.y) * 3)
     expect([cold.x, cold.y, hot.x, hot.y]).toEqual([-0.45, 0, 0.45, 0])
+  })
+
+  it('renders explicit prerequisite depth as strata without moving planar coordinates', () => {
+    const root = note('root', '2026-01-10T00:00:00.000Z', -0.45, 0, 'root')
+    const child = {
+      ...note('child', '2026-01-10T00:00:00.000Z', 0.45, 0, 'child'),
+      prerequisites: materializePrerequisites('child', [{
+        target: 'root',
+        provenance: 'yaml',
+        sourceField: 'prerequisites',
+      }]),
+    }
+    const terrain = buildTerrainData([root, child], 48, 'UTC', 0.05, 'structure')
+    const values = terrain.snapshots[0].values
+
+    expect(sampleHeight(values, 48, child.x, child.y)).toBeGreaterThan(sampleHeight(values, 48, root.x, root.y) * 2)
+    expect([root.x, root.y, child.x, child.y]).toEqual([-0.45, 0, 0.45, 0])
+  })
+
+  it('keeps structural elevation neutral without explicit prerequisite evidence', () => {
+    const terrain = buildTerrainData([
+      note('a', '2026-01-10T00:00:00.000Z', -0.4, 0, 'a'),
+      note('b', '2026-01-10T00:00:00.000Z', 0.4, 0, 'b'),
+    ], 32, 'UTC', 0.05, 'structure')
+
+    expect(Math.max(...terrain.snapshots[0].values)).toBe(0)
   })
 
   it('interpolates and samples height values at timeline boundaries', () => {
