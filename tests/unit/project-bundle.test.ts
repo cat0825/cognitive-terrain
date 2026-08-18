@@ -3,6 +3,7 @@ import { createDemoProject } from '../../src/domain/demo'
 import { parseProjectBundle, serializeProjectBundle } from '../../src/export/project-files'
 import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
+import { buildPrerequisiteTopology, materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import type { TerrainProject } from '../../src/domain/types'
 
 describe('project bundle migration', () => {
@@ -91,6 +92,36 @@ describe('project bundle migration', () => {
     expect(restored.taxonomyNodes).toEqual([root, child])
     expect(restored.referenceAtlases).toEqual(source.referenceAtlases)
     expect(restored.notes[0]?.declaredAreas).toEqual([' 系统 '])
+  })
+
+  it('round-trips prerequisite declarations, diagnostics, and derived evidence', async () => {
+    const demo = createDemoProject()
+    const root = { ...demo.notes[0], id: 'root', title: 'Root', prerequisites: [] }
+    const child = {
+      ...demo.notes[1],
+      id: 'child',
+      title: 'Child',
+      prerequisites: materializePrerequisites('child', [{
+        target: 'Root',
+        provenance: 'app-confirmed',
+        sourceField: 'app',
+      }]),
+    }
+    const notes = [root, child]
+    const source: TerrainProject = {
+      ...demo,
+      notes,
+      prerequisiteTopology: buildPrerequisiteTopology(notes),
+    }
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'prerequisites.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.notes[1]?.prerequisites).toEqual(child.prerequisites)
+    expect(restored.prerequisiteTopology).toEqual(source.prerequisiteTopology)
   })
 
   it('round-trips stable vault source identity, baselines, and sync provenance', async () => {

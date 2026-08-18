@@ -29,6 +29,57 @@ export interface ReferenceAtlasManifest {
 
 export type CognitiveStateProvenance = 'yaml' | 'app' | 'migration'
 
+export type PrerequisiteProvenance = 'yaml' | 'app-confirmed'
+export type PrerequisiteSourceField = 'prerequisites' | 'buildsOn' | 'app'
+
+export interface PrerequisiteInput {
+  target: string
+  provenance: PrerequisiteProvenance
+  sourceField: PrerequisiteSourceField
+}
+
+export interface PrerequisiteDeclaration extends PrerequisiteInput {
+  relationId: string
+}
+
+export interface PrerequisiteRelation {
+  id: string
+  sourceNoteId: string
+  fromItemId: string
+  toItemId: string
+  declaredTarget: string
+  provenance: PrerequisiteProvenance
+  sourceField: PrerequisiteSourceField
+}
+
+export type PrerequisiteDiagnosticKind = 'self-link' | 'unresolved-target' | 'ambiguous-title' | 'cycle'
+
+export interface PrerequisiteDiagnostic {
+  id: string
+  kind: PrerequisiteDiagnosticKind
+  sourceNoteId: string
+  relationIds: string[]
+  declaredTarget?: string
+  itemIds: string[]
+}
+
+export interface FoundationAssignment {
+  itemId: string
+  status: 'neutral' | 'derived' | 'excluded'
+  depth?: number
+  branchRootIds: string[]
+  relationIds: string[]
+  sourceNoteIds: string[]
+}
+
+export interface PrerequisiteTopology {
+  version: 1
+  formulaVersion: 'explicit-prerequisite-dag-v1'
+  relations: PrerequisiteRelation[]
+  diagnostics: PrerequisiteDiagnostic[]
+  assignments: FoundationAssignment[]
+}
+
 export interface CognitiveState {
   itemId: string
   mastery?: number
@@ -91,6 +142,7 @@ export interface NoteInput {
   reviewedAt?: string
   cognitiveStateProvenance?: CognitiveStateProvenance
   links?: string[]
+  prerequisites?: PrerequisiteInput[]
 }
 
 export interface TerrainNote {
@@ -117,6 +169,7 @@ export interface TerrainNote {
   reviewedAt?: string
   cognitiveStateProvenance?: CognitiveStateProvenance
   links: string[]
+  prerequisites?: PrerequisiteDeclaration[]
   x: number
   y: number
 }
@@ -160,6 +213,7 @@ export interface TerrainProject {
   taxonomyVersion?: number
   referenceAtlases?: ReferenceAtlasManifest[]
   vaultSync?: VaultSyncState
+  prerequisiteTopology?: PrerequisiteTopology
 }
 
 export type VaultSyncField =
@@ -175,6 +229,7 @@ export type VaultSyncField =
   | 'areas'
   | 'reviewedAt'
   | 'links'
+  | 'prerequisites'
 
 export interface VaultSyncNoteSnapshot {
   sourceKey?: string
@@ -191,6 +246,7 @@ export interface VaultSyncNoteSnapshot {
   declaredAreas: string[]
   reviewedAt?: string
   links: string[]
+  prerequisites?: PrerequisiteDeclaration[]
 }
 
 export interface VaultSyncVault {
@@ -288,7 +344,7 @@ export interface ParsedImport {
 
 export type ViewMode = '3d' | '2d'
 export type QualityLevel = 'high' | 'medium' | 'low'
-export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'temperature' | 'area'
+export type VisualDimension = 'density' | 'mastery' | 'exploration' | 'structure' | 'temperature' | 'area'
 
 export interface ProjectSummary {
   id: string

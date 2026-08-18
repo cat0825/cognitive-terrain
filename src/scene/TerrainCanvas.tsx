@@ -58,7 +58,7 @@ export const TerrainCanvas = memo(function TerrainCanvas({
       notes: project.notes,
       gridSize: project.gridSize,
       timeZone: project.timeZone,
-      elevation: profileId === 'mastery' ? 'mastery' : 'exploration',
+      elevation: profileId === 'mastery' || profileId === 'structure' ? profileId : 'exploration',
     })
     let active = true
     void handle.promise.then((terrain) => {
@@ -161,6 +161,7 @@ function AnimatedTerrain2D({
       peaks={project.peaks}
       selectedNoteId={selectedNoteId}
       visualDimension={visualDimension}
+      prerequisiteTopology={project.prerequisiteTopology}
       activityByNote={activityByNote}
       onSelectNote={onSelectNote}
     />

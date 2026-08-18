@@ -11,6 +11,7 @@ import type {
   VaultSyncRevision,
   VaultSyncState,
 } from './types'
+import { materializePrerequisites } from './prerequisite-topology'
 
 export const VAULT_SYNC_VERSION = 1 as const
 
@@ -27,6 +28,7 @@ const SYNC_FIELDS: readonly VaultSyncField[] = [
   'areas',
   'reviewedAt',
   'links',
+  'prerequisites',
 ]
 
 const FRONTMATTER_FIELDS: readonly VaultSyncField[] = [
@@ -40,6 +42,7 @@ const FRONTMATTER_FIELDS: readonly VaultSyncField[] = [
   'status',
   'areas',
   'reviewedAt',
+  'prerequisites',
 ]
 
 export interface VaultScanFile {
@@ -138,7 +141,7 @@ export function buildVaultSyncPreview(
     matchedPaths.add(pathKey)
     const bootstrapEquivalent = bootstrap
       && file.note
-      && source.entityHash === entityHash(normalizedIncomingSnapshot(file.note, source.acceptedNote, file.invalidFields))
+      && source.entityHash === entityHash(normalizedIncomingSnapshot(file.note, source.acceptedNote, file.invalidFields, source.itemId))
     if (
       source.relativePath === file.path
       && (bootstrap ? bootstrapEquivalent : source.rawContentHash === file.rawContentHash)
@@ -280,7 +283,7 @@ export function applyVaultSync(
       if (ambiguous && change.conflictIds.some((id) => resolutionById.get(id) === 'app')) continue
       const sourceId = change.sourceId ?? sourceIdFor(preview.vaultId, file.path)
       const itemId = change.itemId ?? itemIdFor(sourceId)
-      const note = normalizedIncomingSnapshot(file.note, undefined, file.invalidFields)
+      const note = normalizedIncomingSnapshot(file.note, undefined, file.invalidFields, itemId)
       inputs.set(itemId, noteInputFromSnapshot(note, itemId, sourceId, preview.vaultName, file.path, 'yaml'))
       const source = sourceStateFromFile(preview, file, sourceId, itemId, note, acceptedAt)
       sourceStates.set(sourceId, source)
@@ -304,7 +307,7 @@ export function applyVaultSync(
     }
     if (!file?.note || !current) continue
 
-    const incoming = normalizedIncomingSnapshot(file.note, source.acceptedNote, file.invalidFields)
+    const incoming = normalizedIncomingSnapshot(file.note, source.acceptedNote, file.invalidFields, source.itemId)
     const local = snapshotFromTerrainNote(current)
     const merged = mergeSnapshots(source.acceptedNote, local, incoming, change, resolutionById, preview.conflicts)
     const provenance = cognitiveProvenanceForMerge(project, source.itemId, source.acceptedNote, local, incoming)
@@ -383,6 +386,7 @@ export function snapshotFromTerrainNote(note: TerrainNote): VaultSyncNoteSnapsho
     declaredAreas: [...(note.declaredAreas ?? note.areas ?? (note.area ? [note.area] : []))],
     reviewedAt: note.reviewedAt,
     links: [...note.links],
+    prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })) ?? [],
   }
 }
 
@@ -448,7 +452,7 @@ function changeForSource(
   const current = project.notes.find((note) => note.id === source.itemId)
   if (!current || !file.note) return change
   const local = snapshotFromTerrainNote(current)
-  const incoming = normalizedIncomingSnapshot(file.note, source.acceptedNote, file.invalidFields)
+  const incoming = normalizedIncomingSnapshot(file.note, source.acceptedNote, file.invalidFields, source.itemId)
   for (const field of SYNC_FIELDS) {
     if (sameField(incoming, source.acceptedNote, field)) continue
     change.fields.push(field)
@@ -524,6 +528,7 @@ function normalizedIncomingSnapshot(
   note: NoteInput,
   baseline: VaultSyncNoteSnapshot | undefined,
   invalidFields: readonly VaultSyncField[],
+  itemId: string,
 ): VaultSyncNoteSnapshot {
   const areas = normalizeStrings(note.areas ?? (note.area ? [note.area] : []))
   const normalized: VaultSyncNoteSnapshot = {
@@ -541,6 +546,7 @@ function normalizedIncomingSnapshot(
     declaredAreas: note.declaredAreas ? [...note.declaredAreas] : [...areas],
     reviewedAt: normalizedOptionalDate(note.reviewedAt),
     links: normalizeStrings(note.links ?? []),
+    prerequisites: materializePrerequisites(itemId, note.prerequisites),
   }
   for (const field of invalidFields) {
     if (!baseline) continue
@@ -675,6 +681,7 @@ function noteInputFromTerrain(note: TerrainNote, provenance?: CognitiveStateProv
     reviewedAt: note.reviewedAt,
     cognitiveStateProvenance: provenance,
     links: [...note.links],
+    prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
   }
 }
 
@@ -708,6 +715,7 @@ function noteInputFromSnapshot(
     reviewedAt: note.reviewedAt,
     cognitiveStateProvenance: provenance,
     links: [...note.links],
+    prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
   }
 }
 
@@ -761,6 +769,7 @@ function cloneSnapshot(note: VaultSyncNoteSnapshot): VaultSyncNoteSnapshot {
     areas: [...note.areas],
     declaredAreas: [...note.declaredAreas],
     links: [...note.links],
+    prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })) ?? [],
   }
 }
 
@@ -878,6 +887,7 @@ export function invalidFieldsForIssues(issues: readonly ImportIssue[]): VaultSyn
   for (const issue of issues) {
     const field = issue.field
     if (field === 'area' || field === 'areas') invalid.add('areas')
+    else if (field === 'buildsOn' || field === 'builds-on') invalid.add('prerequisites')
     else if (field && SYNC_FIELDS.includes(field as VaultSyncField)) invalid.add(field as VaultSyncField)
     else if (issue.message.includes('YAML frontmatter')) FRONTMATTER_FIELDS.forEach((item) => invalid.add(item))
   }

@@ -123,6 +123,7 @@ export function parseTextDocument(
       reviewedAt: cognitive.fields.reviewedAt,
       cognitiveStateProvenance: Object.keys(cognitive.fields).length ? 'yaml' : undefined,
       links: [...new Set([...parseWikiLinks(content), ...normalizeLinks(frontmatter.links)])],
+      prerequisites: cognitive.fields.prerequisites,
     }],
     issues,
     name: title,
@@ -187,6 +188,7 @@ function normalizeNote(value: unknown): { note?: NoteInput; issue?: Omit<ImportI
       ),
       reviewedAt: stringValue(record.reviewedAt) ?? stringValue(record.reviewed_at),
       links: [...new Set([...parseWikiLinks(content), ...normalizeLinks(record.links)])],
+      prerequisites: normalizePrerequisites(record),
     },
   }
 }
@@ -244,6 +246,17 @@ function normalizeLinks(value: unknown): string[] {
   return typeof value === 'string'
     ? value.split(/[\n,|]+/).map((item) => item.trim()).filter(Boolean)
     : []
+}
+
+function normalizePrerequisites(record: Record<string, unknown>): NoteInput['prerequisites'] {
+  return ([
+    ['prerequisites', record.prerequisites],
+    ['buildsOn', record.buildsOn ?? record.builds_on ?? record['builds-on']],
+  ] as const).flatMap(([sourceField, value]) => normalizeLinks(value).map((target) => ({
+    target,
+    provenance: 'yaml' as const,
+    sourceField,
+  })))
 }
 
 export function parseWikiLinks(value: string): string[] {

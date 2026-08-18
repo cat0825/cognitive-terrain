@@ -3,8 +3,9 @@ import path from 'node:path'
 
 const distDir = path.resolve('dist/assets')
 const budget = {
-  main: 348 * 1024,
-  totalJs: 2235 * 1024,
+  // Issues #24 and #25 add lazy write-back plus shared prerequisite-strata UI.
+  main: 360 * 1024,
+  totalJs: 2260 * 1024,
   css: 40 * 1024,
 }
 

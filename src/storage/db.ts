@@ -8,6 +8,7 @@ import {
 import { cognitiveStateFromNote } from '../domain/cognitive-state'
 import { compactActivityHistory } from '../domain/activity-history'
 import { areasForNote, plateIdForArea } from '../domain/knowledge-plates'
+import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
 import { legacyTaxonomyNodesForProject, validateTaxonomy } from '../domain/taxonomy'
 import {
   migrateTerrainProjectToV3,
@@ -313,6 +314,7 @@ export function migrateProject(project: TerrainProject): TerrainProject {
       area: areas[0],
       areas: areas.length ? areas : undefined,
       links: note.links ?? [],
+      prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })) ?? [],
     }
   })
   const cognitiveStates = project.cognitiveStates ?? migratedNotes.flatMap((note) => {
@@ -360,6 +362,7 @@ export function migrateProject(project: TerrainProject): TerrainProject {
       ...manifest,
       taxonomyNodeIds: [...manifest.taxonomyNodeIds],
     })),
+    prerequisiteTopology: buildPrerequisiteTopology(migratedNotes),
   }
 }
 

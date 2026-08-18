@@ -18,6 +18,7 @@ import {
   vaultWritebackCandidates,
   type VaultWritebackCandidate,
 } from '../domain/vault-writeback-candidates'
+import { obsidianUri } from '../import/obsidian-uri'
 import { useAppStore } from '../store/app-store'
 import { ActivityHistory, type ActivityHistoryBucket } from './ActivityHistory'
 
@@ -528,15 +529,6 @@ async function copyWikiLink(title: string, reportError: (message: string) => voi
     reportError('无法写入剪贴板，请手动复制笔记标题')
     return false
   }
-}
-
-/**
- * 有 vault 时用 Obsidian 官方的 vault + file 参数，跨 vault 才能准确定位。
- * 没有 vault 只能退回 path，由 Obsidian 自行猜测所属 vault。
- */
-function obsidianUri(path: string, vault?: string): string {
-  if (!vault) return `obsidian://open?path=${encodeURIComponent(path)}`
-  return `obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(path.replace(/\.md$/i, ''))}`
 }
 
 function formatDate(value: string): string {
