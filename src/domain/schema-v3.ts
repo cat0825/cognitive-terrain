@@ -138,13 +138,24 @@ export interface VaultSyncPatchV3 {
   provenance: 'vault-sync'
 }
 
+export interface VaultWritebackPatchV3 {
+  kind: 'vault-writeback'
+  sourceId: string
+  path: string
+  beforeRawContentHash: string
+  afterRawContentHash: string
+  requestIds: string[]
+  acceptedAt: string
+  provenance: 'vault-writeback'
+}
+
 export interface RevisionV3 {
   id: string
   workspaceId: string
   entityId: string
   entityType: 'item'
-  patch: MigrationBaselinePatchV3 | VaultSyncPatchV3
-  actorId: 'migration' | 'vault-sync'
+  patch: MigrationBaselinePatchV3 | VaultSyncPatchV3 | VaultWritebackPatchV3
+  actorId: 'migration' | 'vault-sync' | 'vault-writeback'
   createdAt: string
 }
 
@@ -383,7 +394,25 @@ export function migrateTerrainProjectToV3(
     actorId: 'vault-sync' as const,
     createdAt: revision.occurredAt,
   } satisfies RevisionV3))
-  const revisions = dedupeById([...migrationRevisions, ...vaultSyncRevisions])
+  const vaultWritebackRevisions = (project.vaultSync?.writebackRevisions ?? []).map((revision) => ({
+    id: revision.id,
+    workspaceId: project.id,
+    entityId: revision.itemId,
+    entityType: 'item' as const,
+    patch: {
+      kind: 'vault-writeback' as const,
+      sourceId: revision.sourceId,
+      path: revision.path,
+      beforeRawContentHash: revision.beforeRawContentHash,
+      afterRawContentHash: revision.afterRawContentHash,
+      requestIds: [...revision.requestIds],
+      acceptedAt: revision.acceptedAt,
+      provenance: revision.provenance,
+    },
+    actorId: 'vault-writeback' as const,
+    createdAt: revision.acceptedAt,
+  } satisfies RevisionV3))
+  const revisions = dedupeById([...migrationRevisions, ...vaultSyncRevisions, ...vaultWritebackRevisions])
   const warnings = [
     ...(uniqueSources.length === 0 ? ['项目没有可迁移的来源；所有条目均标记为 draft'] : []),
     ...(relations.some((relation) => relation.kind === 'wikilink' && !relation.resolved) ? ['部分 WikiLink 无法解析，已保留目标标题'] : []),

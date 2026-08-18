@@ -1,4 +1,4 @@
-import { ArchiveRestore, BookOpen, Download, FileText, Filter, FolderOpen, ImageDown, ListTodo, Pencil, RefreshCw, RotateCcw, Save, Search, Trash2, Upload } from 'lucide-react'
+import { ArchiveRestore, BookOpen, Download, FilePenLine, FileText, Filter, FolderOpen, ImageDown, ListTodo, Pencil, RefreshCw, RotateCcw, Save, Search, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import type { ProjectBackupReason } from '../domain/types'
 import { useAppStore } from '../store/app-store'
@@ -6,13 +6,14 @@ import { useAppStore } from '../store/app-store'
 interface TopBarProps {
   onImport: () => void
   onSync: () => void
+  onWriteback: () => void
   onLoadStudyPack: () => void
   onExportProject: () => void
   onExportImage: () => void
   onExportReport: () => void
 }
 
-export function TopBar({ onImport, onSync, onLoadStudyPack, onExportProject, onExportImage, onExportReport }: TopBarProps) {
+export function TopBar({ onImport, onSync, onWriteback, onLoadStudyPack, onExportProject, onExportImage, onExportReport }: TopBarProps) {
   const project = useAppStore((state) => state.project)
   const projects = useAppStore((state) => state.projects)
   const search = useAppStore((state) => state.search)
@@ -139,6 +140,17 @@ export function TopBar({ onImport, onSync, onLoadStudyPack, onExportProject, onE
                 >
                   <RefreshCw size={14} />
                   同步 Obsidian vault
+                </button>
+                <button
+                  type="button"
+                  disabled={!project.vaultSync?.sources.some((source) => source.status === 'present')}
+                  onClick={() => {
+                    setFilesOpen(false)
+                    onWriteback()
+                  }}
+                >
+                  <FilePenLine size={14} />
+                  写回 Obsidian vault
                 </button>
                 <button
                   type="button"
@@ -299,6 +311,7 @@ function formatShortDate(value: string): string {
 function formatBackupReason(reason: ProjectBackupReason): string {
   if (reason === 'manual') return '手动'
   if (reason === 'before-vault-sync') return '同步前'
+  if (reason === 'before-vault-writeback') return '写回前'
   if (reason === 'before-delete') return '删除前'
   if (reason === 'before-restore') return '恢复前'
   return '修改前'

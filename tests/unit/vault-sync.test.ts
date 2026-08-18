@@ -28,6 +28,30 @@ describe('incremental vault sync', () => {
     expect(JSON.stringify(project)).toBe(before)
   })
 
+  it('preserves prior vault write-back revisions when rebuilding sync state', () => {
+    const project = linkedProject()
+    const source = project.vaultSync!.sources[0]
+    project.vaultSync!.writebackRevisions = [{
+      id: 'vault-writeback:source:field',
+      sourceId: source.sourceId,
+      itemId: source.itemId,
+      path: source.relativePath,
+      beforeRawContentHash: 'sha256:before',
+      afterRawContentHash: source.rawContentHash,
+      requestIds: ['field:source:mastery'],
+      acceptedAt: firstScanAt,
+      provenance: 'vault-writeback',
+    }]
+    const preview = buildVaultSyncPreview(project, scan({ scannedAt: secondScanAt }))
+
+    const applied = applyVaultSync(project, preview, [])
+
+    expect(applied.state.writebackRevisions).toEqual(project.vaultSync!.writebackRevisions)
+    expect(applied.state.writebackRevisions).not.toBe(project.vaultSync!.writebackRevisions)
+    expect(applied.state.writebackRevisions?.[0].requestIds)
+      .not.toBe(project.vaultSync!.writebackRevisions?.[0].requestIds)
+  })
+
   it('preserves item and source identity for a unique content-hash rename', () => {
     const project = linkedProject()
     const source = project.vaultSync!.sources[0]

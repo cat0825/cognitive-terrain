@@ -287,11 +287,24 @@ export interface VaultSyncRevision {
   provenance: 'vault-sync'
 }
 
+export interface VaultWritebackRevision {
+  id: string
+  sourceId: string
+  itemId: string
+  path: string
+  beforeRawContentHash: string
+  afterRawContentHash: string
+  requestIds: string[]
+  acceptedAt: string
+  provenance: 'vault-writeback'
+}
+
 export interface VaultSyncState {
   version: 1
   vaults: VaultSyncVault[]
   sources: VaultSourceState[]
   revisions: VaultSyncRevision[]
+  writebackRevisions?: VaultWritebackRevision[]
 }
 
 export interface AnalysisOptions {
@@ -346,6 +359,7 @@ export type ProjectBackupReason =
   | 'before-delete'
   | 'before-restore'
   | 'before-vault-sync'
+  | 'before-vault-writeback'
 
 export interface ProjectBackup {
   id: string

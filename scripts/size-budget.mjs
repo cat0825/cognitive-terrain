@@ -3,9 +3,9 @@ import path from 'node:path'
 
 const distDir = path.resolve('dist/assets')
 const budget = {
-  // Issue #25 adds shared 2D/3D prerequisite-strata evidence and legend code.
+  // Issues #24 and #25 add lazy write-back plus shared prerequisite-strata UI.
   main: 360 * 1024,
-  totalJs: 2220 * 1024,
+  totalJs: 2260 * 1024,
   css: 40 * 1024,
 }
 

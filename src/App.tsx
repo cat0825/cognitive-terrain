@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { visibleNotesFor } from './domain/project-view'
 import { buildPlateCollisions } from './domain/knowledge-plates'
+import { vaultWritebackCandidates, type VaultWritebackCandidate } from './domain/vault-writeback-candidates'
 import { downloadProjectBundle, downloadProjectReport, exportTerrainPng } from './export/project-files'
 import { TerrainCanvas } from './scene/TerrainCanvas'
 import { useAppStore } from './store/app-store'
@@ -14,6 +15,7 @@ import { Timeline } from './ui/Timeline'
 import { TopBar } from './ui/TopBar'
 
 const VaultSyncPanel = lazy(() => import('./ui/VaultSyncPanel'))
+const VaultWritebackPanel = lazy(() => import('./ui/VaultWritebackPanel'))
 
 function App() {
   const project = useAppStore((state) => state.project)
@@ -72,6 +74,7 @@ function App() {
   const progressValue = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
   const [analysisToast, setAnalysisToast] = useState<typeof lastAnalysis>(null)
   const [syncOpen, setSyncOpen] = useState(false)
+  const [writebackCandidates, setWritebackCandidates] = useState<VaultWritebackCandidate[] | null>(null)
   const toastTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -102,6 +105,7 @@ function App() {
         <TopBar
           onImport={() => setImportOpen(true)}
           onSync={() => setSyncOpen(true)}
+          onWriteback={() => setWritebackCandidates(vaultWritebackCandidates(project))}
           onLoadStudyPack={() => void loadStudyPack()}
           onExportProject={() => downloadProjectBundle(project)}
           onExportImage={() => void exportImage()}
@@ -126,7 +130,13 @@ function App() {
               cameraScale={cameraScale}
               onSelectNote={selectNote}
             />
-            <NoteDetail project={project} note={selectedNote} collision={activeCollision} visibleCount={visibleNotes.length} />
+            <NoteDetail
+              project={project}
+              note={selectedNote}
+              collision={activeCollision}
+              visibleCount={visibleNotes.length}
+              onWriteback={setWritebackCandidates}
+            />
             <CameraRail />
             <Timeline snapshots={project.snapshots} onExportImage={() => void exportImage()} />
             <FilterPanel />
@@ -137,6 +147,15 @@ function App() {
         {syncOpen && (
           <Suspense fallback={<div className="processing-overlay" role="status">正在加载 vault 同步</div>}>
             <VaultSyncPanel open onClose={() => setSyncOpen(false)} />
+          </Suspense>
+        )}
+        {writebackCandidates && (
+          <Suspense fallback={<div className="processing-overlay" role="status">正在加载 vault 写回</div>}>
+            <VaultWritebackPanel
+              open
+              seedCandidates={writebackCandidates}
+              onClose={() => setWritebackCandidates(null)}
+            />
           </Suspense>
         )}
         {project.notes.length > 0 && project.notes.length <= 5 && (

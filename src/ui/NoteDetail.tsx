@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, FilePenLine, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
 import type { TerrainNote, TerrainProject } from '../domain/types'
 import { buildActivitySummaries, temperatureColor } from '../domain/activity-temperature'
 import { aggregateActivityHistoryCounts } from '../domain/activity-history'
@@ -13,6 +13,11 @@ import {
 } from '../domain/knowledge-plates'
 import { findNeighbors } from '../pipeline/neighbors'
 import { maintenanceCandidates, resolveNoteRelations, semanticLinkCandidates } from '../domain/knowledge-maintenance'
+import {
+  vaultWikiLinkCandidate,
+  vaultWritebackCandidates,
+  type VaultWritebackCandidate,
+} from '../domain/vault-writeback-candidates'
 import { obsidianUri } from '../import/obsidian-uri'
 import { useAppStore } from '../store/app-store'
 import { ActivityHistory, type ActivityHistoryBucket } from './ActivityHistory'
@@ -22,9 +27,10 @@ interface NoteDetailProps {
   note: TerrainNote | undefined
   collision?: PlateCollision
   visibleCount: number
+  onWriteback: (candidates: VaultWritebackCandidate[]) => void
 }
 
-export function NoteDetail({ project, note, collision, visibleCount }: NoteDetailProps) {
+export function NoteDetail({ project, note, collision, visibleCount, onWriteback }: NoteDetailProps) {
   const detailsOpen = useAppStore((state) => state.detailsOpen)
   const selectNote = useAppStore((state) => state.selectNote)
   const closeButton = useRef<HTMLButtonElement>(null)
@@ -100,7 +106,7 @@ export function NoteDetail({ project, note, collision, visibleCount }: NoteDetai
         {collision
           ? <CollisionContent collision={collision} project={project} />
           : note
-            ? <NoteContent key={note.id} note={note} />
+            ? <NoteContent key={note.id} note={note} onWriteback={onWriteback} />
             : <ProjectOverview project={project} visibleCount={visibleCount} />}
       </div>
     </aside>
@@ -167,7 +173,7 @@ function CollisionContent({ collision, project }: { collision: PlateCollision; p
   )
 }
 
-function NoteContent({ note }: { note: TerrainNote }) {
+function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (candidates: VaultWritebackCandidate[]) => void }) {
   const project = useAppStore((state) => state.project)
   const selectNote = useAppStore((state) => state.selectNote)
   const requestFocus = useAppStore((state) => state.requestFocus)
@@ -175,6 +181,7 @@ function NoteContent({ note }: { note: TerrainNote }) {
   const markNoteReviewed = useAppStore((state) => state.markNoteReviewed)
   const neighbors = findNeighbors(project, note.id, 6)
   const semanticCandidates = semanticLinkCandidates(project.notes, note.id, 3)
+  const pendingWriteback = vaultWritebackCandidates(project, note.id)
   const noteAreas = areasForNote(note)
   const activity = useMemo(
     () => buildActivitySummaries([note], project.interactionEvents, Date.now(), project.activityHistory?.aggregates).get(note.id),
@@ -322,6 +329,12 @@ function NoteContent({ note }: { note: TerrainNote }) {
           <CheckCircle2 size={13} />
           {isReviewing ? '记录中…' : '标记已复习'}
         </button>
+        {pendingWriteback.length > 0 && (
+          <button type="button" className="focus-button" onClick={() => onWriteback(pendingWriteback)}>
+            <FilePenLine size={13} />
+            写回 Obsidian ({pendingWriteback.length})
+          </button>
+        )}
       </div>
       {neighbors.length > 0 && (
         <section className="neighbor-section">
@@ -344,7 +357,7 @@ function NoteContent({ note }: { note: TerrainNote }) {
         </section>
       )}
       <RelationSection note={note} />
-      {semanticCandidates.length > 0 && <SemanticCandidateSection candidates={semanticCandidates} originId={note.id} project={project} />}
+      {semanticCandidates.length > 0 && <SemanticCandidateSection candidates={semanticCandidates} originId={note.id} project={project} onWriteback={onWriteback} />}
       {note.source?.startsWith('http') && (
         <a href={note.source} target="_blank" rel="noreferrer">
           打开来源
@@ -449,7 +462,7 @@ function RelationList({ icon, label, notes, onSelect }: { icon: ReactNode; label
   return <div className="relation-group"><span>{icon}{label}</span><ul className="relation-list">{notes.slice(0, 5).map((linked) => <li key={linked.id}><button type="button" onClick={() => onSelect(linked.id)}>{linked.title}</button></li>)}</ul></div>
 }
 
-function SemanticCandidateSection({ candidates, originId, project }: { candidates: Array<{ note: TerrainNote; distance: number }>; originId: string; project: TerrainProject }) {
+function SemanticCandidateSection({ candidates, originId, project, onWriteback }: { candidates: Array<{ note: TerrainNote; distance: number }>; originId: string; project: TerrainProject; onWriteback: (candidates: VaultWritebackCandidate[]) => void }) {
   const reportError = useAppStore((state) => state.reportError)
   const [copied, setCopied] = useState<string | null>(null)
   const copiedTimer = useRef<number | null>(null)
@@ -463,7 +476,7 @@ function SemanticCandidateSection({ candidates, originId, project }: { candidate
     if (copiedTimer.current) window.clearTimeout(copiedTimer.current)
     copiedTimer.current = window.setTimeout(() => setCopied(null), 2400)
   }
-  return <section className="relation-section semantic-candidates"><span className="panel-kicker">语义候选补链</span><small>模型投影位置接近，但当前没有明确双链</small><ul className="relation-list">{candidates.map(({ note }) => { const reasons = similarityReasons(project.notes, originId, note.id); return <li key={note.id}><button type="button" onClick={() => void copy(note.title)}><strong>{note.title}</strong><small>{copied === note.title ? '已复制 wikilink' : reasons.map((reason) => reason.label).join(' · ')}</small></button></li> })}</ul><small aria-live="polite" className={copied ? 'copy-status is-copied' : 'copy-status'}>{copied ? `已复制 [[${copied}]]，确认后再写回 Obsidian。` : '点击候选可复制 [[笔记名]]，确认后再写回 Obsidian。'}</small></section>
+  return <section className="relation-section semantic-candidates"><span className="panel-kicker">语义候选补链</span><small>模型投影位置接近，但当前没有明确双链</small><ul className="relation-list">{candidates.map(({ note }) => { const reasons = similarityReasons(project.notes, originId, note.id); const writeback = vaultWikiLinkCandidate(project, originId, note.id); return <li key={note.id}><button type="button" onClick={() => writeback ? onWriteback([writeback]) : void copy(note.title)}><strong>{note.title}</strong><small>{copied === note.title ? '已复制 wikilink' : `${reasons.map((reason) => reason.label).join(' · ')} · ${writeback ? '预览写回' : '复制 WikiLink'}`}</small></button></li> })}</ul><small aria-live="polite" className={copied ? 'copy-status is-copied' : 'copy-status'}>{copied ? `已复制 [[${copied}]]。` : 'Vault 内候选会先显示 exact diff；其他来源只复制 WikiLink。'}</small></section>
 }
 
 function snapshotCutoff(project: TerrainProject, index: number): number {
