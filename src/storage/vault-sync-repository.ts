@@ -17,6 +17,27 @@ export async function saveVaultWritebackProject(previous: TerrainProject, next: 
   return saveVaultProject(previous, next, 'vault write-back', 'before-vault-writeback')
 }
 
+/**
+ * Commits a vault mutation as one transaction, or leaves the store untouched.
+ *
+ * Everything that must move together moves inside a single readwrite
+ * transaction: the recovery point, the materialization diff, and the project
+ * record. A partial commit would leave the projects record disagreeing with the
+ * materialized stores, which is exactly the "analysis succeeded but data
+ * vanished" class of bug the persist-then-swap invariant exists to prevent.
+ *
+ * Failure policy:
+ *
+ * - Any rejected write aborts the transaction, so the store rolls back to its
+ *   pre-sync state and the caller keeps its current in-memory project.
+ * - A preview built against a stale `updatedAt` is refused rather than applied,
+ *   because silently overwriting a project that moved on would discard whatever
+ *   changed in between.
+ * - Backup pruning runs after the transaction commits. It is intentionally
+ *   outside: pruning is a bounded-storage concern, and failing the whole sync
+ *   because an old recovery point could not be deleted would trade real data
+ *   loss for a housekeeping error.
+ */
 async function saveVaultProject(
   previous: TerrainProject,
   next: TerrainProject,
