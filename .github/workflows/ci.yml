@@ -5,7 +5,51 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel superseded runs for the same ref. Without this, pushing a fixup left the
+# previous run to finish its whole matrix, doubling cost for a result nobody would
+# read. `main` is excluded by using run_id as the fallback group, so pushes to the
+# default branch always complete and keep a full history of green commits.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Decides whether the browser gates need to run at all. A docs-only change
+  # cannot alter rendering, so paying for five browser jobs to prove that is
+  # waste. This is a job rather than a workflow-level `paths-ignore` because
+  # filtering the workflow leaves required checks pending forever on a docs-only
+  # PR, blocking the merge instead of speeding it up.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          if [ -z "$BASE_REF" ]; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "push build: running every gate"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE_REF" HEAD)
+          echo "changed files:"
+          echo "$changed"
+          # Anything outside docs and text assets is treated as app-affecting.
+          # Erring toward running the gates keeps a missed pattern from silently
+          # skipping coverage.
+          if echo "$changed" | grep -qvE '^(docs/|README\.md$|SESSION\.md$|\.github/ISSUE_TEMPLATE/|.*\.md$)'; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=false" >> "$GITHUB_OUTPUT"
+            echo "docs-only change: skipping browser gates"
+          fi
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -24,21 +68,31 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    needs: quality
-    timeout-minutes: 35
+    needs: [quality, changes]
+    if: needs.changes.outputs.app == 'true'
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
           - project: desktop
-            shard: 1/2
+            shard: 1/4
             artifact: desktop-1
           - project: desktop
-            shard: 2/2
+            shard: 2/4
             artifact: desktop-2
+          - project: desktop
+            shard: 3/4
+            artifact: desktop-3
+          - project: desktop
+            shard: 4/4
+            artifact: desktop-4
           - project: mobile
-            shard: 1/1
-            artifact: mobile
+            shard: 1/2
+            artifact: mobile-1
+          - project: mobile
+            shard: 2/2
+            artifact: mobile-2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -83,7 +137,8 @@ jobs:
 
   a11y:
     runs-on: ubuntu-latest
-    needs: quality
+    needs: [quality, changes]
+    if: needs.changes.outputs.app == 'true'
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +176,8 @@ jobs:
 
   visual:
     runs-on: ubuntu-latest
-    needs: quality
+    needs: [quality, changes]
+    if: needs.changes.outputs.app == 'true'
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -169,6 +225,10 @@ jobs:
   perf:
     runs-on: ubuntu-latest
     needs: quality
+    # Only on main. Perf is the slowest gate and the most sensitive to runner
+    # noise, so it guards the mainline rather than every PR iteration. A PR that
+    # touches rendering can still be checked locally with `npm run test:perf`.
+    if: github.event_name == 'push'
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
