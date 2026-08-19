@@ -1,5 +1,6 @@
 import { CheckCircle2, Clock3, ExternalLink, FileWarning, Pencil, Play, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { evaluationTimeForProject } from '../domain/evaluation-time'
 import { generateProjectExplorationSuggestions } from '../domain/exploration-loop'
 import type {
   ExplorationLifecycleItem,
@@ -38,10 +39,7 @@ export function ExplorationWorkbench({
   onEdit,
   onSelectNote,
 }: ExplorationWorkbenchProps) {
-  const evaluatedAt = useMemo(() => {
-    const projectTime = Date.parse(project.updatedAt)
-    return Number.isFinite(projectTime) ? Math.max(Date.now(), projectTime) : Date.now()
-  }, [project.updatedAt])
+  const evaluatedAt = useMemo(() => evaluationTimeForProject(project.updatedAt), [project.updatedAt])
   const suggestions = useMemo(
     () => generateProjectExplorationSuggestions(project, evaluatedAt),
     [evaluatedAt, project],

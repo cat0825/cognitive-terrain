@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { buildProjectReferenceGapReport } from '../domain/reference-gaps'
+import { evaluationTimeForProject } from '../domain/evaluation-time'
 import type { TerrainProject } from '../domain/types'
 
 export function ReferenceGapSection({
@@ -10,7 +11,9 @@ export function ReferenceGapSection({
   onSelectAtlas: (id: string) => void
 }) {
   const [selectedAtlasId, setSelectedAtlasId] = useState(project.activeReferenceAtlasId ?? '')
-  const [evaluatedAt] = useState(() => Date.now())
+  // Tied to the project, not frozen at mount: a review recorded while this panel
+  // is open must change the report instead of being treated as future. See #42.
+  const evaluatedAt = useMemo(() => evaluationTimeForProject(project.updatedAt), [project.updatedAt])
   useEffect(() => {
     setSelectedAtlasId(project.activeReferenceAtlasId ?? '')
   }, [project.activeReferenceAtlasId])

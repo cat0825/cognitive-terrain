@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownLeft, ArrowUpRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, FilePenLine, Focus, GitCompare, Link2, Pencil, X } from 'lucide-react'
+import { evaluationTimeForProject } from '../domain/evaluation-time'
 import { calculateActivityElevation } from '../domain/activity-elevation'
 import { calculateProjectLearningProgression } from '../domain/learning-progression'
 import type { CognitiveObservation, InteractionEventType, TerrainNote, TerrainProject } from '../domain/types'
@@ -782,11 +783,6 @@ function relativeActivityTime(value: string): string {
   if (hours < 24) return `${hours} 小时前`
   const days = Math.floor(hours / 24)
   return days < 30 ? `${days} 天前` : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value))
-}
-
-function evaluationTimeForProject(updatedAt: string): number {
-  const projectTime = Date.parse(updatedAt)
-  return Number.isFinite(projectTime) ? Math.max(Date.now(), projectTime) : Date.now()
 }
 
 function activityTypeLabel(type: InteractionEventType): string {
