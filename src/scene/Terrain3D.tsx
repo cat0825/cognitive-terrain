@@ -66,6 +66,7 @@ export default function Terrain3D({
     >
       <TerrainScene
         snapshots={project.snapshots}
+        timeZone={project.timeZone}
         gridSize={project.gridSize}
         notes={notes}
         peaks={project.peaks}

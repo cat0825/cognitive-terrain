@@ -31,6 +31,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { PrerequisiteTopology, QualityLevel, TerrainNote, TerrainPeak, TerrainSnapshot, VisualDimension } from '../domain/types'
 import { temperatureColor, type NoteActivitySummary } from '../domain/activity-temperature'
 import type { LearningProgressionResult } from '../domain/learning-progression'
+import { calendarMonthEnd } from '../domain/calendar-time'
 import { buildPlateCollisions, plateColor, primaryAreaForNote, type PlateBridge, type PlateCollision } from '../domain/knowledge-plates'
 import { sampleHeight } from '../pipeline/terrain'
 import { linkedNotes } from '../domain/knowledge-maintenance'
@@ -59,6 +60,7 @@ import {
 
 interface TerrainSceneProps {
   snapshots: TerrainSnapshot[]
+  timeZone: string
   gridSize: number
   notes: TerrainNote[]
   peaks: TerrainPeak[]
@@ -334,6 +336,7 @@ function TerrainField() {
 
 function TerrainSurface({
   snapshots,
+  timeZone,
   gridSize,
   notes,
   peaks,
@@ -382,6 +385,7 @@ function TerrainSurface({
       )}
       <NotePoints
         snapshots={snapshots}
+        timeZone={timeZone}
         gridSize={gridSize}
         notes={notes}
         heightAtlas={heightAtlas}
@@ -688,6 +692,7 @@ function SelectedRelationLines({ snapshots, gridSize, notes, selectedNoteId }: {
 
 function NotePoints({
   snapshots,
+  timeZone,
   gridSize,
   notes,
   heightAtlas,
@@ -700,7 +705,7 @@ function NotePoints({
   prerequisiteTopology,
   activityByNote,
   progressionByNote,
-}: Pick<TerrainSceneProps, 'snapshots' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'prerequisiteTopology' | 'activityByNote' | 'progressionByNote'> & {
+}: Pick<TerrainSceneProps, 'snapshots' | 'timeZone' | 'gridSize' | 'notes' | 'selectedNoteId' | 'onSelectNote' | 'quality' | 'visualDimension' | 'prerequisiteTopology' | 'activityByNote' | 'progressionByNote'> & {
   heightAtlas: HeightAtlas
   peaks: TerrainPeak[]
   reducedMotion: boolean
@@ -713,7 +718,7 @@ function NotePoints({
     () => snapshots.map((snapshot) => sampleNoteHeights(snapshot.values, gridSize, notes)),
     [gridSize, notes, snapshots],
   )
-  const birthFrames = useMemo(() => resolveNoteBirthFrames(notes, snapshots), [notes, snapshots])
+  const birthFrames = useMemo(() => resolveNoteBirthFrames(notes, snapshots, timeZone), [notes, snapshots, timeZone])
   const structureByNote = useMemo(() => prerequisiteDepthValues(prerequisiteTopology), [prerequisiteTopology])
   const geometry = useMemo(
     () =>
@@ -1158,13 +1163,12 @@ function resolveSnapshotFrame(snapshots: TerrainSnapshot[], timeline: number): S
   }
 }
 
-function resolveTimelineCutoff(snapshots: TerrainSnapshot[], timeline: number): number {
+function resolveTimelineCutoff(snapshots: TerrainSnapshot[], timeline: number, timeZone: string): number {
   if (!snapshots.length) return Number.POSITIVE_INFINITY
   const index = Math.min(snapshots.length - 1, Math.max(0, Math.ceil(timeline)))
   const bucket = snapshots[index].bucket
   if (bucket === 'empty') return Number.POSITIVE_INFINITY
-  const [year, month] = bucket.split('-').map(Number)
-  return Date.UTC(year, month, 1) - 1
+  return calendarMonthEnd(bucket, timeZone)
 }
 
 function buildHeightAtlas(snapshots: TerrainSnapshot[], gridSize: number): HeightAtlas {
@@ -1451,8 +1455,8 @@ function sampleNoteHeights(values: Float32Array, gridSize: number, notes: Terrai
   return heights
 }
 
-function resolveNoteBirthFrames(notes: TerrainNote[], snapshots: TerrainSnapshot[]): Float32Array {
-  const cutoffs = snapshots.map((_, index) => resolveTimelineCutoff(snapshots, index))
+function resolveNoteBirthFrames(notes: TerrainNote[], snapshots: TerrainSnapshot[], timeZone: string): Float32Array {
+  const cutoffs = snapshots.map((_, index) => resolveTimelineCutoff(snapshots, index, timeZone))
   const birthFrames = new Float32Array(notes.length)
   for (let noteIndex = 0; noteIndex < notes.length; noteIndex += 1) {
     const createdAt = notes[noteIndex].createdAtMs

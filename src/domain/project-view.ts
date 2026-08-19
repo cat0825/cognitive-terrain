@@ -1,5 +1,6 @@
 import type { TerrainNote, TerrainProject } from './types'
 import { areasForNote, normalizeArea } from './knowledge-plates'
+import { calendarMonthEnd } from './calendar-time'
 
 export function visibleNotesFor(
   project: TerrainProject,
@@ -38,6 +39,5 @@ function timelineCutoff(project: TerrainProject, timeline: number): number {
   const index = Math.min(project.snapshots.length - 1, Math.max(0, Math.ceil(timeline)))
   const bucket = project.snapshots[index].bucket
   if (bucket === 'empty') return Number.POSITIVE_INFINITY
-  const [year, month] = bucket.split('-').map(Number)
-  return Date.UTC(year, month, 1) - 1
+  return calendarMonthEnd(bucket, project.timeZone)
 }
