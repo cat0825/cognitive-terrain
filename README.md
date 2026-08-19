@@ -58,9 +58,10 @@ npm run size:check
 npm run test:e2e
 npm run test:visual
 npm run test:a11y
-# 另开 `npm run preview -- --port 4174 --strictPort` 后执行：
 npm run test:perf
 ```
+
+`npm run test:perf` 会自行启动并关闭 preview 服务（OS 分配空闲端口，绑定 127.0.0.1），不再需要另开终端；若要复用已有服务，设置 `BASE_URL` 即可。性能预算与基线见 [`docs/perf-budget.md`](docs/perf-budget.md)。
 
 首次运行 Playwright 时需先执行 `npx playwright install chromium`。
 

@@ -1,10 +1,30 @@
 import { mkdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium } from '@playwright/test'
+import { startPreviewServer } from './perf-server.mjs'
+import { PERF_BUDGET, assertWithinBudget } from './perf-budget.mjs'
 
-const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:4174/'
 const quality = process.env.QUALITY
 const visualDimension = process.env.VISUAL_DIMENSION
+
+/**
+ * The gate owns its server unless BASE_URL points at an existing one.
+ *
+ * Requiring a manually started preview made this gate unreproducible: the audit
+ * logged a perf failure that was only a forgotten server.
+ */
+const externalBaseUrl = process.env.BASE_URL
+const previewServer = externalBaseUrl ? undefined : await startPreviewServer()
+const baseUrl = externalBaseUrl ?? previewServer.baseUrl
+if (previewServer) {
+  console.log(`perf gate started its own preview server at ${baseUrl}`)
+  // Ensure the port is released even when the run is interrupted, or the next
+  // run fails on --strictPort for reasons unrelated to performance.
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.once(signal, () => { void previewServer.close().finally(() => process.exit(1)) })
+  }
+}
+
 const targetUrl = new URL(baseUrl)
 targetUrl.searchParams.set('perf', '1')
 for (const [key, value] of new URLSearchParams(process.env.PERF_FLAGS)) {
@@ -201,10 +221,17 @@ try {
     ),
   )
   if (pixels.nonBackgroundRatio < 0.04 || pixels.variance < 1) throw new Error('Canvas 像素检查失败')
-  if (exported.size < 10_000) throw new Error('PNG 导出为空或异常过小')
+  if (exported.size < PERF_BUDGET.minExportBytes) {
+    throw new Error(`PNG 导出过小：${exported.size} < ${PERF_BUDGET.minExportBytes} bytes`)
+  }
   if (errors.length) throw new Error(`浏览器控制台出现 ${errors.length} 个错误`)
+
+  // Without these assertions the gate only printed numbers and could never fail
+  // on a regression, which is what made it a report rather than a gate.
+  assertWithinBudget({ idle, playback, orbit, syntheticScrub, directStoreScrub, pointerScrub })
 } finally {
   await browser.close()
+  if (previewServer) await previewServer.close()
 }
 
 async function measure(page, expectedDuration, action) {
