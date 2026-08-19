@@ -6,6 +6,7 @@ import type {
   TerrainProject,
 } from './types'
 import { buildProjectReferenceGapReport } from './reference-gaps'
+import { isFutureActivityTimestamp } from './future-activity'
 
 export type {
   ExplorationAction,
@@ -141,7 +142,7 @@ export function buildProjectExplorationSignals(
     if (!note.reviewedAt) return []
     const reviewedAtMs = Date.parse(note.reviewedAt)
     if (!Number.isFinite(reviewedAtMs)
-      || reviewedAtMs > evaluatedAtMs
+      || isFutureActivityTimestamp(reviewedAtMs, evaluatedAtMs)
       || evaluatedAtMs - reviewedAtMs < DEFAULT_STALE_REVIEW_DAYS * 86_400_000) return []
     return [{
       noteId: note.id,

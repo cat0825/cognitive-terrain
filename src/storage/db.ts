@@ -6,7 +6,10 @@ import {
   type StoreNames,
 } from 'idb'
 import { cognitiveStateFromNote, normalizeActiveReferenceAtlasId } from '../domain/cognitive-state'
-import { compactActivityHistory } from '../domain/activity-history'
+import {
+  compactActivityHistory,
+  type ActivityCompactionDiagnostics,
+} from '../domain/activity-history'
 import {
   DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION,
   normalizeCognitiveObservations,
@@ -351,7 +354,19 @@ export async function closeDatabase(): Promise<void> {
   databasePromise = undefined
 }
 
-export function migrateProject(project: TerrainProject): TerrainProject {
+export interface MigrateProjectOptions {
+  /**
+   * Collects activity dropped for being future-dated. Migration already discards
+   * those events, so a caller that wants to warn the user must observe it here
+   * rather than inspecting the migrated project afterwards.
+   */
+  activityDiagnostics?: ActivityCompactionDiagnostics
+}
+
+export function migrateProject(
+  project: TerrainProject,
+  options: MigrateProjectOptions = {},
+): TerrainProject {
   const sourceSchemaVersion = (project as { schemaVersion: number }).schemaVersion
   const legacyV1 = sourceSchemaVersion < 2
   const migratedNotes = project.notes.map((note) => {
@@ -378,8 +393,13 @@ export function migrateProject(project: TerrainProject): TerrainProject {
   const interactionEvents = project.interactionEvents ?? project.activityHistory?.rawEvents ?? []
   const activityHistory = compactActivityHistory(interactionEvents, {
     timeZone: project.timeZone,
+    // Retention stays pinned to the stored timestamp so migration is deterministic,
+    // while future detection uses the real clock: a stale `updatedAt` must not
+    // make genuine newer activity look future-dated.
     now: project.updatedAt,
+    futureReference: Date.now(),
     aggregates: project.activityHistory?.aggregates,
+    diagnostics: options.activityDiagnostics,
   })
   const taxonomyNodes = project.taxonomyNodes?.length
     ? project.taxonomyNodes.map((node) => ({ ...node, aliases: [...node.aliases] }))

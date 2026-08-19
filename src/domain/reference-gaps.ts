@@ -1,4 +1,5 @@
 import type { TerrainProject } from './types'
+import { isFutureActivityTimestamp } from './future-activity'
 
 export const REFERENCE_GAP_FORMULA_VERSION = 'reference-gap-v1' as const
 export const DEFAULT_REFERENCE_SPARSE_ITEM_COUNT = 2
@@ -178,7 +179,14 @@ function expectedDescendants(nodes: readonly ReferenceAtlasNode[], rootId: strin
 
 function latestTimestamp(values: string[], latestAllowedMs = Number.POSITIVE_INFINITY): string | undefined {
   return values
-    .filter((value) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= latestAllowedMs)
+    .filter((value) => {
+      const parsed = Date.parse(value)
+      if (!Number.isFinite(parsed)) return false
+      // Infinity means "no evaluation bound"; otherwise apply the shared skew window
+      // so this path agrees with heat and retention about what counts as future.
+      if (!Number.isFinite(latestAllowedMs)) return true
+      return !isFutureActivityTimestamp(parsed, latestAllowedMs)
+    })
     .sort((a, b) => Date.parse(b) - Date.parse(a))[0]
 }
 
@@ -189,7 +197,8 @@ function retainLatestActivity(
   latestAllowedMs: number,
 ): void {
   const occurredAtMs = Date.parse(occurredAt)
-  if (!Number.isFinite(occurredAtMs) || occurredAtMs > latestAllowedMs) return
+  if (!Number.isFinite(occurredAtMs)) return
+  if (isFutureActivityTimestamp(occurredAtMs, latestAllowedMs)) return
   const previous = target.get(itemId)
   if (!previous || occurredAtMs > Date.parse(previous)) target.set(itemId, occurredAt)
 }

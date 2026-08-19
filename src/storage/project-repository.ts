@@ -227,7 +227,9 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
   const database = await getDatabase()
   const projects = await database.getAllFromIndex('projects', 'by-updated-at')
   return projects
-    .map(migrateProject)
+    // Explicit arrow: passing migrateProject directly would forward the array
+    // index as its options argument.
+    .map((project) => migrateProject(project))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((project) => ({
       id: project.id,
