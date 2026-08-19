@@ -109,22 +109,25 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # Bounded retries with an idle timeout: `--with-deps` shells out to apt-get,
-      # and a stalled package mirror otherwise hangs silently until the job
-      # timeout, which reports as an opaque cancellation instead of a failure.
-      - name: Install Playwright browsers
-        timeout-minutes: 12
-        run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
-          npx playwright install --with-deps chromium
-      # The browser binaries come from the cache on a hit, but the OS libraries
-      # they link against are not cached and must still be present.
+      # System libraries first, and only on a cache miss. The GitHub runner image
+      # already ships Playwright's Chromium dependencies, so apt is the flaky part
+      # of this step rather than a necessary one. Keeping it separate means a
+      # stalled package mirror cannot block the browser download itself.
       - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 12
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        continue-on-error: true
         run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
+          node scripts/run-with-retry.mjs --attempts=2 --timeout=240 --idle-timeout=90 --
           npx playwright install-deps chromium
+      # Browsers without --with-deps: no apt, so no package lock to wedge. This is
+      # the step that must succeed, so it retries harder and does not tolerate
+      # failure.
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: >-
+          node scripts/run-with-retry.mjs --attempts=3 --timeout=240 --idle-timeout=90 --
+          npx playwright install chromium
       - run: npm run test:e2e -- --project=${{ matrix.project }} --shard=${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -156,22 +159,25 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # Bounded retries with an idle timeout: `--with-deps` shells out to apt-get,
-      # and a stalled package mirror otherwise hangs silently until the job
-      # timeout, which reports as an opaque cancellation instead of a failure.
-      - name: Install Playwright browsers
-        timeout-minutes: 12
-        run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
-          npx playwright install --with-deps chromium
-      # The browser binaries come from the cache on a hit, but the OS libraries
-      # they link against are not cached and must still be present.
+      # System libraries first, and only on a cache miss. The GitHub runner image
+      # already ships Playwright's Chromium dependencies, so apt is the flaky part
+      # of this step rather than a necessary one. Keeping it separate means a
+      # stalled package mirror cannot block the browser download itself.
       - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 12
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        continue-on-error: true
         run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
+          node scripts/run-with-retry.mjs --attempts=2 --timeout=240 --idle-timeout=90 --
           npx playwright install-deps chromium
+      # Browsers without --with-deps: no apt, so no package lock to wedge. This is
+      # the step that must succeed, so it retries harder and does not tolerate
+      # failure.
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: >-
+          node scripts/run-with-retry.mjs --attempts=3 --timeout=240 --idle-timeout=90 --
+          npx playwright install chromium
       - run: npm run test:a11y
 
   visual:
@@ -195,22 +201,25 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # Bounded retries with an idle timeout: `--with-deps` shells out to apt-get,
-      # and a stalled package mirror otherwise hangs silently until the job
-      # timeout, which reports as an opaque cancellation instead of a failure.
-      - name: Install Playwright browsers
-        timeout-minutes: 12
-        run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
-          npx playwright install --with-deps chromium
-      # The browser binaries come from the cache on a hit, but the OS libraries
-      # they link against are not cached and must still be present.
+      # System libraries first, and only on a cache miss. The GitHub runner image
+      # already ships Playwright's Chromium dependencies, so apt is the flaky part
+      # of this step rather than a necessary one. Keeping it separate means a
+      # stalled package mirror cannot block the browser download itself.
       - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 12
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        continue-on-error: true
         run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
+          node scripts/run-with-retry.mjs --attempts=2 --timeout=240 --idle-timeout=90 --
           npx playwright install-deps chromium
+      # Browsers without --with-deps: no apt, so no package lock to wedge. This is
+      # the step that must succeed, so it retries harder and does not tolerate
+      # failure.
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: >-
+          node scripts/run-with-retry.mjs --attempts=3 --timeout=240 --idle-timeout=90 --
+          npx playwright install chromium
       - run: npm run test:visual
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -241,7 +250,9 @@ jobs:
       # rather than the bundled chromium the other browser jobs use.
       - name: Install Chrome for the perf gate
         timeout-minutes: 12
-        run: npx playwright install --with-deps chrome
+        run: >-
+          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
+          npx playwright install --with-deps chrome
       # The gate starts and stops its own preview server, so there is no manual
       # step to forget and no hardcoded port to collide with.
       - run: npm run test:perf

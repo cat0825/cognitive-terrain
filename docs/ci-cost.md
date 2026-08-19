@@ -69,3 +69,32 @@ which is now self-contained (see `docs/perf-budget.md`).
   would add failure modes to save seconds.
 - Reducing retries. `retries: 1` on CI absorbs genuine runner flakiness; removing
   it would produce red runs that say nothing about the code.
+
+## Browser install: what the first public-repo run taught us
+
+The retry wrapper worked as designed on its first real outing — it detected a
+192-second silent stall and aborted instead of consuming the job timeout. But the
+two remaining attempts then failed in 2 seconds each:
+
+```
+E: Could not get lock /var/lib/apt/lists/lock. It is held by process 2308 (apt-get)
+Error: Installation process exited with code: 100
+```
+
+That was a genuine bug in the wrapper. `playwright install --with-deps` runs
+apt-get as a *grandchild*, and killing only the direct child left apt alive
+holding the package lock, poisoning every retry. Fixed by spawning with
+`detached: true` and signalling the whole process group. A regression test spawns
+a silent parent with a surviving grandchild and asserts the grandchild does not
+outlive the abort; it fails with `detached` removed, which is how the fix was
+confirmed rather than assumed.
+
+The install step was also restructured, because the lock was a symptom of doing
+unnecessary work:
+
+- The GitHub runner image already ships Chromium's system libraries, so apt is the
+  flaky part of the step rather than a required one. `install-deps` now runs only
+  on a cache miss and is `continue-on-error`.
+- Browsers are downloaded with plain `playwright install` — no `--with-deps`, so
+  there is no apt and no lock to wedge. This is the step that must succeed, so it
+  retries harder and does not tolerate failure.

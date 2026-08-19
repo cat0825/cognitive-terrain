@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process'
+import { existsSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -67,6 +69,28 @@ describe('run-with-retry', () => {
     expect(code).toBe(3)
     expect(output).toContain('exit code 3')
     expect(output).toContain('attempt 2/2')
+  }, 60_000)
+
+  it('kills grandchildren too, so a survivor cannot poison the retries', async () => {
+    // Reproduces the observed CI failure: `playwright install --with-deps` runs
+    // apt-get as a grandchild. Killing only the direct child left apt holding
+    // /var/lib/apt/lists/lock, so every later attempt failed instantly with
+    // "Could not get lock ... held by process N (apt-get)" (exit code 100).
+    const marker = path.join(tmpdir(), `retry-grandchild-${process.pid}-${Date.now()}`)
+    // Parent stays silent so the idle timer fires; the grandchild would outlive it
+    // and create the marker unless the whole process group is signalled.
+    const grandchild = `setTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'survived') }, 4000)`
+    const parent = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: 'ignore' }); setTimeout(() => {}, 30000)`
+
+    const { code } = await runWrapper([
+      '--attempts=1', '--idle-timeout=1', '--timeout=20', '--', 'node', '-e', parent,
+    ])
+    expect(code).not.toBe(0)
+
+    // Wait past the grandchild's own timer before checking.
+    await new Promise((resolve) => setTimeout(resolve, 6_000))
+    expect(existsSync(marker)).toBe(false)
+    if (existsSync(marker)) rmSync(marker, { force: true })
   }, 60_000)
 
   it('rejects a missing command separator instead of silently doing nothing', async () => {

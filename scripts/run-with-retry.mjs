@@ -28,6 +28,26 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 const DEFAULTS = { attempts: 3, timeoutSeconds: 300, idleTimeoutSeconds: 120 }
 
+/**
+ * Signals the child's entire process group, falling back to the child alone.
+ *
+ * Negating the pid targets the group, which is what reaches grandchildren such as
+ * the apt-get that `playwright install --with-deps` starts. The fallback covers
+ * the case where the group is already gone.
+ */
+function killProcessTree(child, signal) {
+  if (child.pid === undefined) return
+  try {
+    process.kill(-child.pid, signal)
+  } catch {
+    try {
+      child.kill(signal)
+    } catch {
+      // Already exited; nothing to signal.
+    }
+  }
+}
+
 function parsePositiveInt(value, fallback, { allowZero = false } = {}) {
   const parsed = Number.parseInt(value ?? '', 10)
   if (!Number.isFinite(parsed)) return fallback
@@ -61,7 +81,12 @@ function parseArgs(argv) {
  */
 function runAttempt(command, args, { timeoutSeconds, idleTimeoutSeconds }) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false })
+    // detached: true puts the child in its own process group so the whole tree can
+    // be signalled. `playwright install --with-deps` spawns apt-get as a
+    // grandchild; killing only the direct child let apt survive holding
+    // /var/lib/apt/lists/lock, and every subsequent retry then failed instantly
+    // with "Could not get lock ... held by process N (apt-get)" (exit code 100).
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false, detached: true })
     let settled = false
     let idleTimer
     let hardTimer
@@ -71,11 +96,12 @@ function runAttempt(command, args, { timeoutSeconds, idleTimeoutSeconds }) {
       settled = true
       clearTimeout(idleTimer)
       clearTimeout(hardTimer)
-      // SIGKILL after SIGTERM: a wedged apt child may ignore the polite signal,
-      // and leaving it alive would keep the runner's package lock held.
+      // Signal the whole process group, not just the child. SIGKILL follows
+      // SIGTERM because a wedged apt ignores the polite signal, and any survivor
+      // keeps the package lock and poisons the remaining retries.
       if (result.aborted && child.exitCode === null) {
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 5_000).unref?.()
+        killProcessTree(child, 'SIGTERM')
+        setTimeout(() => killProcessTree(child, 'SIGKILL'), 5_000).unref?.()
       }
       resolve(result)
     }
