@@ -89,12 +89,31 @@ a silent parent with a surviving grandchild and asserts the grandchild does not
 outlive the abort; it fails with `detached` removed, which is how the fix was
 confirmed rather than assumed.
 
-The install step was also restructured, because the lock was a symptom of doing
-unnecessary work:
+The install step was also split, so a stalled mirror cannot block the browser
+download itself:
 
-- The GitHub runner image already ships Chromium's system libraries, so apt is the
-  flaky part of the step rather than a required one. `install-deps` now runs only
-  on a cache miss and is `continue-on-error`.
-- Browsers are downloaded with plain `playwright install` — no `--with-deps`, so
-  there is no apt and no lock to wedge. This is the step that must succeed, so it
-  retries harder and does not tolerate failure.
+- `install-deps` runs on its own, unconditionally, and must succeed.
+- Browsers download with plain `playwright install` — no `--with-deps`, so no apt
+  and no lock to wedge.
+
+### A wrong turn worth recording
+
+The first attempt skipped `install-deps` on a browser-cache hit and marked it
+`continue-on-error`, reasoning that the runner image already ships Chromium's
+dependencies. The visual gate went red:
+
+```
+Expected: < 0.002
+Received:   0.005551215277777778
+```
+
+Two mistakes in one change. The browser cache holds *binaries*, not the host's
+font and rendering libraries, so a cache hit says nothing about whether those are
+present — the condition was checking an unrelated fact. And `continue-on-error`
+on a step that affects rendering output converts a hard failure into a silent
+change in test results, which is exactly the kind of untrustworthy gate this
+milestone exists to remove.
+
+The diff was small (0.0055 versus the 0.0145 of the genuine drift in #46), which
+is what identified it as a rasterisation difference rather than a product change.
+`install-deps` now always runs and must succeed.

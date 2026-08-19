@@ -109,20 +109,19 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # System libraries first, and only on a cache miss. The GitHub runner image
-      # already ships Playwright's Chromium dependencies, so apt is the flaky part
-      # of this step rather than a necessary one. Keeping it separate means a
-      # stalled package mirror cannot block the browser download itself.
+      # System libraries are installed unconditionally and must succeed. An earlier
+      # revision skipped this on a browser-cache hit and made it continue-on-error,
+      # which turned the visual gate red: the cache holds browser binaries, not the
+      # host's font and rendering libraries, so a hit says nothing about whether
+      # they are present. Missing fonts changed text rasterisation enough to push
+      # the diff ratio to 0.0055 against a 0.002 threshold.
       - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
-        continue-on-error: true
         run: >-
-          node scripts/run-with-retry.mjs --attempts=2 --timeout=240 --idle-timeout=90 --
+          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
           npx playwright install-deps chromium
-      # Browsers without --with-deps: no apt, so no package lock to wedge. This is
-      # the step that must succeed, so it retries harder and does not tolerate
-      # failure.
+      # Browsers separately, without --with-deps, so the download does not run apt
+      # again and cannot be blocked by a package lock.
       - name: Install Playwright browsers
         timeout-minutes: 10
         run: >-
@@ -159,20 +158,19 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # System libraries first, and only on a cache miss. The GitHub runner image
-      # already ships Playwright's Chromium dependencies, so apt is the flaky part
-      # of this step rather than a necessary one. Keeping it separate means a
-      # stalled package mirror cannot block the browser download itself.
+      # System libraries are installed unconditionally and must succeed. An earlier
+      # revision skipped this on a browser-cache hit and made it continue-on-error,
+      # which turned the visual gate red: the cache holds browser binaries, not the
+      # host's font and rendering libraries, so a hit says nothing about whether
+      # they are present. Missing fonts changed text rasterisation enough to push
+      # the diff ratio to 0.0055 against a 0.002 threshold.
       - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
-        continue-on-error: true
         run: >-
-          node scripts/run-with-retry.mjs --attempts=2 --timeout=240 --idle-timeout=90 --
+          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
           npx playwright install-deps chromium
-      # Browsers without --with-deps: no apt, so no package lock to wedge. This is
-      # the step that must succeed, so it retries harder and does not tolerate
-      # failure.
+      # Browsers separately, without --with-deps, so the download does not run apt
+      # again and cannot be blocked by a package lock.
       - name: Install Playwright browsers
         timeout-minutes: 10
         run: >-
@@ -201,20 +199,19 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # System libraries first, and only on a cache miss. The GitHub runner image
-      # already ships Playwright's Chromium dependencies, so apt is the flaky part
-      # of this step rather than a necessary one. Keeping it separate means a
-      # stalled package mirror cannot block the browser download itself.
+      # System libraries are installed unconditionally and must succeed. An earlier
+      # revision skipped this on a browser-cache hit and made it continue-on-error,
+      # which turned the visual gate red: the cache holds browser binaries, not the
+      # host's font and rendering libraries, so a hit says nothing about whether
+      # they are present. Missing fonts changed text rasterisation enough to push
+      # the diff ratio to 0.0055 against a 0.002 threshold.
       - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
-        continue-on-error: true
         run: >-
-          node scripts/run-with-retry.mjs --attempts=2 --timeout=240 --idle-timeout=90 --
+          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
           npx playwright install-deps chromium
-      # Browsers without --with-deps: no apt, so no package lock to wedge. This is
-      # the step that must succeed, so it retries harder and does not tolerate
-      # failure.
+      # Browsers separately, without --with-deps, so the download does not run apt
+      # again and cannot be blocked by a package lock.
       - name: Install Playwright browsers
         timeout-minutes: 10
         run: >-
