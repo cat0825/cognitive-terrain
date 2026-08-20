@@ -412,11 +412,27 @@ export const useAppStore = create<AppState>((set, get) => {
       if (commit?.vaultSync) {
         const normalizedProject = migrateProject(committedProject)
         const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
-        await saveVaultSyncProject(commit.baseProject, normalizedProject)
+        // Same invariant as persistProject: the vault-sync transaction must commit
+        // before the in-memory project moves, or a failed save would leave the UI
+        // showing a synced terrain that was never written.
+        try {
+          await saveVaultSyncProject(commit.baseProject, normalizedProject)
+        } catch (error) {
+          const message = `Vault 同步保存失败，当前项目未切换：${error instanceof Error ? error.message : String(error)}`
+          throw new Error(message, { cause: error })
+        }
         if (!analyses.isCurrent(generation)) return
         localStorage.setItem('cognitive-terrain:last-project', normalizedProject.id)
         setProjectState(set, normalizedProject)
-        await Promise.all([get().reloadProjects(), get().reloadBackups()])
+        // Refresh failures are reported separately: the sync itself already
+        // committed, so treating this as a sync failure would be a lie.
+        try {
+          await Promise.all([get().reloadProjects(), get().reloadBackups()])
+        } catch (error) {
+          if (analyses.isCurrent(generation)) {
+            set({ error: `Vault 同步已保存，但项目列表刷新失败：${error instanceof Error ? error.message : String(error)}` })
+          }
+        }
       } else {
         const normalizedProject = await persistProject(committedProject)
         if (!analyses.isCurrent(generation)) return
@@ -537,8 +553,14 @@ export const useAppStore = create<AppState>((set, get) => {
         const normalized = migrateProject(next)
         const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
         await saveVaultSyncProject(current, normalized)
+        // Only after the transaction commits, so a rejected save cannot leave the
+        // terrain claiming sources it does not have.
         setProjectState(set, normalized)
-        await Promise.all([get().reloadProjects(), get().reloadBackups()])
+        try {
+          await Promise.all([get().reloadProjects(), get().reloadBackups()])
+        } catch (error) {
+          set({ error: `Vault 同步已保存，但项目列表刷新失败：${error instanceof Error ? error.message : String(error)}` })
+        }
         return true
       }
       const effective = {
@@ -1013,6 +1035,29 @@ function cognitiveObservationsForUpdate(
   })
 }
 
+/**
+ * Commit invariant for every project mutation in this store.
+ *
+ * Persist first, then swap the in-memory project. The reverse order let analysis
+ * report success while IndexedDB rejected the write, so the user saw a populated
+ * terrain that vanished on reload (audit finding H2).
+ *
+ * Three commit paths exist and all obey it:
+ *
+ * - `persistProject` here, for ordinary saves and analysis commits.
+ * - `saveVaultSyncProject`, for vault sync.
+ * - `saveVaultWritebackProject`, for diff-first write-back.
+ *
+ * The vault paths do not route through `persistProject` because they need a
+ * single transaction that also writes a recovery point and applies a
+ * materialization diff against the previous bundle, plus a stale-preview check
+ * against the stored `updatedAt`. They are therefore stricter than this
+ * function rather than weaker: see `src/storage/vault-sync-repository.ts`.
+ *
+ * A refresh failure after a successful commit is reported separately from a
+ * commit failure. Collapsing the two would tell the user their sync failed when
+ * their data is safely on disk.
+ */
 async function persistProject(project: TerrainProject): Promise<TerrainProject> {
   const normalized = migrateProject(project)
   await saveProject(normalized)
