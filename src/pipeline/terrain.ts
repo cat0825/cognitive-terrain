@@ -1,5 +1,6 @@
 import { contours } from 'd3-contour'
 import type { NoteActivitySummary } from '../domain/activity-temperature'
+import { calendarMonthInTimeZone } from '../domain/calendar-time'
 import type { LearningProgressionResult } from '../domain/learning-progression'
 import type { TerrainElevation, TerrainNote, TerrainPeak, TerrainSnapshot } from '../domain/types'
 import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
@@ -336,10 +337,7 @@ function choosePeakLabel(notes: TerrainNote[], index: number): string {
 }
 
 function monthBucket(timestamp: number, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit' }).formatToParts(timestamp)
-  const year = parts.find((part) => part.type === 'year')?.value ?? '1970'
-  const month = parts.find((part) => part.type === 'month')?.value ?? '01'
-  return `${year}-${month}`
+  return calendarMonthInTimeZone(timestamp, timeZone)
 }
 
 function formatBucket(bucket: string): string {

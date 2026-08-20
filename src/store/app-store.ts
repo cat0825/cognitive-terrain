@@ -50,6 +50,7 @@ import {
   updateActiveReferenceAtlas,
 } from '../storage/project-repository'
 import { migrateProject } from '../storage/db'
+import { createLatestRequestController } from './latest-request'
 
 export type CameraInteractionMode = 'rotate' | 'pan'
 
@@ -187,7 +188,6 @@ declare global {
   }
 }
 
-let activeAnalysis: AnalysisHandle | null = null
 const REFERENCE_ATLAS_PREFERENCE_PREFIX = 'cognitive-terrain:reference-atlas:'
 const initialProject = applyStoredReferenceAtlasPreference(migrateProject(createDemoProject({ includeProgressionEvidence: true })))
 let liveTimeline = Math.max(0, initialProject.snapshots.length - 1)
@@ -196,7 +196,9 @@ export function getLiveTimeline(): number {
   return liveTimeline
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set, get) => {
+  const analyses = createLatestRequestController<AnalysisHandle>()
+  return {
   project: initialProject,
   selectedNoteId: null,
   search: '',
@@ -378,16 +380,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     const startedAt = performance.now()
-    activeAnalysis?.cancel()
+    const generation = analyses.begin()
     set({
       isAnalyzing: true,
       progress: { stage: 'parsing', completed: 0, total: 1, message: '准备分析' },
       error: null,
       importOpen: false,
     })
-    activeAnalysis = runAnalysis(name, notes, options, (progress) => set({ progress }))
     try {
-      const analyzedProject = await activeAnalysis.promise
+      const analysis = runAnalysis(name, notes, options, (progress) => {
+        if (analyses.isCurrent(generation)) set({ progress })
+      })
+      analyses.attach(generation, analysis)
+      const analyzedProject = await analysis.promise
+      if (!analyses.isCurrent(generation)) return
       const project = commit
         ? commitAnalyzedProject(analyzedProject, commit.baseProject, commit.events)
         : analyzedProject
@@ -403,33 +409,48 @@ export const useAppStore = create<AppState>((set, get) => ({
         : project
       const embeddingMode: 'semantic' | 'fallback' =
         committedProject.embeddingMode === 'semantic' ? 'semantic' : 'fallback'
-      set({
-        lastAnalysis: {
-          modelId: committedProject.modelId,
-          embeddingMode,
-          device: options.embeddingStrategy === 'deterministic' ? 'local' : 'webgpu/wasm',
-          elapsedMs: Math.round(performance.now() - startedAt),
-        },
-      })
       if (commit?.vaultSync) {
         const normalizedProject = migrateProject(committedProject)
         const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
         await saveVaultSyncProject(commit.baseProject, normalizedProject)
+        if (!analyses.isCurrent(generation)) return
         localStorage.setItem('cognitive-terrain:last-project', normalizedProject.id)
         setProjectState(set, normalizedProject)
         await Promise.all([get().reloadProjects(), get().reloadBackups()])
       } else {
-        await get().replaceProject(committedProject)
+        const normalizedProject = await persistProject(committedProject)
+        if (!analyses.isCurrent(generation)) return
+        localStorage.setItem('cognitive-terrain:last-project', normalizedProject.id)
+        setProjectState(set, normalizedProject)
+        try {
+          await Promise.all([get().reloadProjects(), get().reloadBackups()])
+        } catch (error) {
+          if (analyses.isCurrent(generation)) {
+            set({ error: `项目已保存，但项目列表刷新失败：${error instanceof Error ? error.message : String(error)}` })
+          }
+        }
       }
-      set({ isAnalyzing: false, progress: null })
+      if (analyses.isCurrent(generation)) {
+        set({
+          lastAnalysis: {
+            modelId: committedProject.modelId,
+            embeddingMode,
+            device: options.embeddingStrategy === 'deterministic' ? 'local' : 'webgpu/wasm',
+            elapsedMs: Math.round(performance.now() - startedAt),
+          },
+          isAnalyzing: false,
+          progress: null,
+        })
+      }
     } catch (error) {
+      if (!analyses.isCurrent(generation)) return
       set({
         isAnalyzing: false,
         progress: null,
         error: error instanceof Error ? error.message : '分析失败',
       })
     } finally {
-      activeAnalysis = null
+      analyses.clear(generation)
     }
   },
   loadStudyPack: () => {
@@ -466,7 +487,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       prerequisites: note.prerequisites?.map((declaration) => ({ ...declaration })),
     }))
     const existingIds = new Set(existing.map((note) => note.id))
-    const deduped = newNotes.filter((note) => !existingIds.has(note.id?.trim() ?? ''))
+    const batchIds = new Set<string>()
+    const duplicateBatchIds = new Set<string>()
+    const deduped = newNotes.filter((note) => {
+      const id = note.id?.trim()
+      if (!id) return true
+      if (batchIds.has(id)) duplicateBatchIds.add(id)
+      batchIds.add(id)
+      return !existingIds.has(id)
+    })
+    if (duplicateBatchIds.size) {
+      set({ error: `导入批次包含重复笔记 ID：${[...duplicateBatchIds].sort().join('、')}` })
+      return
+    }
     if (!deduped.length) {
       set({ error: '没有新增笔记可合并' })
       return
@@ -698,19 +731,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   cancelAnalysis: () => {
-    activeAnalysis?.cancel()
-    activeAnalysis = null
+    analyses.cancel()
     set({ isAnalyzing: false, progress: null })
   },
   replaceProject: async (project) => {
-    const normalized = migrateProject(project)
+    let normalized: TerrainProject
+    try {
+      normalized = await persistProject(project)
+    } catch (error) {
+      const message = `项目保存失败，当前项目未切换：${error instanceof Error ? error.message : String(error)}`
+      set({ error: message })
+      throw new Error(message, { cause: error })
+    }
+    localStorage.setItem('cognitive-terrain:last-project', normalized.id)
     setProjectState(set, normalized)
     try {
-      await saveProject(normalized)
-      localStorage.setItem('cognitive-terrain:last-project', normalized.id)
       await Promise.all([get().reloadProjects(), get().reloadBackups()])
     } catch (error) {
-      set({ error: `项目已打开，但本地保存失败：${error instanceof Error ? error.message : String(error)}` })
+      set({ error: `项目已保存，但项目列表刷新失败：${error instanceof Error ? error.message : String(error)}` })
     }
   },
   resetDemo: () => {
@@ -873,7 +911,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       taxonomyVersion: nextTaxonomyVersion(current),
     }, set, get)
   },
-}))
+  }
+})
 
 if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf')) {
   window.__cognitiveTerrainPerf = {
@@ -972,6 +1011,12 @@ function cognitiveObservationsForUpdate(
       reason,
     })]
   })
+}
+
+async function persistProject(project: TerrainProject): Promise<TerrainProject> {
+  const normalized = migrateProject(project)
+  await saveProject(normalized)
+  return normalized
 }
 
 async function persistTaxonomyProject(
