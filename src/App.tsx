@@ -4,6 +4,7 @@ import './App.css'
 import { visibleNotesFor } from './domain/project-view'
 import { buildPlateCollisions } from './domain/knowledge-plates'
 import { buildProjectReferenceGapReport } from './domain/reference-gaps'
+import { evaluationTimeForProject } from './domain/evaluation-time'
 import { vaultWritebackCandidates, type VaultWritebackCandidate } from './domain/vault-writeback-candidates'
 import { TerrainCanvas } from './scene/TerrainCanvas'
 import { useAppStore } from './store/app-store'
@@ -78,7 +79,9 @@ function App() {
   const activeCollision = collisions.find((collision) => collision.id === activeCollisionId)
   const progressValue = progress?.total ? Math.round((progress.completed / progress.total) * 100) : 0
   const [analysisToast, setAnalysisToast] = useState<typeof lastAnalysis>(null)
-  const [gapEvaluatedAt] = useState(() => Date.now())
+  // Derived from the project rather than frozen at page load, so activity the
+  // user records during the session is actually reflected. See #42.
+  const gapEvaluatedAt = useMemo(() => evaluationTimeForProject(project.updatedAt), [project.updatedAt])
   const [syncOpen, setSyncOpen] = useState(false)
   const [writebackCandidates, setWritebackCandidates] = useState<VaultWritebackCandidate[] | null>(null)
   const toastTimer = useRef<number | null>(null)

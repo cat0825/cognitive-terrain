@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense, useEffect, useMemo, useState } from 'react'
+import { evaluationTimeForProject } from '../domain/evaluation-time'
 import type { QualityLevel, TerrainNote, TerrainProject, ViewMode, VisualDimension } from '../domain/types'
 import { buildActivitySummaries } from '../domain/activity-temperature'
 import { calculateProjectLearningProgression } from '../domain/learning-progression'
@@ -209,7 +210,3 @@ function supportsWebgl(): boolean {
   return webglSupport
 }
 
-function evaluationTimeForProject(updatedAt: string): number {
-  const projectTime = Date.parse(updatedAt)
-  return Number.isFinite(projectTime) ? Math.max(Date.now(), projectTime) : Date.now()
-}
