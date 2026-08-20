@@ -2,9 +2,10 @@ import { mkdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { chromium } from '@playwright/test'
 import { startPreviewServer } from './perf-server.mjs'
-import { PERF_BUDGET, assertWithinBudget } from './perf-budget.mjs'
+import { PERF_BUDGET, assertWithinBudget, profileForHost } from './perf-budget.mjs'
 
-const quality = process.env.QUALITY
+const hostProfile = profileForHost()
+const quality = process.env.QUALITY ?? hostProfile.quality
 const visualDimension = process.env.VISUAL_DIMENSION
 
 /**
@@ -37,7 +38,10 @@ const exportPath = path.join(outputDir, 'perf-export.png')
 await mkdir(outputDir, { recursive: true })
 
 const browser = await chromium.launch({ channel: 'chrome', headless: true })
-const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1.5 })
+const page = await browser.newPage({
+  viewport: hostProfile.viewport,
+  deviceScaleFactor: hostProfile.deviceScaleFactor,
+})
 await page.addInitScript(() => {
   Object.defineProperty(Navigator.prototype, 'share', { configurable: true, value: undefined })
   Object.defineProperty(Navigator.prototype, 'canShare', { configurable: true, value: undefined })
@@ -81,26 +85,26 @@ try {
   const timelineBox = await timeline.boundingBox()
   if (!canvasBox || !timelineBox) throw new Error('无法读取 Canvas 或时间轴位置')
 
-  const idle = await measure(page, 1500, async () => page.waitForTimeout(1500))
+  const idle = await measure(page, 'idle', 1500, hostProfile.scenarioTimeoutMs, async () => page.waitForTimeout(1500))
   await play.click()
   await page.waitForTimeout(800)
   await page.getByRole('button', { name: '暂停时间演化' }).click()
-  const playback = await measure(page, 2500, async () => {
+  const playback = await measure(page, 'playback', 2500, hostProfile.scenarioTimeoutMs, async () => {
     await play.click()
     await page.waitForTimeout(2500)
     await page.getByRole('button', { name: '暂停时间演化' }).click()
   })
-  const orbit = await measure(page, 1800, async () => {
+  const orbit = await measure(page, 'orbit', 1800, hostProfile.scenarioTimeoutMs, async () => {
     const startX = canvasBox.x + canvasBox.width * 0.54
     const startY = canvasBox.y + canvasBox.height * 0.46
     await page.mouse.move(startX, startY)
     await page.mouse.down()
-    await page.mouse.move(startX + canvasBox.width * 0.19, startY - canvasBox.height * 0.08, { steps: 90 })
-    await page.mouse.move(startX - canvasBox.width * 0.14, startY + canvasBox.height * 0.06, { steps: 90 })
+    await page.mouse.move(startX + canvasBox.width * 0.19, startY - canvasBox.height * 0.08, { steps: hostProfile.orbitSteps })
+    await page.mouse.move(startX - canvasBox.width * 0.14, startY + canvasBox.height * 0.06, { steps: hostProfile.orbitSteps })
     await page.mouse.up()
     await page.waitForTimeout(300)
   })
-  const syntheticScrub = await measure(page, 2100, async () => {
+  const syntheticScrub = await measure(page, 'syntheticScrub', 2100, hostProfile.scenarioTimeoutMs, async () => {
     await timeline.evaluate(
       (element) =>
         new Promise((resolve) => {
@@ -153,7 +157,7 @@ try {
     )
     await page.waitForTimeout(300)
   })
-  const directStoreScrub = await measure(page, 2100, async () => {
+  const directStoreScrub = await measure(page, 'directStoreScrub', 2100, hostProfile.scenarioTimeoutMs, async () => {
     await page.evaluate(
       async (maximum) => {
         if (!window.__cognitiveTerrainPerf) throw new Error('性能控制面未启用')
@@ -174,14 +178,14 @@ try {
     )
     await page.waitForTimeout(300)
   })
-  const pointerScrub = await measure(page, 1800, async () => {
+  const pointerScrub = await measure(page, 'pointerScrub', 1800, hostProfile.scenarioTimeoutMs, async () => {
     const y = timelineBox.y + timelineBox.height / 2
     const left = timelineBox.x + 4
     const right = timelineBox.x + timelineBox.width - 4
     await page.mouse.move(right, y)
     await page.mouse.down()
-    await page.mouse.move(left, y, { steps: 120 })
-    await page.mouse.move(right, y, { steps: 120 })
+    await page.mouse.move(left, y, { steps: hostProfile.pointerSteps })
+    await page.mouse.move(right, y, { steps: hostProfile.pointerSteps })
     await page.mouse.up()
     await page.waitForTimeout(300)
   })
@@ -207,7 +211,21 @@ try {
     return { nonBackgroundRatio: changed / 1024, variance: variance / 1024 }
   })
 
-  const downloadPromise = page.waitForEvent('download', { timeout: 10_000 })
+  // Keep the measurements visible even if the later PNG export stalls. This is
+  // especially useful on software-rendered CI hosts, where export can be much
+  // slower than the interaction probes that preceded it.
+  console.log(
+    JSON.stringify(
+      { phase: 'measurements', hostProfile: hostProfile.id, visualDimension: visualDimension ?? 'density', quality: quality ?? 'high', idle, playback, orbit, syntheticScrub, directStoreScrub, pointerScrub, pixels, errors },
+      null,
+      2,
+    ),
+  )
+
+  // Software rendering makes the export render far slower: the first CI run timed
+  // out here after every measurement had already completed. Scale the allowance
+  // with the host rather than weakening it everywhere.
+  const downloadPromise = page.waitForEvent('download', { timeout: hostProfile.exportTimeoutMs })
   await page.getByRole('button', { name: '分享截图' }).click()
   const download = await downloadPromise
   await download.saveAs(exportPath)
@@ -215,7 +233,7 @@ try {
 
   console.log(
     JSON.stringify(
-      { visualDimension: visualDimension ?? 'density', quality: quality ?? 'high', idle, playback, orbit, syntheticScrub, directStoreScrub, pointerScrub, pixels, exportBytes: exported.size, errors },
+      { hostProfile: hostProfile.id, visualDimension: visualDimension ?? 'density', quality: quality ?? 'high', idle, playback, orbit, syntheticScrub, directStoreScrub, pointerScrub, pixels, exportBytes: exported.size, errors },
       null,
       2,
     ),
@@ -234,7 +252,8 @@ try {
   if (previewServer) await previewServer.close()
 }
 
-async function measure(page, expectedDuration, action) {
+async function measure(page, scenario, expectedDuration, timeoutMs, action) {
+  console.log(`perf scenario ${scenario} started (${timeoutMs}ms timeout)`)
   await page.evaluate(() => {
     const samples = []
     const longTasks = []
@@ -254,7 +273,17 @@ async function measure(page, expectedDuration, action) {
     window.__terrainPerf = { samples, longTasks, stop: () => { active = false; observer.disconnect() } }
   })
   const start = Date.now()
-  await action()
+  let timeout
+  try {
+    await Promise.race([
+      action(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`perf scenario ${scenario} exceeded ${timeoutMs}ms`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
   const elapsed = Date.now() - start
   if (elapsed < expectedDuration) await page.waitForTimeout(expectedDuration - elapsed)
   return page.evaluate(() => {

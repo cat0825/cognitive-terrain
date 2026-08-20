@@ -235,7 +235,9 @@ jobs:
     # noise, so it guards the mainline rather than every PR iteration. A PR that
     # touches rendering can still be checked locally with `npm run test:perf`.
     if: github.event_name == 'push'
-    timeout-minutes: 25
+    # The software-rendering profile bounds each scenario and uses fewer pointer
+    # events, but retain a job-level backstop for browser or runner hangs.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -252,7 +254,13 @@ jobs:
           npx playwright install --with-deps chrome
       # The gate starts and stops its own preview server, so there is no manual
       # step to forget and no hardcoded port to collide with.
+      # Hosted runners have no GPU, so Chrome falls back to SwiftShader and every
+      # frame is rasterised on the CPU. This flag selects budgets and timeouts that
+      # describe that environment; without it the gate measures the renderer rather
+      # than the application. See docs/perf-budget.md.
       - run: npm run test:perf
+        env:
+          PERF_SOFTWARE_RENDERING: '1'
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
