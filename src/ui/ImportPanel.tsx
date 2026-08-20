@@ -1,7 +1,7 @@
 import { AlertTriangle, FileJson, FolderOpen, FolderTree, UploadCloud, X } from 'lucide-react'
 import { useRef, useState, type DragEvent } from 'react'
 import type { ParsedImport } from '../domain/types'
-import { parseProjectBundle } from '../export/project-files'
+import { parseProjectBundleWithWarnings } from '../export/project-files'
 import { parseImportFiles } from '../import/parse'
 import { useAppStore } from '../store/app-store'
 
@@ -40,10 +40,17 @@ export function ImportPanel() {
     setBusy(true)
     try {
       if (files.length === 1 && files[0].name.endsWith('.terrain.json')) {
-        const project = await parseProjectBundle(files[0])
+        const { project, futureActivityWarnings } = await parseProjectBundleWithWarnings(files[0])
         await replaceProject(project)
         setOpen(false)
         setParsed(null)
+        // Report after the import succeeds: the project still loaded, so this is a
+        // warning about dropped activity rather than an import failure.
+        if (futureActivityWarnings.length > 0) {
+          reportError(
+            `已忽略 ${futureActivityWarnings.length} 条晚于当前时间的活动记录（导出方时钟可能不准），其余数据已导入`,
+          )
+        }
         return
       }
       setParsed(await parseImportFiles(files))

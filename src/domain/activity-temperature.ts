@@ -1,5 +1,6 @@
 import type { InteractionEvent, TerrainNote } from './types'
 import type { ActivityHistoryAggregate } from './activity-history'
+import { isFutureActivityTimestamp } from './future-activity'
 
 export interface NoteActivitySummary {
   itemId: string
@@ -40,6 +41,8 @@ export function buildActivitySummaries(
     const summary = summaries.get(event.itemId)
     const occurredAtMs = Date.parse(event.occurredAt)
     if (!model || !summary || !Number.isFinite(occurredAtMs)) continue
+    // A future event would otherwise decay to age 0 and pin the note at full heat.
+    if (isFutureActivityTimestamp(occurredAtMs, nowMs)) continue
 
     const ageDays = Math.max(0, nowMs - occurredAtMs) / DAY_MS
     summary.rawHeat += model.weight * Math.pow(0.5, ageDays / model.halfLifeDays)
@@ -57,6 +60,7 @@ export function buildActivitySummaries(
     const summary = summaries.get(aggregate.itemId)
     const compactedAtMs = Date.parse(aggregate.compactedAt)
     if (!model || !summary || !Number.isFinite(compactedAtMs)) continue
+    if (isFutureActivityTimestamp(compactedAtMs, nowMs)) continue
     const ageDays = Math.max(0, nowMs - compactedAtMs) / DAY_MS
     summary.rawHeat += aggregate.heatAtCompactedAt * Math.pow(0.5, ageDays / model.halfLifeDays)
     summary.totalCount += aggregate.count
@@ -64,7 +68,9 @@ export function buildActivitySummaries(
     if (aggregate.type === 'edited') summary.editedCount += aggregate.count
     if (aggregate.type === 'reviewed') summary.reviewedCount += aggregate.count
     const lastOccurredAtMs = Date.parse(aggregate.lastOccurredAt)
-    if (!summary.lastActivityAt || (Number.isFinite(lastOccurredAtMs) && lastOccurredAtMs > Date.parse(summary.lastActivityAt))) {
+    const usableLastOccurredAt = Number.isFinite(lastOccurredAtMs)
+      && !isFutureActivityTimestamp(lastOccurredAtMs, nowMs)
+    if (usableLastOccurredAt && (!summary.lastActivityAt || lastOccurredAtMs > Date.parse(summary.lastActivityAt))) {
       summary.lastActivityAt = aggregate.lastOccurredAt
     }
   }

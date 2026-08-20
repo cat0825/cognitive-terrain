@@ -4,6 +4,7 @@ import { generateProjectExplorationSuggestions } from '../domain/exploration-loo
 import type { TerrainProject, TerrainSnapshot } from '../domain/types'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
 import { migrateProject } from '../storage/db'
+import { createActivityCompactionDiagnostics } from '../domain/activity-history'
 import { drawReferenceGapSummary, renderShareCard } from './share-card'
 
 const explorationActionSchema = z.object({
@@ -413,7 +414,35 @@ export function serializeProjectBundle(project: TerrainProject): string {
   })
 }
 
+/** A future-dated bundle timestamp that was dropped on import. */
+export interface FutureActivityImportWarning {
+  scope: 'interaction-event' | 'activity-aggregate'
+  itemId: string
+  occurredAt: string
+}
+
+export interface ParsedProjectBundle {
+  project: TerrainProject
+  /**
+   * Future-dated activity dropped during import. Reported rather than silently
+   * discarded so a user whose export carries a bad clock can tell why the
+   * terrain no longer shows that activity.
+   */
+  futureActivityWarnings: FutureActivityImportWarning[]
+}
+
 export async function parseProjectBundle(file: File): Promise<TerrainProject> {
+  return (await parseProjectBundleWithWarnings(file)).project
+}
+
+/**
+ * Imports a bundle and reports future-dated activity that was dropped.
+ *
+ * Rejecting the whole bundle would be worse than dropping the offending events:
+ * a single bad timestamp should not cost the user their entire project, so the
+ * rest of the import proceeds and the drops surface as warnings.
+ */
+export async function parseProjectBundleWithWarnings(file: File): Promise<ParsedProjectBundle> {
   const value: unknown = JSON.parse(await file.text())
   const parsed = projectBundleSchema.parse(value)
   const serialized = {
@@ -431,7 +460,23 @@ export async function parseProjectBundle(file: File): Promise<TerrainProject> {
       values: new Float32Array(snapshot.values),
     })),
   } as unknown as TerrainProject
-  return migrateProject(serialized)
+  // Migration compacts activity and already drops future-dated entries, so collect
+  // the diagnostics from it instead of re-filtering the cleaned project.
+  const activityDiagnostics = createActivityCompactionDiagnostics()
+  const project = migrateProject(serialized, { activityDiagnostics })
+  const futureActivityWarnings: FutureActivityImportWarning[] = [
+    ...activityDiagnostics.ignoredFutureEvents.map((event): FutureActivityImportWarning => ({
+      scope: 'interaction-event',
+      itemId: event.itemId,
+      occurredAt: event.occurredAt,
+    })),
+    ...activityDiagnostics.ignoredFutureAggregateIds.map((id): FutureActivityImportWarning => ({
+      scope: 'activity-aggregate',
+      itemId: id,
+      occurredAt: '',
+    })),
+  ]
+  return { project, futureActivityWarnings }
 }
 
 export async function exportTerrainPng(

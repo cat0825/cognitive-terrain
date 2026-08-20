@@ -1,12 +1,74 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoProject } from '../../src/domain/demo'
 import { migrateTerrainProjectToV3 } from '../../src/domain/schema-v3'
-import { parseProjectBundle, serializeProjectBundle } from '../../src/export/project-files'
+import { parseProjectBundle, parseProjectBundleWithWarnings, serializeProjectBundle } from '../../src/export/project-files'
 import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { createCognitiveObservation } from '../../src/domain/learning-progression'
 import { buildPrerequisiteTopology, materializePrerequisites } from '../../src/domain/prerequisite-topology'
 import type { ExplorationLifecycleItem, TerrainProject } from '../../src/domain/types'
+
+describe('project bundle future-dated activity', () => {
+  it('drops future activity, reports it, and still imports the rest of the bundle', async () => {
+    const demo = createDemoProject()
+    const itemId = demo.notes[0].id
+    const past = {
+      id: 'event-past',
+      itemId,
+      type: 'edited' as const,
+      occurredAt: new Date(Date.now() - 86_400_000).toISOString(),
+    }
+    const future = {
+      id: 'event-future',
+      itemId,
+      type: 'edited' as const,
+      occurredAt: '2030-01-01T00:00:00.000Z',
+    }
+    // Inject the future event after migration: migrateProject strips it, so
+    // building the source through it would serialize an already-clean bundle and
+    // the test would pass without exercising the import boundary at all.
+    const migrated = migrateProject({ ...demo, interactionEvents: [past] })
+    const source: TerrainProject = {
+      ...migrated,
+      interactionEvents: [...migrated.interactionEvents, future],
+    }
+
+    const { project, futureActivityWarnings } = await parseProjectBundleWithWarnings(new File(
+      [serializeProjectBundle(source)],
+      'future-activity.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    // The valid event and the notes survive: one bad timestamp must not cost the
+    // user their whole project.
+    expect(project.interactionEvents.map((event) => event.id)).toEqual(['event-past'])
+    expect(project.notes.length).toBe(demo.notes.length)
+    expect(futureActivityWarnings).toEqual([
+      { scope: 'interaction-event', itemId, occurredAt: '2030-01-01T00:00:00.000Z' },
+    ])
+  })
+
+  it('reports no warnings for a bundle whose activity is entirely in the past', async () => {
+    const demo = createDemoProject()
+    const source = migrateProject({
+      ...demo,
+      interactionEvents: [{
+        id: 'event-past',
+        itemId: demo.notes[0].id,
+        type: 'reviewed' as const,
+        occurredAt: new Date(Date.now() - 86_400_000).toISOString(),
+      }],
+    })
+
+    const { futureActivityWarnings } = await parseProjectBundleWithWarnings(new File(
+      [serializeProjectBundle(source)],
+      'past-activity.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(futureActivityWarnings).toEqual([])
+  })
+})
 
 describe('project bundle migration', () => {
   it('round-trips learning observations while snapshot-only projects stay history-free', async () => {

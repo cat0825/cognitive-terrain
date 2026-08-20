@@ -1,5 +1,6 @@
 import { ACTIVITY_MODEL } from './activity-temperature'
 import type { InteractionEvent, InteractionEventType } from './types'
+import { isFutureActivityTimestamp } from './future-activity'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -56,6 +57,32 @@ export interface CompactActivityHistoryOptions {
   now?: string | number | Date
   policy?: Readonly<ActivityRetentionPolicy>
   aggregates?: readonly ActivityHistoryAggregate[]
+  /**
+   * Reference time for deciding what counts as future-dated. Defaults to `now`.
+   *
+   * These are deliberately separate clocks. `now` also drives the retention
+   * cutoffs, and callers such as project migration pass a stored `updatedAt`
+   * there to keep migration deterministic. Reusing that stored value to detect
+   * future events would discard genuine activity recorded after it, so callers
+   * with a stale `now` pass the real clock here instead.
+   */
+  futureReference?: string | number | Date
+  /**
+   * Collects events dropped for being future-dated so callers can surface a
+   * warning. Compaction stays silent by default because it also runs on load,
+   * where there is no import to attach a warning to.
+   */
+  diagnostics?: ActivityCompactionDiagnostics
+}
+
+/** Mutable sink for compaction findings that callers may want to report. */
+export interface ActivityCompactionDiagnostics {
+  ignoredFutureEvents: InteractionEvent[]
+  ignoredFutureAggregateIds: string[]
+}
+
+export function createActivityCompactionDiagnostics(): ActivityCompactionDiagnostics {
+  return { ignoredFutureEvents: [], ignoredFutureAggregateIds: [] }
 }
 
 export interface ActivityCountBucket {
@@ -91,12 +118,22 @@ export function compactActivityHistory(
   assertPolicy(policy)
   assertTimeZone(options.timeZone)
   const nowMs = parseNow(options.now)
+  const futureReferenceMs = options.futureReference === undefined
+    ? nowMs
+    : parseDate(options.futureReference)
   const compactedAt = new Date(nowMs).toISOString()
   const dailyCutoff = nowMs - policy.dailyRetentionDays * DAY_MS
   const weeklyCutoff = nowMs - policy.weeklyRetentionDays * DAY_MS
-  const validEvents = [...new Map(events.map((event) => [event.id, event])).values()]
+  const dedupedEvents = [...new Map(events.map((event) => [event.id, event])).values()]
     .map((event) => ({ event, occurredAtMs: Date.parse(event.occurredAt) }))
     .filter((entry) => Number.isFinite(entry.occurredAtMs))
+  // Future events are dropped here rather than clamped, so retention, heat, and
+  // bucketing all see the same set and compaction stays idempotent.
+  const validEvents = dedupedEvents.filter((entry) => {
+    if (!isFutureActivityTimestamp(entry.occurredAtMs, futureReferenceMs)) return true
+    options.diagnostics?.ignoredFutureEvents.push(entry.event)
+    return false
+  })
 
   const rawEvents: InteractionEvent[] = []
   const compactableEvents: Array<{ event: InteractionEvent; occurredAtMs: number }> = []
@@ -126,6 +163,10 @@ export function compactActivityHistory(
   const merged = new Map<string, MutableAggregate>()
   for (const aggregate of options.aggregates ?? []) {
     if (!isUsableAggregate(aggregate, options.timeZone, weeklyCutoff)) continue
+    if (hasFutureAggregateTimestamp(aggregate, futureReferenceMs)) {
+      options.diagnostics?.ignoredFutureAggregateIds.push(aggregate.id)
+      continue
+    }
     const lastOccurredAtMs = Date.parse(aggregate.lastOccurredAt)
     const granularity = aggregate.granularity === 'week' || lastOccurredAtMs < dailyCutoff
       ? 'week'
@@ -208,13 +249,16 @@ export function aggregateActivityCounts(
   events: readonly InteractionEvent[],
   timeZone: string,
   granularity: ActivityHistoryGranularity,
+  now: string | number | Date = Date.now(),
 ): ActivityCountBucket[] {
   assertTimeZone(timeZone)
+  const nowMs = parseDate(now)
   const buckets = new Map<string, ActivityCountBucket>()
   for (const event of events) {
     if (!heatModelFor(event.type)) continue
     const occurredAtMs = Date.parse(event.occurredAt)
     if (!Number.isFinite(occurredAtMs)) continue
+    if (isFutureActivityTimestamp(occurredAtMs, nowMs)) continue
     const bucket = activityBucketKey(occurredAtMs, timeZone, granularity)
     const current = buckets.get(bucket)
     if (!current) {
@@ -240,14 +284,17 @@ export function aggregateActivityCounts(
 export function aggregateActivityHistoryCounts(
   state: Pick<ActivityHistoryState, 'rawEvents' | 'aggregates' | 'timeZone'>,
   granularity: ActivityHistoryGranularity,
+  now: string | number | Date = Date.now(),
 ): ActivityCountBucket[] {
+  const nowMs = parseDate(now)
   const buckets = new Map(
-    aggregateActivityCounts(state.rawEvents, state.timeZone, granularity)
+    aggregateActivityCounts(state.rawEvents, state.timeZone, granularity, nowMs)
       .map((bucket) => [bucket.bucket, bucket] as const),
   )
   for (const aggregate of state.aggregates) {
     if (!heatModelFor(aggregate.type)) continue
     if (granularity === 'day' && aggregate.granularity !== 'day') continue
+    if (hasFutureAggregateTimestamp(aggregate, nowMs)) continue
     const bucket = granularity === aggregate.granularity
       ? aggregate.bucket
       : activityBucketKey(`${aggregate.bucket}T12:00:00.000Z`, state.timeZone, 'week')
@@ -288,6 +335,7 @@ export function activityRawHeat(
   }
   for (const aggregate of aggregates) {
     if (aggregate.itemId !== itemId || aggregate.policyVersion !== ACTIVITY_HISTORY_POLICY_VERSION) continue
+    if (hasFutureAggregateTimestamp(aggregate, nowMs)) continue
     heat += decayStoredHeat(aggregate, nowMs)
   }
   return heat
@@ -301,6 +349,7 @@ function eventHeatAt(event: InteractionEvent, nowMs: number): number {
   const model = heatModelFor(event.type)
   const occurredAtMs = Date.parse(event.occurredAt)
   if (!model || !Number.isFinite(occurredAtMs)) return 0
+  if (isFutureActivityTimestamp(occurredAtMs, nowMs)) return 0
   const ageDays = Math.max(0, nowMs - occurredAtMs) / DAY_MS
   return model.weight * Math.pow(0.5, ageDays / model.halfLifeDays)
 }
@@ -310,6 +359,7 @@ function decayStoredHeat(aggregate: ActivityHistoryAggregate, nowMs: number): nu
   if (!model || aggregate.heatAtCompactedAt <= 0) return 0
   const compactedAtMs = Date.parse(aggregate.compactedAt)
   if (!Number.isFinite(compactedAtMs)) return 0
+  if (isFutureActivityTimestamp(compactedAtMs, nowMs)) return 0
   const ageDays = Math.max(0, nowMs - compactedAtMs) / DAY_MS
   return aggregate.heatAtCompactedAt * Math.pow(0.5, ageDays / model.halfLifeDays)
 }
@@ -346,6 +396,19 @@ function aggregateId(aggregate: Pick<
     aggregate.bucket,
     encodeURIComponent(aggregate.timeZone),
   ].join(':')
+}
+
+/**
+ * True when any of an aggregate's timestamps sits in the future.
+ *
+ * `compactedAt` drives decay and `lastOccurredAt` drives "recent activity", so a
+ * future value in either one is enough to distort the result; the aggregate is
+ * dropped as a whole rather than partially trusted.
+ */
+function hasFutureAggregateTimestamp(aggregate: ActivityHistoryAggregate, nowMs: number): boolean {
+  return isFutureActivityTimestamp(Date.parse(aggregate.compactedAt), nowMs)
+    || isFutureActivityTimestamp(Date.parse(aggregate.lastOccurredAt), nowMs)
+    || isFutureActivityTimestamp(Date.parse(aggregate.firstOccurredAt), nowMs)
 }
 
 function isUsableAggregate(
