@@ -16,12 +16,36 @@
  *   server is running.
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
+import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
+import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const HOST = '127.0.0.1'
+
+/**
+ * Builds the app when `dist/` is missing.
+ *
+ * `vite preview` serves whatever is in `dist/`, and happily starts with nothing
+ * there: it binds the port and answers 404. The readiness probe then failed with
+ * "did not become ready (HTTP 404)" after the full timeout, which pointed at the
+ * server rather than at the real cause. Other browser gates avoid this because
+ * their Playwright `webServer` command is `npm run build && npm run preview`;
+ * this gate owns its own server, so it has to own the build too.
+ *
+ * An existing `dist/` is reused rather than rebuilt, so a local run right after a
+ * build does not pay for a second one.
+ */
+function ensureBuild() {
+  if (existsSync(path.resolve('dist/index.html'))) return
+  console.log('perf gate: dist/ missing, running npm run build')
+  const result = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', shell: false })
+  if (result.status !== 0) {
+    throw new Error(`perf gate could not build the app (npm run build exited with ${result.status})`)
+  }
+}
 
 /** Asks the OS for a currently free TCP port. */
 async function findFreePort() {
@@ -43,8 +67,15 @@ async function waitForReady(url, { timeoutMs, isAlive }) {
     try {
       const response = await fetch(url, { method: 'GET' })
       if (response.ok) return
+      // A persistent 404 means the server is up but has nothing to serve, which is
+      // a build problem, not a startup problem. Say so instead of waiting out the
+      // whole timeout and blaming the server.
+      if (response.status === 404) {
+        throw new Error(`Preview server returned 404: dist/ appears to be empty or missing (${url})`)
+      }
       lastError = `HTTP ${response.status}`
     } catch (error) {
+      if (error instanceof Error && error.message.includes('dist/ appears to be empty')) throw error
       lastError = error instanceof Error ? error.message : String(error)
     }
     await delay(250)
@@ -59,6 +90,7 @@ async function waitForReady(url, { timeoutMs, isAlive }) {
  * both the normal path and a signal handler can invoke it.
  */
 export async function startPreviewServer({ timeoutMs = 120_000 } = {}) {
+  ensureBuild()
   const port = await findFreePort()
   const child = spawn(
     'npm',
