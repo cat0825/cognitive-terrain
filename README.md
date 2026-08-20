@@ -58,11 +58,20 @@ npm run size:check
 npm run test:e2e
 npm run test:visual
 npm run test:a11y
-# 另开 `npm run preview -- --port 4174 --strictPort` 后执行：
 npm run test:perf
 ```
 
+`npm run test:perf` 会自行启动并关闭 preview 服务（OS 分配空闲端口，绑定 127.0.0.1），不再需要另开终端；若要复用已有服务，设置 `BASE_URL` 即可。性能预算与基线见 [`docs/perf-budget.md`](docs/perf-budget.md)。
+
 首次运行 Playwright 时需先执行 `npx playwright install chromium`。
+
+CI 形态与成本取舍（分片数、并发取消、纯文档改动跳过浏览器门禁）见 [`docs/ci-cost.md`](docs/ci-cost.md)。
+
+CI 中浏览器安装通过 `node scripts/run-with-retry.mjs` 包装：`playwright install --with-deps` 会调用 apt-get，包镜像卡住时它既不输出也不退出，会静默占满整个 job 超时并表现为难以归因的 job 取消。该脚本把「长时间无输出」也视为失败并重试，同时按 Playwright 版本缓存浏览器；本地调试可直接复用：
+
+```bash
+node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 -- npx playwright install --with-deps chromium
+```
 
 ## 导入格式
 
