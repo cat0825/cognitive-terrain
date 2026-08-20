@@ -54,6 +54,30 @@ Two independent limits are used per scenario:
 Scrub scenarios get more slack because they intentionally drive the timeline as
 fast as the browser accepts, making them the heaviest paths by design.
 
+### Hosted CI without a GPU
+
+The `perf` job runs Chrome on a hosted Linux runner without a hardware GPU. It
+sets `PERF_SOFTWARE_RENDERING=1`, which selects a separate budget and a bounded
+software-rendering profile: 960x640 at DPR 1, low rendering quality, 30 orbit
+steps, 40 pointer-scrub steps, a three-minute timeout per scenario, and a
+60-second PNG-download timeout. The previous GPU-sized profile took 1,071
+seconds before reaching export because hundreds of pointer events each forced a
+CPU-rasterised frame. This is an environment declaration, not a developer
+override: local runs keep the 1440x960 DPR 1.5 strict profile unless that
+variable is explicitly set.
+
+| Scenario | minimum FPS | maximum frames over 33.3ms |
+| --- | ---: | ---: |
+| idle | 2 | 2,000 |
+| playback / orbit | 1 | 3,000 |
+| scrub scenarios | 1 | 4,000 |
+
+These values are intentionally low because SwiftShader can take two orders of
+magnitude longer than the local GPU-backed baseline. They still fail a stalled
+scene (`0.1 FPS` or `99,999` long frames), missing measurements, non-finite FPS,
+canvas pixel checks, console errors, and an undersized PNG. The CI job also has a
+15-minute hard timeout so a renderer regression cannot occupy a runner forever.
+
 ## Changing a threshold
 
 1. Establish the new baseline on an unloaded machine and record host, GPU, and
