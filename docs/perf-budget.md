@@ -66,3 +66,20 @@ fast as the browser accepts, making them the heaviest paths by design.
 
 Loosening a threshold to make a red gate green, without explaining the underlying
 change, defeats the gate.
+
+## The gate builds if it has to
+
+`vite preview` serves whatever is in `dist/`, and it starts happily with nothing
+there: it binds the port and answers 404. The first CI run of this gate failed
+with `Preview server did not become ready within 120000ms (HTTP 404)`, which
+pointed at the server when the real cause was a missing build.
+
+The other browser gates never hit this because their Playwright `webServer`
+command is `npm run build && npm run preview`. This gate owns its own server, so
+it now owns the build too: `startPreviewServer` runs `npm run build` when
+`dist/index.html` is absent, and reuses an existing build otherwise so a local run
+straight after a build does not pay twice.
+
+A persistent 404 during the readiness probe is also reported as an empty-`dist/`
+problem immediately, rather than being retried for the full two minutes and then
+blamed on startup.
