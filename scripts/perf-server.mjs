@@ -95,7 +95,14 @@ export async function startPreviewServer({ timeoutMs = 120_000 } = {}) {
   const child = spawn(
     'npm',
     ['run', 'preview', '--', '--port', String(port), '--strictPort', '--host', HOST],
-    { stdio: ['ignore', 'pipe', 'pipe'], shell: false },
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+      // npm launches Vite as a child. Killing only npm can leave Vite holding
+      // stdout/stderr open forever on hosted Linux runners, so give the preview
+      // tree its own process group and terminate the whole group during cleanup.
+      detached: process.platform !== 'win32',
+    },
   )
 
   let exited = false
@@ -116,15 +123,20 @@ export async function startPreviewServer({ timeoutMs = 120_000 } = {}) {
   const close = async () => {
     if (closed) return
     closed = true
-    if (exited) return
-    child.kill('SIGTERM')
+    const exitPromise = exited ? Promise.resolve() : once(child, 'exit')
+    signalProcessTree(child, 'SIGTERM')
     // Escalate: a preview server holding the port would make the next run fail
     // on --strictPort for reasons unrelated to the code under test.
-    const timer = setTimeout(() => child.kill('SIGKILL'), 5_000)
+    const timer = setTimeout(() => signalProcessTree(child, 'SIGKILL'), 5_000)
     try {
-      await once(child, 'exit')
+      await exitPromise
     } finally {
       clearTimeout(timer)
+      // npm can exit before Vite. Send one final group signal so a descendant
+      // that outlived the wrapper cannot keep the captured pipes open.
+      signalProcessTree(child, 'SIGKILL')
+      child.stdout.destroy()
+      child.stderr.destroy()
     }
   }
 
@@ -139,4 +151,17 @@ export async function startPreviewServer({ timeoutMs = 120_000 } = {}) {
   }
 
   return { baseUrl, port, close }
+}
+
+/** Sends a signal to npm and every descendant it started. */
+export function signalProcessTree(child, signal) {
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal)
+      return true
+    } catch (error) {
+      if (error?.code !== 'ESRCH') throw error
+    }
+  }
+  return child.kill(signal)
 }

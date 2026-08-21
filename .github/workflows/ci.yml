@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       app: ${{ steps.filter.outputs.app }}
+      perf: ${{ steps.filter.outputs.perf }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,6 +35,7 @@ jobs:
         run: |
           if [ -z "$BASE_REF" ]; then
             echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "perf=true" >> "$GITHUB_OUTPUT"
             echo "push build: running every gate"
             exit 0
           fi
@@ -48,6 +50,12 @@ jobs:
           else
             echo "app=false" >> "$GITHUB_OUTPUT"
             echo "docs-only change: skipping browser gates"
+          fi
+          if echo "$changed" | grep -qE '^(\.github/workflows/ci\.yml|scripts/perf-[^/]+\.mjs|tests/unit/perf-(budget|server)\.test\.ts|docs/perf-budget\.md)$'; then
+            echo "perf=true" >> "$GITHUB_OUTPUT"
+            echo "perf harness change: running hosted perf gate on this PR"
+          else
+            echo "perf=false" >> "$GITHUB_OUTPUT"
           fi
 
   quality:
@@ -230,11 +238,10 @@ jobs:
 
   perf:
     runs-on: ubuntu-latest
-    needs: quality
-    # Only on main. Perf is the slowest gate and the most sensitive to runner
-    # noise, so it guards the mainline rather than every PR iteration. A PR that
-    # touches rendering can still be checked locally with `npm run test:perf`.
-    if: github.event_name == 'push'
+    needs: [quality, changes]
+    # Perf is the slowest gate and the most sensitive to runner noise, so it
+    # guards every mainline push but only PRs that change the perf harness.
+    if: github.event_name == 'push' || needs.changes.outputs.perf == 'true'
     # The software-rendering profile bounds each scenario and uses fewer pointer
     # events, but retain a job-level backstop for browser or runner hangs.
     timeout-minutes: 15
