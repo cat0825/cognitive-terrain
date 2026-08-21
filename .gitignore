@@ -19,11 +19,18 @@ tests/visual/diffs
 blob-report
 output/playwright
 
-# Reference material and scraped raw data
+# Reference material, generated artifacts and scraped raw data.
+# Decision recorded in docs/review/findings-ledger.md: these are generated or
+# reference assets, not source or decision records. Design conclusions live in
+# docs/adr/ instead.
 output/reference-video
 output/watch-reference-20260731
 output/migration
+output/imagegen
 public/imports/*.raw.json
+
+# Local one-off scratch scripts
+*.tmp.mjs
 
 # Editor directories and files
 .vscode/*

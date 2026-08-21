@@ -194,6 +194,17 @@ docs/adr/       架构决策记录
 
 技术栈：React 19、TypeScript、Vite、React Three Fiber、Zustand、`@huggingface/transformers`、umap-js、idb、Vitest、Playwright、oxlint。
 
+## 部署
+
+线上：<https://cognitive-terrain.eriri-blog.workers.dev>
+
+```bash
+npm run deploy       # 先构建，再用 wrangler 把 dist/ 发到 Cloudflare Workers Assets
+```
+
+配置在 [`wrangler.jsonc`](wrangler.jsonc)：纯静态资产，没有 Worker 脚本与后端，所有路由回落 `index.html`。
+部署需要本机已登录 `wrangler login`（或设置 `CLOUDFLARE_API_TOKEN`）。
+
 ## 隐私与限制
 
 - 笔记与生成的项目保存在当前浏览器的 IndexedDB 中，不上传到应用服务器。
@@ -211,4 +222,6 @@ docs/adr/       架构决策记录
 - 搜索仍以字符串匹配为主；小规模编辑会触发全量 embedding/UMAP，布局稳定性与 10k/50k 规模未验证。
 - a11y 门禁当前排除暗色 8px 等宽小字的 `color-contrast` 规则，不能据此宣称完整 WCAG 2.2 AA。
 
-架构决策见 [`docs/adr/`](docs/adr/)，成熟产品差距见 [GAP.md](GAP.md)，当前交接见 [SESSION.md](SESSION.md)。
+架构决策见 [`docs/adr/`](docs/adr/)。独立审查结论与逐条处置见 [`docs/review/findings-ledger.md`](docs/review/findings-ledger.md)，其中 `npm audit` 的 high 项有显式接受理由与复核条件。成熟产品差距见 [GAP.md](GAP.md)。
+
+[SESSION.md](SESSION.md) 是带 commit pin 的交接快照，不是当前状态源；判断现状请直接 fresh check Git 与 GitHub。
