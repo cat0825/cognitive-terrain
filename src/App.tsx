@@ -7,7 +7,7 @@ import { buildProjectReferenceGapReport } from './domain/reference-gaps'
 import { evaluationTimeForProject } from './domain/evaluation-time'
 import { vaultWritebackCandidates, type VaultWritebackCandidate } from './domain/vault-writeback-candidates'
 import { TerrainCanvas } from './scene/TerrainCanvas'
-import { useAppStore } from './store/app-store'
+import { useAppStore, type PersistenceState } from './store/app-store'
 import { CameraRail } from './ui/CameraRail'
 import { FilterPanel } from './ui/FilterPanel'
 import { NoteDetail } from './ui/NoteDetail'
@@ -36,6 +36,7 @@ function App() {
   const cameraRevision = useAppStore((state) => state.cameraRevision)
   const cameraScale = useAppStore((state) => state.cameraScale)
   const isAnalyzing = useAppStore((state) => state.isAnalyzing)
+  const persistence = useAppStore((state) => state.persistence)
   const progress = useAppStore((state) => state.progress)
   const error = useAppStore((state) => state.error)
   const lastAnalysis = useAppStore((state) => state.lastAnalysis)
@@ -49,6 +50,7 @@ function App() {
   const dismissError = useAppStore((state) => state.dismissError)
   const firstRun = useAppStore((state) => state.firstRun)
   const dismissFirstRun = useAppStore((state) => state.dismissFirstRun)
+  const acknowledgePersistence = useAppStore((state) => state.acknowledgePersistence)
 
   useEffect(() => {
     void initialize()
@@ -92,6 +94,14 @@ function App() {
   const activeReferenceAtlas = referenceGapReport.enabled
     ? project.referenceAtlases?.find((atlas) => atlas.id === referenceGapReport.referenceAtlasId)
     : undefined
+
+  // A successful save is transient feedback. Failures stay until the next commit
+  // so a user cannot miss that their data did not reach storage.
+  useEffect(() => {
+    if (persistence.status !== 'saved') return
+    const timer = window.setTimeout(acknowledgePersistence, 4000)
+    return () => window.clearTimeout(timer)
+  }, [acknowledgePersistence, persistence.status, persistence.updatedAt])
 
   useEffect(() => {
     if (!lastAnalysis) return
@@ -265,6 +275,21 @@ function App() {
             <button type="button" onClick={cancelAnalysis}>取消</button>
           </div>
         )}
+        {persistence.status !== 'idle' && (
+          <div
+            className="persistence-status"
+            role="status"
+            aria-live="polite"
+            data-save-status={persistence.status}
+            data-save-scope={persistence.scope ?? ''}
+          >
+            <span className="panel-kicker">SAVE</span>
+            <strong>{persistenceLabel(persistence)}</strong>
+            {persistence.status === 'failed' && persistence.message && (
+              <span className="persistence-status-detail">{persistence.message}</span>
+            )}
+          </div>
+        )}
         {analysisToast && (
           <div className="analysis-toast" role="status">
             <strong>本地分析完成</strong>
@@ -288,6 +313,28 @@ function App() {
       </div>
     </div>
   )
+}
+
+/**
+ * Save state is reported separately from analysis so a user can tell "analysis
+ * finished" apart from "the project is on disk".
+ */
+function persistenceLabel(persistence: PersistenceState): string {
+  const scope = persistenceScopeLabel(persistence.scope)
+  if (persistence.status === 'saving') return `正在保存${scope}`
+  if (persistence.status === 'saved') return `${scope}已保存`
+  return `${scope}保存失败`
+}
+
+function persistenceScopeLabel(scope: PersistenceState['scope']): string {
+  switch (scope) {
+    case 'vault-sync': return 'Vault 同步'
+    case 'vault-writeback': return 'Vault 写回'
+    case 'taxonomy': return '领域结构'
+    case 'review': return '复习记录'
+    case 'exploration': return '探索记录'
+    default: return '项目'
+  }
 }
 
 function focusTerrainStage(): void {

@@ -64,10 +64,10 @@ export async function analyzeNotes(
   )
 
   report(onProgress, 'terrain', 0, 1, '正在生成密度地形与时间快照')
-  const project = createProjectFromNotes(name, ordered, actualModelId, neighborEvidence)
+  const project = createProjectFromNotes(name, ordered, actualModelId, neighborEvidence, timeZone)
   report(onProgress, 'terrain', 1, 1, `${project.snapshots.length} 个时间快照已生成`)
   report(onProgress, 'cache', 1, 1, '项目已准备好，可保存到本地')
-  return projectWithTimeZone(project, timeZone)
+  return project
 }
 
 async function embedWithTransformers(
@@ -188,10 +188,6 @@ function fallbackEmbedding(text: string): number[] {
     }
   }
   return normalizeVector(vector)
-}
-
-function projectWithTimeZone<T extends { timeZone: string }>(project: T, timeZone: string): T {
-  return { ...project, timeZone }
 }
 
 function report(

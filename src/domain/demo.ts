@@ -1,10 +1,11 @@
 import type { TerrainNote, TerrainProject } from './types'
 import { buildPrerequisiteTopology } from './prerequisite-topology'
-import { buildTerrainData } from '../pipeline/terrain'
+import { buildTerrainData, chooseGridSize } from '../pipeline/terrain'
 import { computeNeighbors, type EmbeddingNeighborResult } from '../pipeline/neighbors'
 import { cognitiveStateFromNote } from './cognitive-state'
 import { createCognitiveObservation } from './learning-progression'
 import { DEFAULT_TERRAIN_PROFILE_ID, DEFAULT_TERRAIN_PROFILES } from './terrain-profile'
+import { derivedTerrainRecord, projectVersionTuple } from './derived-data'
 
 interface DemoTopic {
   key: string
@@ -330,7 +331,15 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
     const to = notes[(topicIndex + bridgeStride) % topics.length]
     if (from && to && from.area !== to.area) from.links = [to.title]
   }
-  const terrain = buildTerrainData(notes, 128, 'Asia/Shanghai', 0.052)
+  const terrainData = buildTerrainData(notes, 128, 'Asia/Shanghai', 0.052)
+  const terrain = derivedTerrainRecord({
+    gridSize: 128,
+    bandwidth: terrainData.bandwidth,
+    timeZone: 'Asia/Shanghai',
+    // Demo peaks are authored per topic so the tour always highlights the same
+    // named summits; a density rebuild must not silently replace them.
+    peaks: 'authored',
+  })
   const timestamp = '2025-12-31T20:00:00+08:00'
   const taxonomyNodes = demoTaxonomyLabels.map(([id, label]) => ({
     id,
@@ -343,7 +352,7 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
     createdAt: timestamp,
     updatedAt: timestamp,
   }))
-  return {
+  const project: TerrainProject = {
     schemaVersion: 3,
     id: 'demo-ai-infra-terrain',
     name: 'AI Infra 知识地形',
@@ -355,7 +364,7 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
     sourceDigest: `ai-infra-demo-${notes.length}`,
     gridSize: 128,
     notes,
-    snapshots: terrain.snapshots,
+    snapshots: terrainData.snapshots,
     peaks: topics.map((topic, topicIndex) => ({
       id: `ai-infra-peak-${topicIndex + 1}`,
       x: topic.center[0],
@@ -387,6 +396,7 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
       updatedAt: timestamp,
     }],
   }
+  return { ...project, derived: { versionTuple: projectVersionTuple(project), terrain } }
 }
 
 function buildDemoProgressionObservations(notes: TerrainNote[]): TerrainProject['cognitiveObservations'] {
@@ -417,20 +427,25 @@ export function createProjectFromNotes(
   notes: TerrainNote[],
   modelId = 'local-analysis',
   neighborEvidence?: EmbeddingNeighborResult,
+  timeZone = 'Asia/Shanghai',
 ): TerrainProject {
-  const terrain = buildTerrainData(notes)
+  // The terrain must be bucketed in the same zone the project claims, otherwise a
+  // rebuild in the project's zone produces different month buckets than the ones
+  // that were persisted.
+  const gridSize = chooseGridSize(notes.length)
+  const terrain = buildTerrainData(notes, gridSize, timeZone)
   const timestamp = new Date().toISOString()
-  return {
+  const project: TerrainProject = {
     schemaVersion: 3,
     id: `project-${hash(`${name}-${timestamp}`)}`,
     name,
     createdAt: timestamp,
     updatedAt: timestamp,
-    timeZone: 'Asia/Shanghai',
+    timeZone,
     modelId,
     embeddingMode: modelId === 'deterministic-local-fallback' ? 'fallback' : 'semantic',
     sourceDigest: hash(notes.map((note) => note.fingerprint).join('|')),
-    gridSize: Math.sqrt(terrain.snapshots[0]?.values.length ?? 128 * 128),
+    gridSize,
     notes,
     snapshots: terrain.snapshots,
     peaks: terrain.peaks,
@@ -442,6 +457,17 @@ export function createProjectFromNotes(
     terrainProfiles: DEFAULT_TERRAIN_PROFILES.map((profile) => ({ ...profile })),
     activeTerrainProfileId: DEFAULT_TERRAIN_PROFILE_ID,
     prerequisiteTopology: buildPrerequisiteTopology(notes),
+  }
+  return {
+    ...project,
+    derived: {
+      versionTuple: projectVersionTuple(project),
+      terrain: derivedTerrainRecord({
+        gridSize: project.gridSize,
+        bandwidth: terrain.bandwidth,
+        timeZone: project.timeZone,
+      }),
+    },
   }
 }
 

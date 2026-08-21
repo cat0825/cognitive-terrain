@@ -38,6 +38,7 @@ beforeEach(() => {
     project: initialProject,
     error: null,
     isAnalyzing: false,
+    persistence: { status: 'idle' },
     progress: null,
     lastAnalysis: null,
   })
@@ -120,6 +121,49 @@ describe('app store reliability', () => {
       expect.objectContaining({ referenceAtlases: [expect.objectContaining({ taxonomyVersion: 2 })] }),
       { createBackup: false },
     )
+  })
+})
+
+describe('analysis and save states are independently observable', () => {
+  it('marks the save as failed while analysis state stays clean', async () => {
+    repositoryMocks.saveProject.mockRejectedValueOnce(new Error('quota exceeded'))
+    const replacement = { ...initialProject, id: 'save-failed-project', name: 'Save failed' }
+
+    await expect(useAppStore.getState().replaceProject(replacement)).rejects.toThrow(/当前项目未切换/)
+
+    const state = useAppStore.getState()
+    expect(state.persistence).toMatchObject({ status: 'failed', scope: 'project' })
+    expect(state.persistence.message).toContain('quota exceeded')
+    // Analysis never ran here, so conflating the two states would report a
+    // phantom analysis failure.
+    expect(state.isAnalyzing).toBe(false)
+  })
+
+  it('reports a successful save separately from analysis completion', async () => {
+    const replacement = { ...initialProject, id: 'saved-project', name: 'Saved' }
+
+    await useAppStore.getState().replaceProject(replacement)
+
+    expect(useAppStore.getState().persistence).toMatchObject({ status: 'saved', scope: 'project' })
+    expect(useAppStore.getState().project.id).toBe('saved-project')
+  })
+
+  it('keeps a failed save visible until the next commit and never drops an in-flight one', () => {
+    useAppStore.setState({ persistence: { status: 'failed', scope: 'taxonomy', message: 'disk full' } })
+    useAppStore.getState().acknowledgePersistence()
+    expect(useAppStore.getState().persistence.status).toBe('idle')
+
+    useAppStore.setState({ persistence: { status: 'saving', scope: 'vault-sync' } })
+    useAppStore.getState().acknowledgePersistence()
+    expect(useAppStore.getState().persistence).toMatchObject({ status: 'saving', scope: 'vault-sync' })
+  })
+
+  it('scopes the save state to the review path', async () => {
+    const noteId = initialProject.notes[0].id
+
+    await useAppStore.getState().markNoteReviewed(noteId)
+
+    expect(useAppStore.getState().persistence).toMatchObject({ status: 'saved', scope: 'review' })
   })
 })
 

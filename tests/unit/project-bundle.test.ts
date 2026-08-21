@@ -447,3 +447,54 @@ describe('project bundle migration', () => {
     expect(JSON.stringify(restored)).not.toContain('vaultBindings')
   })
 })
+
+describe('project bundle derived data', () => {
+  it('round-trips the version tuple and terrain parameters', async () => {
+    const source = migrateProject(createDemoProject())
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'derived.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.derived?.versionTuple).toEqual(source.derived?.versionTuple)
+    expect(restored.derived?.terrain).toEqual(source.derived?.terrain)
+  })
+
+  it('rebuilds and reports derived data that the bundle got wrong', async () => {
+    const source = migrateProject(createDemoProject())
+    const drifted: TerrainProject = {
+      ...source,
+      snapshots: source.snapshots.map((snapshot, index) => index === 0
+        ? { ...snapshot, values: snapshot.values.map((value) => value + 0.5) as Float32Array }
+        : snapshot),
+    }
+
+    const { project, derivedDriftWarnings } = await parseProjectBundleWithWarnings(new File(
+      [serializeProjectBundle(drifted)],
+      'derived-drift.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(derivedDriftWarnings).toEqual([{ field: 'snapshots' }])
+    expect(Array.from(project.snapshots[0].values))
+      .toEqual(Array.from(source.snapshots[0].values))
+  })
+
+  it('keeps a bundle without a derived record importable and unmodified', async () => {
+    const source = migrateProject(createDemoProject())
+    const { derived: _derived, ...legacy } = source
+
+    const { project, derivedDriftWarnings } = await parseProjectBundleWithWarnings(new File(
+      [serializeProjectBundle(legacy as TerrainProject)],
+      'derived-legacy.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(derivedDriftWarnings).toEqual([])
+    expect(project.derived?.terrain).toBeNull()
+    expect(project.snapshots.map((snapshot) => snapshot.bucket))
+      .toEqual(source.snapshots.map((snapshot) => snapshot.bucket))
+  })
+})

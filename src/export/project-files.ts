@@ -5,6 +5,7 @@ import type { TerrainProject, TerrainSnapshot } from '../domain/types'
 import { TERRAIN_PREPARE_EXPORT_EVENT } from '../scene/terrain-events'
 import { migrateProject } from '../storage/db'
 import { createActivityCompactionDiagnostics } from '../domain/activity-history'
+import { rebuildProjectDerivedData } from '../domain/derived-data'
 import { drawReferenceGapSummary, renderShareCard } from './share-card'
 
 const explorationActionSchema = z.object({
@@ -216,6 +217,28 @@ const vaultSyncStateSchema = z.object({
   revisions: z.array(vaultSyncRevisionSchema),
 })
 
+const projectDerivedRecordSchema = z.object({
+  versionTuple: z.object({
+    tupleVersion: z.literal(1),
+    taxonomyVersion: z.number().int().nonnegative(),
+    referenceAtlasVersion: z.number().int().nonnegative().nullable(),
+    terrainFormulaVersion: z.string().min(1),
+    densityFormulaVersion: z.literal('density-kde-v1'),
+    layoutFormulaVersion: z.literal('umap-js-2d-v1'),
+    neighborFormulaVersion: z.literal('embedding-cosine-neighbors-v1'),
+    prerequisiteFormulaVersion: z.literal('explicit-prerequisite-dag-v1'),
+    embeddingModelId: z.string().min(1),
+    embeddingMode: z.enum(['semantic', 'fallback', 'demo']),
+  }),
+  terrain: z.object({
+    gridSize: z.number().int().positive(),
+    bandwidth: z.number().positive(),
+    timeZone: z.string().min(1),
+    formulaVersion: z.literal('density-kde-v1'),
+    peaks: z.enum(['derived', 'authored']),
+  }).nullable(),
+})
+
 const projectBundleSchema = z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   id: z.string(),
@@ -404,6 +427,7 @@ const projectBundleSchema = z.object({
   explorationItems: z.array(explorationItemSchema).optional(),
   prerequisiteTopology: prerequisiteTopologySchema.optional(),
   vaultSync: vaultSyncStateSchema.optional(),
+  derived: projectDerivedRecordSchema.optional(),
 })
 
 export function downloadProjectBundle(project: TerrainProject): void {
@@ -427,6 +451,11 @@ export interface FutureActivityImportWarning {
   occurredAt: string
 }
 
+/** A derived field whose rebuilt value disagreed with the imported bundle. */
+export interface DerivedDriftWarning {
+  field: string
+}
+
 export interface ParsedProjectBundle {
   project: TerrainProject
   /**
@@ -435,6 +464,12 @@ export interface ParsedProjectBundle {
    * terrain no longer shows that activity.
    */
   futureActivityWarnings: FutureActivityImportWarning[]
+  /**
+   * Derived fields the bundle claimed that a rebuild from its own core data plus
+   * version tuple did not reproduce. Empty for a self-consistent bundle. The
+   * rebuilt values win, because a stale snapshot is what makes a terrain lie.
+   */
+  derivedDriftWarnings: DerivedDriftWarning[]
 }
 
 export async function parseProjectBundle(file: File, signal?: AbortSignal): Promise<TerrainProject> {
@@ -471,7 +506,14 @@ export async function parseProjectBundleWithWarnings(file: File, signal?: AbortS
   // Migration compacts activity and already drops future-dated entries, so collect
   // the diagnostics from it instead of re-filtering the cleaned project.
   const activityDiagnostics = createActivityCompactionDiagnostics()
-  const project = migrateProject(serialized, { activityDiagnostics })
+  const migrated = migrateProject(serialized, { activityDiagnostics })
+  // An imported bundle is the one place where derived data arrives from outside
+  // this app's control, so it is rebuilt from core data and the version tuple
+  // instead of being trusted. Bundles without a derived record keep their stored
+  // terrain: with no recorded bandwidth there is nothing to reproduce it from.
+  const rebuild = rebuildProjectDerivedData(migrated)
+  const project = rebuild.project
+  const derivedDriftWarnings = rebuild.mismatches.map((field) => ({ field }))
   const futureActivityWarnings: FutureActivityImportWarning[] = [
     ...activityDiagnostics.ignoredFutureEvents.map((event): FutureActivityImportWarning => ({
       scope: 'interaction-event',
@@ -484,7 +526,7 @@ export async function parseProjectBundleWithWarnings(file: File, signal?: AbortS
       occurredAt: '',
     })),
   ]
-  return { project, futureActivityWarnings }
+  return { project, futureActivityWarnings, derivedDriftWarnings }
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

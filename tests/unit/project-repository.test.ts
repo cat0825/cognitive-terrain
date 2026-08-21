@@ -28,6 +28,7 @@ import { createInteractionEvent } from '../../src/domain/cognitive-state'
 import { createCognitiveObservation } from '../../src/domain/learning-progression'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { closeDatabase, DATABASE_NAME, DATABASE_VERSION, getDatabase } from '../../src/storage/db'
+import { projectVersionTuple } from '../../src/domain/derived-data'
 
 const repositoryDemoFixture = createDemoProject()
 
@@ -283,6 +284,46 @@ describe('project repository', () => {
     expect(bundle?.citations).toEqual([])
     expect(bundle?.revisions).toHaveLength(2)
     expect(bundle?.revisions.every((revision) => revision.patch.sourceSchemaVersion === 1)).toBe(true)
+  })
+
+  it('migrates a stored project without a derived record while keeping recovery points and bindings', async () => {
+    const legacy = withVaultSync(smallProject('legacy-derived', '无派生记录的旧项目'))
+    await saveProject(legacy)
+    await createProjectBackup(legacy)
+    const handle = { kind: 'directory', name: 'Main vault' }
+    await saveVaultBinding('legacy-derived', 'vault-main', handle)
+    // Rewrite the stored record the way a v10 database holds it: no derived
+    // record at all. Going through saveProject would add one back.
+    const database = await getDatabase()
+    const stored = await database.get('projects', 'legacy-derived')
+    const { derived: _derived, ...withoutDerived } = stored!
+    await database.put('projects', withoutDerived as TerrainProject)
+
+    const reloaded = await getProject('legacy-derived')
+
+    expect(reloaded?.derived?.versionTuple).toEqual(projectVersionTuple(reloaded!))
+    // No recorded bandwidth means the stored terrain is a cache, not something
+    // this migration can claim to reproduce.
+    expect(reloaded?.derived?.terrain).toBeNull()
+    expect(reloaded?.vaultSync).toEqual(legacy.vaultSync)
+    expect(reloaded?.notes).toHaveLength(2)
+    expect(await getVaultBinding('legacy-derived', 'vault-main')).toEqual(handle)
+    const [backup] = await listProjectBackups('legacy-derived')
+    const restored = await restoreProjectBackup(backup.id)
+    expect(restored?.notes).toHaveLength(2)
+    expect(restored?.derived?.terrain).toEqual(legacy.derived?.terrain)
+  })
+
+  it('keeps the derived record when a project with terrain parameters is saved and reloaded', async () => {
+    const project = smallProject('derived-roundtrip', '派生记录往返')
+
+    await saveProject(project)
+
+    const stored = await getProject('derived-roundtrip')
+    expect(stored?.derived?.terrain).toEqual(repositoryDemoFixture.derived?.terrain)
+    expect(stored?.derived?.versionTuple).toEqual(projectVersionTuple(stored!))
+    expect((await getProjectObjectBundle('derived-roundtrip'))?.workspace.derived?.terrain)
+      .toEqual(repositoryDemoFixture.derived?.terrain)
   })
 
   it('preserves review timestamps when migrating a legacy note into cognitive state and materialization', async () => {
