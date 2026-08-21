@@ -20,7 +20,8 @@
     "size:check": "node scripts/size-budget.mjs",
     "test:perf:update": "UPDATE_BASELINES=1 playwright test -c playwright.visual.config.ts",
     "migrate:local-notes": "node scripts/migrate-local-notes.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && npx --yes wrangler@4.125.0 deploy"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

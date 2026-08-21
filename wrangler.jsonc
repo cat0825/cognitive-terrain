@@ -1,0 +1,15 @@
+{
+  // 纯静态 SPA 部署到 Cloudflare Workers Assets：没有 Worker 脚本，没有后端。
+  // 部署命令见 package.json 的 deploy 脚本（wrangler 版本在那里固定，因此这里
+  // 不引用 node_modules 下的 $schema）。
+  "name": "cognitive-terrain",
+  "compatibility_date": "2026-08-21",
+  "assets": {
+    // 所有路由回落 index.html，客户端状态（选中笔记、当前维度）在刷新后仍可恢复。
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

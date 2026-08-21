@@ -194,6 +194,17 @@ docs/adr/       架构决策记录
 
 技术栈：React 19、TypeScript、Vite、React Three Fiber、Zustand、`@huggingface/transformers`、umap-js、idb、Vitest、Playwright、oxlint。
 
+## 部署
+
+线上：<https://cognitive-terrain.eriri-blog.workers.dev>
+
+```bash
+npm run deploy       # 先构建，再用 wrangler 把 dist/ 发到 Cloudflare Workers Assets
+```
+
+配置在 [`wrangler.jsonc`](wrangler.jsonc)：纯静态资产，没有 Worker 脚本与后端，所有路由回落 `index.html`。
+部署需要本机已登录 `wrangler login`（或设置 `CLOUDFLARE_API_TOKEN`）。
+
 ## 隐私与限制
 
 - 笔记与生成的项目保存在当前浏览器的 IndexedDB 中，不上传到应用服务器。
