@@ -82,6 +82,28 @@ test('imports a JSON study pack and generates terrain', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'DeepSeek Harness 内测：用代表作说话' })).toBeVisible()
 })
 
+test('preflights imports and blocks duplicate IDs before analysis', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开项目菜单' }).click()
+  await page.getByRole('button', { name: '导入笔记' }).click()
+  await page.locator('.drop-zone input[type="file"]').setInputFiles({
+    name: 'duplicates.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify([
+      { id: 'duplicate', title: 'First', content: 'one', createdAt: '2026-01-01' },
+      { id: 'duplicate', title: 'Second', content: 'two', createdAt: '2026-01-02' },
+    ])),
+  })
+
+  const preflight = page.getByRole('region', { name: '导入预检' })
+  await expect(preflight).toContainText('2 条记录')
+  await expect(preflight).toContainText('重复笔记 ID「duplicate」出现 2 次')
+  await expect(page.getByRole('button', { name: '生成地形' })).toBeDisabled()
+  await page.getByRole('button', { name: '按上限整理' }).click()
+  await expect(page.getByRole('button', { name: '生成地形' })).toBeEnabled()
+  await expect(preflight).toContainText('移除 1 条记录、1 个重复 ID')
+})
+
 test('creates and restores a local recovery point', async ({ page }) => {
   test.setTimeout(process.env.CI ? 120_000 : 45_000)
   await page.addInitScript(() => {

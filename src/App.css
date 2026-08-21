@@ -3093,6 +3093,121 @@
   border-color: #6f6f6c;
 }
 
+.import-preflight {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 10px;
+  border: 1px solid #34342f;
+  border-radius: 4px;
+  color: #92928d;
+  background: #171716;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.import-preflight-heading,
+.import-preflight-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+}
+
+.import-preflight-heading {
+  justify-content: space-between;
+  color: #bdbdb5;
+}
+
+.import-preflight-heading strong {
+  color: #d5d5cd;
+  font-size: 10px;
+}
+
+.import-preflight-grid span {
+  color: #777772;
+}
+
+.import-preflight-grid b {
+  color: #c7c7bf;
+  font-weight: 500;
+}
+
+.import-preflight-blocking {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #5a3f35;
+  border-radius: 3px;
+  color: #d0a398;
+  background: #211a18;
+}
+
+.import-preflight-blocking svg {
+  margin-top: 2px;
+  color: #d68f70;
+}
+
+.import-preflight-blocking strong {
+  color: #e1b4a7;
+}
+
+.import-preflight-blocking p,
+.import-preflight-warning,
+.import-preflight-trimmed {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.import-preflight-warning {
+  color: #c5ad74;
+}
+
+.import-preflight-trimmed {
+  color: #9ab18a;
+}
+
+.import-selection-error {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid #5a3f35;
+  border-radius: 3px;
+  color: #d0a398;
+  background: #211a18;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.import-selection-error svg {
+  margin-top: 2px;
+  color: #d68f70;
+}
+
+.import-selection-error strong {
+  color: #e1b4a7;
+}
+
+.import-selection-error p {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.import-reading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  color: #aaa99f;
+  font-size: 9px;
+}
+
 .small-data-hint {
   position: absolute;
   z-index: 80;

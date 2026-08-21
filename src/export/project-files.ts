@@ -431,8 +431,8 @@ export interface ParsedProjectBundle {
   futureActivityWarnings: FutureActivityImportWarning[]
 }
 
-export async function parseProjectBundle(file: File): Promise<TerrainProject> {
-  return (await parseProjectBundleWithWarnings(file)).project
+export async function parseProjectBundle(file: File, signal?: AbortSignal): Promise<TerrainProject> {
+  return (await parseProjectBundleWithWarnings(file, signal)).project
 }
 
 /**
@@ -442,8 +442,10 @@ export async function parseProjectBundle(file: File): Promise<TerrainProject> {
  * a single bad timestamp should not cost the user their entire project, so the
  * rest of the import proceeds and the drops surface as warnings.
  */
-export async function parseProjectBundleWithWarnings(file: File): Promise<ParsedProjectBundle> {
+export async function parseProjectBundleWithWarnings(file: File, signal?: AbortSignal): Promise<ParsedProjectBundle> {
+  throwIfAborted(signal)
   const value: unknown = JSON.parse(await file.text())
+  throwIfAborted(signal)
   const parsed = projectBundleSchema.parse(value)
   const serialized = {
     ...parsed,
@@ -477,6 +479,10 @@ export async function parseProjectBundleWithWarnings(file: File): Promise<Parsed
     })),
   ]
   return { project, futureActivityWarnings }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('导入已取消', 'AbortError')
 }
 
 export async function exportTerrainPng(
