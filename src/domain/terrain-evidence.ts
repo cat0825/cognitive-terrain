@@ -1,6 +1,7 @@
 import { calculateActivityElevation } from './activity-elevation'
+import { ACTIVITY_TEMPERATURE_FORMULA_VERSION } from './activity-temperature'
 import { calculateProjectLearningProgression } from './learning-progression'
-import { areasForNote, normalizeArea, type PlateCollision } from './knowledge-plates'
+import { AREA_COLOR_FORMULA_VERSION, areasForNote, normalizeArea, type PlateCollision } from './knowledge-plates'
 import { buildPrerequisiteTopology } from './prerequisite-topology'
 import {
   REFERENCE_GAP_FORMULA_VERSION,
@@ -30,6 +31,10 @@ export const PLATE_FORMULA_VERSION = 'declared-taxonomy-plate-v1' as const
 export const COLLISION_EVIDENCE_FORMULA_VERSION = 'wikilink-collision-v1' as const
 export const COLLISION_DIRECTION_FORMULA_VERSION = 'wikilink-direction-v1' as const
 export const COLLISION_STRENGTH_FORMULA_VERSION = 'collision-strength-log2-v1' as const
+export const DENSITY_SHADING_FORMULA_VERSION = 'density-height-shading-v1' as const
+export const SOURCE_KIND_COLOR_FORMULA_VERSION = 'source-kind-color-v1' as const
+export const TRUST_COLOR_FORMULA_VERSION = 'trust-color-v1' as const
+export const OVERLAY_NONE_FORMULA_VERSION = 'overlay-none-v1' as const
 
 export type TerrainSemanticKind =
   | 'planar-position'
@@ -267,7 +272,7 @@ export function buildTerrainSemanticsLegend(
       '颜色与海拔分开编码；颜色相同不表示 embedding 相同或存在 WikiLink。', color.timeSensitive
         ? evaluatedAt ?? normalizeTimestamp(project.updatedAt)
         : evaluatedAt),
-    legendEntry('overlay', '叠加层', usableAtlas ? REFERENCE_GAP_FORMULA_VERSION : 'overlay-none-v1', usableAtlas ? ['reference-atlas', 'declared-taxonomy'] : [], usableAtlas ? [usableAtlas.id] : [], Boolean(usableAtlas),
+    legendEntry('overlay', '叠加层', usableAtlas ? REFERENCE_GAP_FORMULA_VERSION : OVERLAY_NONE_FORMULA_VERSION, usableAtlas ? ['reference-atlas', 'declared-taxonomy'] : [], usableAtlas ? [usableAtlas.id] : [], Boolean(usableAtlas),
       usableAtlas ? `当前叠加层显示相对「${usableAtlas.label}」的参考图谱缺口。` : '当前没有启用独立叠加层。',
       '叠加层不改变原始笔记、平面位置或显式关系。', usableAtlas ? evaluatedAt ?? normalizeTimestamp(project.updatedAt) : evaluatedAt),
     legendEntry('plate', '知识板块', PLATE_FORMULA_VERSION, ['declared-taxonomy'], [], true,
@@ -603,7 +608,7 @@ function effectiveColorEncoding(
 } {
   if (dimension === 'temperature') {
     return {
-      formulaVersion: 'activity-temperature-v1',
+      formulaVersion: ACTIVITY_TEMPERATURE_FORMULA_VERSION,
       provenance: ['raw-event', 'retained-aggregate'],
       definition: '颜色表示近期打开、编辑与复习事件的衰减热度；海拔保持知识密度。',
       timeSensitive: true,
@@ -611,7 +616,7 @@ function effectiveColorEncoding(
   }
   if (dimension === 'density') {
     return {
-      formulaVersion: 'density-height-shading-v1',
+      formulaVersion: DENSITY_SHADING_FORMULA_VERSION,
       provenance: ['kernel-density', 'stored-terrain-output'],
       definition: '颜色是中性的高度明暗，仅辅助读取知识密度地形。',
       timeSensitive: false,
@@ -619,7 +624,7 @@ function effectiveColorEncoding(
   }
   if (dimension === 'mastery' || dimension === 'exploration' || dimension === 'activity' || dimension === 'progression' || dimension === 'structure' || dimension === 'area') {
     return {
-      formulaVersion: 'declared-taxonomy-area-color-v1',
+      formulaVersion: AREA_COLOR_FORMULA_VERSION,
       provenance: ['declared-taxonomy'],
       definition: '颜色表示用户声明并解析到版本化 taxonomy 的领域归属。',
       timeSensitive: false,
@@ -627,7 +632,7 @@ function effectiveColorEncoding(
   }
   if (profile.color === 'source-kind') {
     return {
-      formulaVersion: 'source-kind-color-v1',
+      formulaVersion: SOURCE_KIND_COLOR_FORMULA_VERSION,
       provenance: ['source-metadata'],
       definition: '颜色表示来源类型。',
       timeSensitive: false,
@@ -635,14 +640,14 @@ function effectiveColorEncoding(
   }
   if (profile.color === 'trust') {
     return {
-      formulaVersion: 'trust-color-v1',
+      formulaVersion: TRUST_COLOR_FORMULA_VERSION,
       provenance: ['terrain-profile'],
       definition: '颜色表示当前 terrain profile 的 trust 通道。',
       timeSensitive: false,
     }
   }
   return {
-    formulaVersion: 'declared-taxonomy-area-color-v1',
+    formulaVersion: AREA_COLOR_FORMULA_VERSION,
     provenance: ['declared-taxonomy'],
     definition: '颜色表示用户声明并解析到版本化 taxonomy 的领域归属。',
     timeSensitive: false,

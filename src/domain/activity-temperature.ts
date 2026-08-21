@@ -13,6 +13,14 @@ export interface NoteActivitySummary {
   lastActivityAt?: string
 }
 
+/**
+ * Formula behind the temperature colour channel.
+ *
+ * Owned here rather than inlined in the evidence layer so the visual contract
+ * and the legend cannot drift apart: both read this constant.
+ */
+export const ACTIVITY_TEMPERATURE_FORMULA_VERSION = 'activity-temperature-v1' as const
+
 export const ACTIVITY_MODEL = {
   opened: { weight: 1, halfLifeDays: 7 },
   edited: { weight: 3, halfLifeDays: 30 },

@@ -1,5 +1,14 @@
 import type { TerrainNote } from './types'
 
+/**
+ * Formula behind the area colour channel.
+ *
+ * Colour carries declared taxonomy membership and nothing else. Keeping the
+ * version next to `plateColor` means a palette or resolution change has to bump
+ * a version the visual contract already asserts on.
+ */
+export const AREA_COLOR_FORMULA_VERSION = 'declared-taxonomy-area-color-v1' as const
+
 export interface KnowledgePlate {
   id: string
   label: string
