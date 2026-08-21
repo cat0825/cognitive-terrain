@@ -4,6 +4,7 @@ import { areasForNote, normalizeArea, type PlateCollision } from './knowledge-pl
 import { buildPrerequisiteTopology } from './prerequisite-topology'
 import {
   REFERENCE_GAP_FORMULA_VERSION,
+  isReferenceAtlasUsable,
   type ReferenceGapReport,
 } from './reference-gaps'
 import type {
@@ -221,7 +222,7 @@ export interface CollisionEvidence extends TerrainEvidenceEnvelope<'collision'> 
 
 export interface GapEvidence extends TerrainEvidenceEnvelope<'gap'> {
   enabled: boolean
-  reason?: 'no-reference-atlas' | 'unknown-reference-node'
+  reason?: 'no-reference-atlas' | 'unknown-reference-node' | 'atlas-rebind-required'
   referenceAtlasId?: string
   node?: {
     id: string
@@ -249,6 +250,7 @@ export function buildTerrainSemanticsLegend(
   )
   const color = effectiveColorEncoding(options.visualDimension, profile)
   const activeAtlas = project.referenceAtlases?.find((atlas) => atlas.id === project.activeReferenceAtlasId)
+  const usableAtlas = isReferenceAtlasUsable(project, activeAtlas) ? activeAtlas : undefined
   const positionProvenance = embeddingProvenance(project.embeddingMode)
   const entries: TerrainLegendEntry[] = [
     legendEntry('planar-position', '平面位置', PLANAR_POSITION_FORMULA_VERSION, positionProvenance, [], true,
@@ -265,18 +267,18 @@ export function buildTerrainSemanticsLegend(
       '颜色与海拔分开编码；颜色相同不表示 embedding 相同或存在 WikiLink。', color.timeSensitive
         ? evaluatedAt ?? normalizeTimestamp(project.updatedAt)
         : evaluatedAt),
-    legendEntry('overlay', '叠加层', activeAtlas ? REFERENCE_GAP_FORMULA_VERSION : 'overlay-none-v1', activeAtlas ? ['reference-atlas', 'declared-taxonomy'] : [], activeAtlas ? [activeAtlas.id] : [], Boolean(activeAtlas),
-      activeAtlas ? `当前叠加层显示相对「${activeAtlas.label}」的参考图谱缺口。` : '当前没有启用独立叠加层。',
-      '叠加层不改变原始笔记、平面位置或显式关系。', activeAtlas ? evaluatedAt ?? normalizeTimestamp(project.updatedAt) : evaluatedAt),
+    legendEntry('overlay', '叠加层', usableAtlas ? REFERENCE_GAP_FORMULA_VERSION : 'overlay-none-v1', usableAtlas ? ['reference-atlas', 'declared-taxonomy'] : [], usableAtlas ? [usableAtlas.id] : [], Boolean(usableAtlas),
+      usableAtlas ? `当前叠加层显示相对「${usableAtlas.label}」的参考图谱缺口。` : '当前没有启用独立叠加层。',
+      '叠加层不改变原始笔记、平面位置或显式关系。', usableAtlas ? evaluatedAt ?? normalizeTimestamp(project.updatedAt) : evaluatedAt),
     legendEntry('plate', '知识板块', PLATE_FORMULA_VERSION, ['declared-taxonomy'], [], true,
       '板块来自笔记显式声明的 area/areas 与版本化 taxonomy 映射。',
       '板块不是由 embedding 聚类自动推断的学科真相。', evaluatedAt),
     legendEntry('collision', '板块碰撞', COLLISION_EVIDENCE_FORMULA_VERSION, ['declared-taxonomy', 'explicit-wikilink'], [], true,
       '碰撞仅由跨板块、可解析的显式 WikiLink 聚合；方向来自链接方向计数。',
       '空间接近、共享标签或 embedding 相似度不能单独生成碰撞。', evaluatedAt),
-    legendEntry('gap', '海洋 / 缺口', REFERENCE_GAP_FORMULA_VERSION, activeAtlas ? ['reference-atlas', 'declared-taxonomy'] : [], activeAtlas ? [activeAtlas.id] : [], Boolean(activeAtlas),
-      activeAtlas ? `仅表示当前项目相对所选参考图谱「${activeAtlas.label}」的覆盖差距。` : '未选择有效参考图谱，缺口语义禁用。',
-      '缺口不是用户能力、无知程度或低活动的判断。', evaluatedAt ?? (activeAtlas ? normalizeTimestamp(project.updatedAt) : undefined)),
+    legendEntry('gap', '海洋 / 缺口', REFERENCE_GAP_FORMULA_VERSION, usableAtlas ? ['reference-atlas', 'declared-taxonomy'] : [], usableAtlas ? [usableAtlas.id] : [], Boolean(usableAtlas),
+      usableAtlas ? `仅表示当前项目相对所选参考图谱「${usableAtlas.label}」的覆盖差距。` : '未选择有效参考图谱，缺口语义禁用。',
+      '缺口不是用户能力、无知程度或低活动的判断。', evaluatedAt ?? (usableAtlas ? normalizeTimestamp(project.updatedAt) : undefined)),
   ]
   return {
     schemaVersion: TERRAIN_EVIDENCE_SCHEMA_VERSION,
@@ -490,7 +492,8 @@ export function buildGapEvidence(
       provenance: [],
       supportingIds: [],
       enabled: false,
-      reason: 'no-reference-atlas',
+      reason: report.reason ?? 'no-reference-atlas',
+      referenceAtlasId: report.referenceAtlasId,
     }
   }
   if (!gap) {

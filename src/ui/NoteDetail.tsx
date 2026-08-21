@@ -144,7 +144,11 @@ function GapContent({ project, report, nodeId }: { project: TerrainProject; repo
   const selectNote = useAppStore((state) => state.selectNote)
   const evidence = buildGapEvidence(report, nodeId)
   if (!evidence.enabled || !evidence.node) {
-    return <p role="status">{evidence.reason === 'no-reference-atlas' ? '未选择参考图谱。' : '参考图谱节点不存在。'}</p>
+    return <p role="status">{evidence.reason === 'no-reference-atlas'
+      ? '未选择参考图谱。'
+      : evidence.reason === 'atlas-rebind-required'
+        ? '参考图谱已失效，请先按当前领域重新绑定。'
+        : '参考图谱节点不存在。'}</p>
   }
   return (
     <Suspense fallback={<p role="status">正在加载缺口证据</p>}>
@@ -541,6 +545,7 @@ function NoteContent({ note, onWriteback }: { note: TerrainNote; onWriteback: (c
 
 function ProjectOverview({ project, visibleCount }: { project: TerrainProject; visibleCount: number }) {
   const setReferenceAtlas = useAppStore((state) => state.setReferenceAtlas)
+  const rebindReferenceAtlas = useAppStore((state) => state.rebindReferenceAtlas)
   const selectNote = useAppStore((state) => state.selectNote)
   const transitionExploration = useAppStore((state) => state.transitionExploration)
   const editExploration = useAppStore((state) => state.editExploration)
@@ -607,7 +612,11 @@ function ProjectOverview({ project, visibleCount }: { project: TerrainProject; v
         )}
       </div>
       <Suspense fallback={<div className="reference-gap-empty" role="status">正在加载参考图谱缺口</div>}>
-        <ReferenceGapSection project={project} onSelectAtlas={(id) => void setReferenceAtlas(id || undefined)} />
+        <ReferenceGapSection
+          project={project}
+          onSelectAtlas={(id) => void setReferenceAtlas(id || undefined)}
+          onRebindAtlas={(id) => void rebindReferenceAtlas(id)}
+        />
       </Suspense>
       <Suspense fallback={<section className="exploration-workbench" aria-label="探索工作台" aria-busy="true"><p className="exploration-empty" role="status">正在加载探索工作台</p></section>}>
         <ExplorationWorkbench

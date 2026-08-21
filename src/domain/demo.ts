@@ -336,6 +336,7 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
     id,
     workspaceId: 'demo-ai-infra-terrain',
     label,
+    parentId: undefined,
     aliases: [],
     version: DEMO_TAXONOMY_VERSION,
     status: 'active' as const,
@@ -379,6 +380,9 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
       label: 'AI Infra 核心能力参考图谱',
       taxonomyVersion: DEMO_TAXONOMY_VERSION,
       taxonomyNodeIds: demoReferenceAtlasLabels.map(([id]) => id),
+      taxonomySnapshot: taxonomyNodes
+        .filter((node) => demoReferenceAtlasLabels.some(([id]) => id === node.id))
+        .map((node) => ({ id: node.id, label: node.label, parentId: node.parentId, aliases: [...node.aliases] })),
       createdAt: timestamp,
       updatedAt: timestamp,
     }],

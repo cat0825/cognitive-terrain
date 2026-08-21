@@ -21,7 +21,7 @@
 - Obsidian vault 支持本地增量同步：重新选择同一目录后预览新增、修改、重命名、移除和字段冲突；确认前创建恢复点，未变化文件不会重新解析。写回认知字段或逐条接受的 WikiLink 时会单独请求目录读写权限并展示 exact diff，不上传文件或静默修改 Markdown。
 - 导入/导出 `.terrain.json` 完整项目包，导出当前地图为 PNG，导出 Markdown 复盘报告。
 - 项目自动保存到 IndexedDB，支持增量合并新笔记；覆盖、改名、删除和恢复前会自动创建本地恢复点，每个项目最多保留 8 份。
-- IndexedDB v10 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、探索生命周期、前置关系拓扑、布局、原始 embedding 邻居证据、revision 与 vault writeback recovery；不同项目通过复合键隔离。目录句柄保存在独立 binding store，不进入项目导出或恢复点。reference atlas 必须显式绑定 taxonomy version，不会把模型聚类自动声明为权威学科。
+- IndexedDB v10 同时保存 workspace、item、source、relation、认知状态、taxonomy node、reference-atlas manifest、探索生命周期、前置关系拓扑、布局、原始 embedding 邻居证据、revision 与 vault writeback recovery；不同项目通过复合键隔离。目录句柄保存在独立 binding store，不进入项目导出或恢复点。reference atlas 显式绑定 taxonomy version 与不可变节点快照；旧 atlas 在 taxonomy 变化后必须由用户重新绑定，不会被当前层级静默改写，也不会把模型聚类自动声明为权威学科。
 - 海洋/知识缺口（`reference-gap-v1`）只表示当前项目相对显式选中的 active reference atlas 的 taxonomy 覆盖差距。未选择有效 atlas 时该计算为 disabled，不输出用户知识或技能缺口声明；低活动不等于缺口。
 - 探索工作台把所选参考缺口、陈旧复习、未解析双链、未评估/低置信度笔记和用户明确标记的 `gap` 目标转换为最多 8 条确定性建议；当前工作集最多 3 项。每条建议保留 reason code、支持项、参考边界、来源回跳、下一步动作与本地生命周期历史，活动分数不会单独触发建议。
 - 活动历史按 retention policy v1 有界保存：打开/编辑/复习原始事件分别保留 30/180/365 天，每条笔记每类最多 500 条；180 天内可按日查看，最长 730 天按周聚合。项目 `timeZone` 决定日历边界，非法时间戳会被忽略。聚合保留每类事件的计数、首末时间和衰减热度；笔记自身的 `reviewedAt` 不参与裁剪，因此迁移不会丢失最近复习时间。超过 730 天的活动不再出现在历史或温度计算中，也不承诺作为审计档案。

@@ -89,7 +89,9 @@ function App() {
     () => buildProjectReferenceGapReport(project, project.activeReferenceAtlasId ?? '', gapEvaluatedAt),
     [gapEvaluatedAt, project],
   )
-  const activeReferenceAtlas = project.referenceAtlases?.find((atlas) => atlas.id === referenceGapReport.referenceAtlasId)
+  const activeReferenceAtlas = referenceGapReport.enabled
+    ? project.referenceAtlases?.find((atlas) => atlas.id === referenceGapReport.referenceAtlasId)
+    : undefined
 
   useEffect(() => {
     if (!lastAnalysis) return

@@ -392,6 +392,12 @@ const projectBundleSchema = z.object({
     label: z.string(),
     taxonomyVersion: z.number().int().nonnegative(),
     taxonomyNodeIds: z.array(z.string()),
+    taxonomySnapshot: z.array(z.object({
+      id: z.string(),
+      label: z.string(),
+      parentId: z.string().optional(),
+      aliases: z.array(z.string()),
+    })).optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })).optional(),

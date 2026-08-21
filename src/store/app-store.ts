@@ -32,6 +32,7 @@ import {
   resolveTaxonomyAlias,
   validateTaxonomy,
 } from '../domain/taxonomy'
+import { bindReferenceAtlasToTaxonomy } from '../domain/reference-gaps'
 import { migrateTerrainProjectToV3 } from '../domain/schema-v3'
 import type { VaultSyncPreview, VaultSyncResolution } from '../domain/vault-sync'
 import { TODAY_STUDY_PACK_NAME, todayStudyPack } from '../domain/study-pack'
@@ -109,6 +110,7 @@ interface AppState {
   setQuality: (quality: QualityLevel) => void
   setVisualDimension: (dimension: VisualDimension) => void
   setReferenceAtlas: (id: string | undefined) => Promise<void>
+  rebindReferenceAtlas: (id: string) => Promise<void>
   setTimeline: (timeline: number) => void
   setImportOpen: (open: boolean) => void
   setFiltersOpen: (open: boolean) => void
@@ -326,6 +328,28 @@ export const useAppStore = create<AppState>((set, get) => {
       else localStorage.setItem(preferenceKey, previousPreference)
       set({ error: `参考图谱选择保存失败：${error instanceof Error ? error.message : String(error)}` })
     }
+  },
+  rebindReferenceAtlas: async (id) => {
+    const current = get().project
+    const manifest = current.referenceAtlases?.find((atlas) => atlas.id === id)
+    if (!manifest) {
+      set({ error: `参考图谱不存在：${id}` })
+      return
+    }
+    const taxonomyNodes = current.taxonomyNodes ?? []
+    const taxonomyVersion = Math.max(
+      current.taxonomyVersion ?? 0,
+      taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
+    )
+    const now = taxonomyMutationTimestamp(current)
+    const rebound = bindReferenceAtlasToTaxonomy(manifest, taxonomyNodes, taxonomyVersion, now)
+    const project = {
+      ...current,
+      updatedAt: now,
+      referenceAtlases: (current.referenceAtlases ?? []).map((atlas) => atlas.id === id ? rebound : atlas),
+      activeReferenceAtlasId: id,
+    }
+    await persistTaxonomyProject(project, set, get)
   },
   setTimeline: (timeline) => {
     liveTimeline = timeline

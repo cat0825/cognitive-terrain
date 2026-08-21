@@ -23,8 +23,17 @@ export interface ReferenceAtlasManifest {
   label: string
   taxonomyVersion: number
   taxonomyNodeIds: string[]
+  /** Immutable taxonomy semantics captured when the atlas is explicitly bound. */
+  taxonomySnapshot?: ReferenceAtlasNodeSnapshot[]
   createdAt: string
   updatedAt: string
+}
+
+export interface ReferenceAtlasNodeSnapshot {
+  id: string
+  label: string
+  parentId?: string
+  aliases: string[]
 }
 
 export type ExplorationReasonCode =

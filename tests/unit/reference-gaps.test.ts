@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   REFERENCE_GAP_FORMULA_VERSION,
+  bindReferenceAtlasToTaxonomy,
   buildProjectReferenceGapReport,
   buildReferenceGapReport,
 } from '../../src/domain/reference-gaps'
+import { mergeTaxonomyNodes, reparentTaxonomyNode, renameTaxonomyNode } from '../../src/domain/taxonomy'
 import type { TerrainProject } from '../../src/domain/types'
 
 const evaluatedAt = '2026-08-15T00:00:00.000Z'
@@ -59,6 +61,63 @@ describe('reference-relative gaps', () => {
         lastSupportingAt: '2026-08-14T12:00:00.000Z',
       }),
     ])
+  })
+
+  it('keeps snapshot labels and hierarchy stable after rename, reparent, and merge', () => {
+    const project = projectFixture()
+    const manifest = project.referenceAtlases![0]
+    const root = {
+      id: 'root', workspaceId: project.id, label: 'Root', aliases: ['Foundation'], version: 1,
+      status: 'active' as const, createdAt: project.createdAt, updatedAt: project.updatedAt,
+    }
+    const ml = project.taxonomyNodes![0]
+    project.taxonomyNodes = [root, { ...ml, parentId: root.id }]
+    project.taxonomyVersion = 1
+    manifest.taxonomyNodeIds = [root.id, ml.id]
+    project.referenceAtlases = [bindReferenceAtlasToTaxonomy(manifest, project.taxonomyNodes, 1, project.updatedAt)]
+    const before = buildProjectReferenceGapReport(project, manifest.id, evaluatedAt)
+
+    const reparanted = reparentTaxonomyNode(project.taxonomyNodes, ml.id, undefined, [], '2026-08-15T01:00:00.000Z').nodes
+    const renamed = renameTaxonomyNode(reparanted, root.id, 'Renamed root', [], '2026-08-15T02:00:00.000Z').nodes
+    const merged = mergeTaxonomyNodes(renamed, ml.id, root.id, [], '2026-08-15T03:00:00.000Z').nodes
+    project.taxonomyVersion = 4
+    project.taxonomyNodes = merged
+    const after = buildProjectReferenceGapReport(project, manifest.id, evaluatedAt)
+
+    expect(after).toEqual(before)
+    expect(after.gaps.find((gap) => gap.nodeId === root.id)).toMatchObject({
+      label: 'Root',
+      expectedNodeIds: ['root', 'ml'],
+    })
+  })
+
+  it('disables a legacy atlas after taxonomy changes and enables an explicit rebind', () => {
+    const project = projectFixture()
+    project.taxonomyVersion = 2
+    project.taxonomyNodes = project.taxonomyNodes!.map((node) => ({
+      ...node,
+      label: 'Machine Learning v2',
+      aliases: ['ML v2'],
+      version: 2,
+    }))
+
+    const invalid = buildProjectReferenceGapReport(project, 'atlas-ai', evaluatedAt)
+    expect(invalid).toMatchObject({
+      enabled: false,
+      reason: 'atlas-rebind-required',
+      referenceTaxonomyVersion: 1,
+      currentTaxonomyVersion: 2,
+    })
+
+    project.referenceAtlases = [bindReferenceAtlasToTaxonomy(
+      project.referenceAtlases![0],
+      project.taxonomyNodes,
+      2,
+      project.updatedAt,
+    )]
+    const rebound = buildProjectReferenceGapReport(project, 'atlas-ai', evaluatedAt)
+    expect(rebound.enabled).toBe(true)
+    expect(rebound.gaps[0]).toMatchObject({ label: 'Machine Learning v2' })
   })
 })
 
