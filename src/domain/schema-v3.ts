@@ -618,10 +618,21 @@ function referenceAtlasesForProject(
       throw new Error(`reference atlas ${manifest.id} has invalid taxonomy version: ${manifest.taxonomyVersion}`)
     }
     const uniqueNodeIds = [...new Set(manifest.taxonomyNodeIds)]
-    for (const nodeId of uniqueNodeIds) {
-      if (!nodeIds.has(nodeId)) throw new Error(`reference atlas ${manifest.id} references missing taxonomy node: ${nodeId}`)
+    const taxonomySnapshot = manifest.taxonomySnapshot?.map((node) => ({ ...node, aliases: [...node.aliases] }))
+    if (taxonomySnapshot) {
+      const snapshotIds = taxonomySnapshot.map((node) => node.id)
+      if (new Set(snapshotIds).size !== snapshotIds.length
+        || snapshotIds.length !== uniqueNodeIds.length
+        || snapshotIds.some((id) => !uniqueNodeIds.includes(id))
+        || taxonomySnapshot.some((node) => !node.label.normalize('NFKC').trim())) {
+        throw new Error(`reference atlas ${manifest.id} has an invalid taxonomy snapshot`)
+      }
+    } else {
+      for (const nodeId of uniqueNodeIds) {
+        if (!nodeIds.has(nodeId)) throw new Error(`reference atlas ${manifest.id} references missing taxonomy node: ${nodeId}`)
+      }
     }
-    return { ...manifest, taxonomyNodeIds: uniqueNodeIds }
+    return { ...manifest, taxonomyNodeIds: uniqueNodeIds, taxonomySnapshot }
   })
 }
 

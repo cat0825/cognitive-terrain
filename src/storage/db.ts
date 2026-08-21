@@ -413,6 +413,7 @@ export function migrateProject(
   const referenceAtlases = (project.referenceAtlases ?? []).map((manifest) => ({
     ...manifest,
     taxonomyNodeIds: [...manifest.taxonomyNodeIds],
+    taxonomySnapshot: manifest.taxonomySnapshot?.map((node) => ({ ...node, aliases: [...node.aliases] })),
   }))
   const activeReferenceAtlasId = normalizeActiveReferenceAtlasId(
     referenceAtlases,

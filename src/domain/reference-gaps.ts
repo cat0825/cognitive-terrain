@@ -1,4 +1,4 @@
-import type { TerrainProject } from './types'
+import type { ReferenceAtlasManifest, ReferenceAtlasNodeSnapshot, TaxonomyNode, TerrainProject } from './types'
 import { isFutureActivityTimestamp } from './future-activity'
 
 export const REFERENCE_GAP_FORMULA_VERSION = 'reference-gap-v1' as const
@@ -9,8 +9,11 @@ export interface ReferenceAtlasNode {
   id: string
   label: string
   parentId?: string
+  aliases?: string[]
   weight?: number
 }
+
+export type ReferenceAtlasInvalidReason = 'atlas-rebind-required'
 
 export interface ReferenceAtlas {
   id: string
@@ -51,8 +54,47 @@ export interface ReferenceGapReport {
   formulaVersion: typeof REFERENCE_GAP_FORMULA_VERSION
   evaluatedAt: string
   referenceAtlasId?: string
-  reason?: 'no-reference-atlas'
+  reason?: 'no-reference-atlas' | ReferenceAtlasInvalidReason
+  referenceTaxonomyVersion?: number
+  currentTaxonomyVersion?: number
   gaps: ReferenceGapEvidence[]
+}
+
+export function hasReferenceAtlasSnapshot(manifest: ReferenceAtlasManifest | undefined): boolean {
+  if (!manifest?.taxonomySnapshot) return false
+  const expectedIds = [...new Set(manifest.taxonomyNodeIds)].sort()
+  const snapshotIds = manifest.taxonomySnapshot.map((node) => node.id).sort()
+  return snapshotIds.length === expectedIds.length
+    && snapshotIds.every((id, index) => id === expectedIds[index])
+}
+
+export function isReferenceAtlasUsable(
+  project: TerrainProject,
+  manifest: ReferenceAtlasManifest | undefined,
+): boolean {
+  if (!manifest) return false
+  if (hasReferenceAtlasSnapshot(manifest)) return true
+  const currentVersion = Math.max(
+    project.taxonomyVersion ?? 0,
+    (project.taxonomyNodes ?? []).reduce((max, node) => Math.max(max, node.version), 0),
+  )
+  return manifest.taxonomyVersion === currentVersion
+}
+
+/** Explicitly binds an atlas to the current taxonomy; never guesses old data. */
+export function bindReferenceAtlasToTaxonomy(
+  manifest: ReferenceAtlasManifest,
+  taxonomyNodes: readonly TaxonomyNode[],
+  taxonomyVersion: number,
+  updatedAt: string,
+): ReferenceAtlasManifest {
+  const nodesById = new Map(taxonomyNodes.map((node) => [node.id, node]))
+  const taxonomySnapshot: ReferenceAtlasNodeSnapshot[] = manifest.taxonomyNodeIds.map((id) => {
+    const node = nodesById.get(id)
+    if (!node) throw new Error(`reference atlas ${manifest.id} references missing taxonomy node: ${id}`)
+    return { id: node.id, label: node.label, parentId: node.parentId, aliases: [...node.aliases] }
+  })
+  return { ...manifest, taxonomyVersion, taxonomySnapshot, updatedAt }
 }
 
 /**
@@ -127,21 +169,42 @@ export function buildProjectReferenceGapReport(
 ): ReferenceGapReport {
   const manifest = project.referenceAtlases?.find((atlas) => atlas.id === selectedAtlasId)
   const taxonomyNodes = project.taxonomyNodes ?? []
+  const currentVersion = Math.max(
+    project.taxonomyVersion ?? 0,
+    taxonomyNodes.reduce((max, node) => Math.max(max, node.version), 0),
+  )
+  // Legacy v10 manifests have no snapshot. They remain usable only while the
+  // project is still at the exact version they recorded; the first taxonomy
+  // mutation makes the ambiguity visible instead of silently reinterpreting it.
+  if (manifest && !hasReferenceAtlasSnapshot(manifest) && manifest.taxonomyVersion !== currentVersion) {
+    const evaluatedAtMs = parseDate(evaluatedAt)
+    return {
+      enabled: false,
+      formulaVersion: REFERENCE_GAP_FORMULA_VERSION,
+      evaluatedAt: new Date(evaluatedAtMs).toISOString(),
+      referenceAtlasId: manifest.id,
+      reason: 'atlas-rebind-required',
+      referenceTaxonomyVersion: manifest.taxonomyVersion,
+      currentTaxonomyVersion: currentVersion,
+      gaps: [],
+    }
+  }
   const atlas: ReferenceAtlas | undefined = manifest
     ? {
         id: manifest.id,
         label: manifest.label,
         taxonomyVersion: manifest.taxonomyVersion,
-        nodes: manifest.taxonomyNodeIds.map((id) => {
+        nodes: (manifest.taxonomySnapshot ?? manifest.taxonomyNodeIds.map((id) => {
           const node = taxonomyNodes.find((candidate) => candidate.id === id)
-          return { id, label: node?.label ?? id, parentId: node?.parentId }
-        }),
+          return { id, label: node?.label ?? id, parentId: node?.parentId, aliases: node?.aliases ?? [] }
+        })).map((node) => ({ id: node.id, label: node.label, parentId: node.parentId, aliases: node.aliases })),
       }
     : undefined
   const nodeIdsByLabel = new Map<string, string>()
-  for (const node of taxonomyNodes) {
+  const coverageNodes = manifest?.taxonomySnapshot ?? taxonomyNodes
+  for (const node of coverageNodes) {
     nodeIdsByLabel.set(normalizeLabel(node.label), node.id)
-    for (const alias of node.aliases) nodeIdsByLabel.set(normalizeLabel(alias), node.id)
+    for (const alias of node.aliases ?? []) nodeIdsByLabel.set(normalizeLabel(alias), node.id)
   }
   const activityByItem = new Map<string, string>()
   const evaluatedAtMs = parseDate(evaluatedAt)

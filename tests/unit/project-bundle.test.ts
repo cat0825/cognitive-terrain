@@ -6,6 +6,7 @@ import { migrateProject } from '../../src/storage/db'
 import { createTaxonomyNode } from '../../src/domain/taxonomy'
 import { createCognitiveObservation } from '../../src/domain/learning-progression'
 import { buildPrerequisiteTopology, materializePrerequisites } from '../../src/domain/prerequisite-topology'
+import { buildProjectReferenceGapReport } from '../../src/domain/reference-gaps'
 import type { ExplorationLifecycleItem, TerrainProject } from '../../src/domain/types'
 
 describe('project bundle future-dated activity', () => {
@@ -216,6 +217,48 @@ describe('project bundle migration', () => {
     expect(restored.notes[0]?.declaredAreas).toEqual([' 系统 '])
   })
 
+  it('preserves an immutable reference-atlas taxonomy snapshot in project bundles', async () => {
+    const demo = createDemoProject()
+    const source = migrateProject(demo)
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(source)],
+      'atlas-snapshot.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.referenceAtlases?.[0]?.taxonomySnapshot).toEqual(source.referenceAtlases?.[0]?.taxonomySnapshot)
+  })
+
+  it('migrates a legacy atlas without inventing a snapshot and disables it after a taxonomy change', async () => {
+    const demo = createDemoProject()
+    const legacy = {
+      ...demo,
+      taxonomyVersion: 2,
+      taxonomyNodes: (demo.taxonomyNodes ?? []).map((node) => ({ ...node, version: 2 })),
+      referenceAtlases: (demo.referenceAtlases ?? []).map((atlas) => ({
+        ...atlas,
+        taxonomyVersion: 1,
+        taxonomySnapshot: undefined,
+      })),
+      activeReferenceAtlasId: demo.referenceAtlases?.[0]?.id,
+    }
+
+    const restored = await parseProjectBundle(new File(
+      [serializeProjectBundle(legacy)],
+      'legacy-atlas.terrain.json',
+      { type: 'application/json' },
+    ))
+
+    expect(restored.referenceAtlases?.[0]?.taxonomySnapshot).toBeUndefined()
+    expect(restored.referenceAtlases?.[0]?.taxonomyVersion).toBe(1)
+    expect(buildProjectReferenceGapReport(
+      restored,
+      restored.activeReferenceAtlasId ?? '',
+      '2026-08-21T00:00:00.000Z',
+    )).toMatchObject({ enabled: false, reason: 'atlas-rebind-required' })
+  })
+
   it('clears a dangling active reference atlas during materialization and bundle migration', async () => {
     const demo = createDemoProject()
     const root = createTaxonomyNode({
@@ -247,6 +290,7 @@ describe('project bundle migration', () => {
 
     expect(bundle.workspace.activeReferenceAtlasId).toBeUndefined()
     expect(restored.referenceAtlases).toEqual(project.referenceAtlases)
+    expect(restored.referenceAtlases?.[0]?.taxonomySnapshot).toBeUndefined()
     expect(restored.activeReferenceAtlasId).toBeUndefined()
   })
 

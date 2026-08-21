@@ -4,6 +4,7 @@ import type { TerrainProject } from '../../src/domain/types'
 const workerMocks = vi.hoisted(() => ({ runAnalysis: vi.fn() }))
 const repositoryMocks = vi.hoisted(() => ({
   saveProject: vi.fn(),
+  createProjectBackup: vi.fn(),
   listProjectSummaries: vi.fn(),
   listProjectBackups: vi.fn(),
 }))
@@ -12,6 +13,7 @@ vi.mock('../../src/pipeline/worker-client', () => ({ runAnalysis: workerMocks.ru
 vi.mock('../../src/storage/project-repository', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/storage/project-repository')>(),
   saveProject: repositoryMocks.saveProject,
+  createProjectBackup: repositoryMocks.createProjectBackup,
   listProjectSummaries: repositoryMocks.listProjectSummaries,
   listProjectBackups: repositoryMocks.listProjectBackups,
 }))
@@ -28,6 +30,7 @@ beforeAll(async () => {
 beforeEach(() => {
   workerMocks.runAnalysis.mockReset()
   repositoryMocks.saveProject.mockReset().mockResolvedValue(undefined)
+  repositoryMocks.createProjectBackup.mockReset().mockResolvedValue(undefined)
   repositoryMocks.listProjectSummaries.mockReset().mockResolvedValue([])
   repositoryMocks.listProjectBackups.mockReset().mockResolvedValue([])
   localStorage.clear()
@@ -97,6 +100,26 @@ describe('app store reliability', () => {
     expect(useAppStore.getState().isAnalyzing).toBe(false)
     expect(useAppStore.getState().progress).toBeNull()
     expect(useAppStore.getState().error).toBe('worker unavailable')
+  })
+
+  it('rebinds a legacy reference atlas only after an explicit command', async () => {
+    const project = structuredClone(initialProject)
+    const atlas = project.referenceAtlases![0]
+    project.taxonomyVersion = 2
+    project.taxonomyNodes = project.taxonomyNodes!.map((node) => ({ ...node, version: 2 }))
+    project.referenceAtlases = [{ ...atlas, taxonomyVersion: 1, taxonomySnapshot: undefined }]
+    project.activeReferenceAtlasId = atlas.id
+    useAppStore.setState({ project })
+
+    await useAppStore.getState().rebindReferenceAtlas(atlas.id)
+
+    const rebound = useAppStore.getState().project.referenceAtlases![0]
+    expect(rebound.taxonomyVersion).toBe(2)
+    expect(rebound.taxonomySnapshot).toHaveLength(atlas.taxonomyNodeIds.length)
+    expect(repositoryMocks.saveProject).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceAtlases: [expect.objectContaining({ taxonomyVersion: 2 })] }),
+      { createBackup: false },
+    )
   })
 })
 

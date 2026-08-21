@@ -1585,6 +1585,27 @@
   font: 8px/1.5 var(--mono);
 }
 
+.reference-gap-warning {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #554d33;
+  border-radius: 3px;
+  color: #c5b680;
+  background: #252116;
+  font: 8px/1.5 var(--mono);
+}
+
+.reference-gap-warning strong,
+.reference-gap-warning p {
+  margin: 0;
+}
+
+.reference-gap-warning .focus-button {
+  width: fit-content;
+  margin-top: 1px;
+}
+
 .reference-gap-list {
   display: grid;
   gap: 4px;

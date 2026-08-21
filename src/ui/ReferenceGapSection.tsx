@@ -6,9 +6,11 @@ import type { TerrainProject } from '../domain/types'
 export function ReferenceGapSection({
   project,
   onSelectAtlas,
+  onRebindAtlas,
 }: {
   project: TerrainProject
   onSelectAtlas: (id: string) => void
+  onRebindAtlas: (id: string) => void
 }) {
   const [selectedAtlasId, setSelectedAtlasId] = useState(project.activeReferenceAtlasId ?? '')
   // Tied to the project, not frozen at mount: a review recorded while this panel
@@ -22,7 +24,9 @@ export function ReferenceGapSection({
     [evaluatedAt, project, selectedAtlasId],
   )
   const atlases = project.referenceAtlases ?? []
-  const nodesById = new Map((project.taxonomyNodes ?? []).map((node) => [node.id, node]))
+  const selectedAtlas = atlases.find((atlas) => atlas.id === selectedAtlasId)
+  const referenceNodes = selectedAtlas?.taxonomySnapshot ?? project.taxonomyNodes ?? []
+  const nodesById = new Map(referenceNodes.map((node) => [node.id, node]))
   const supportingTitles = new Map(project.notes.map((note) => [note.id, note.title]))
   const expectedLabels = (ids: string[]) => ids.map((id) => nodesById.get(id)?.label ?? id)
   return (
@@ -43,7 +47,15 @@ export function ReferenceGapSection({
         )}
       </div>
       {!report.enabled ? (
-        <p className="reference-gap-empty">未选择参考图谱；活动低不等于知识缺口，选择一个明确的参考图谱后才会计算覆盖缺口。</p>
+        report.reason === 'atlas-rebind-required' ? (
+          <div className="reference-gap-warning" role="alert">
+            <strong>参考图谱需要重新绑定</strong>
+            <p>该图谱记录的是 taxonomy v{report.referenceTaxonomyVersion}，当前领域已到 v{report.currentTaxonomyVersion}。为避免旧层级被静默改写，缺口层暂时停用。</p>
+            <button type="button" className="focus-button" onClick={() => onRebindAtlas(report.referenceAtlasId ?? selectedAtlasId)}>按当前领域重新绑定</button>
+          </div>
+        ) : (
+          <p className="reference-gap-empty">未选择参考图谱；活动低不等于知识缺口，选择一个明确的参考图谱后才会计算覆盖缺口。</p>
+        )
       ) : report.gaps.filter((gap) => gap.gap > 0).length === 0 ? (
         <p className="reference-gap-empty">当前参考图谱没有待补覆盖节点。</p>
       ) : (
