@@ -498,10 +498,34 @@ export interface ImportIssue {
   message: string
 }
 
+export interface ImportLimitViolation extends ImportIssue {
+  code: 'file-count' | 'file-bytes' | 'total-bytes' | 'record-count' | 'content-length' | 'duplicate-id'
+  actual: number
+  allowed: number
+}
+
+export interface ImportPreflightReport {
+  fileCount: number
+  totalBytes: number
+  recordCount: number
+  noteCount: number
+  totalContentChars: number
+  duplicateIds: string[]
+  invalidTimestampCount: number
+  futureTimestampCount: number
+  unknownTaxonomyLabels: string[]
+  estimatedSeconds: { deterministic: number; semantic: number }
+  blockingIssues: ImportLimitViolation[]
+  trimmed?: { records: number; duplicateIds: number; contentChars: number }
+}
+
 export interface ParsedImport {
   notes: NoteInput[]
   issues: ImportIssue[]
   name: string
+  recordCount?: number
+  limitViolations?: ImportLimitViolation[]
+  preflight?: ImportPreflightReport
 }
 
 export type ViewMode = '3d' | '2d'

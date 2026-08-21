@@ -1,17 +1,42 @@
 import Papa from 'papaparse'
 import { parse as parseYaml } from 'yaml'
 import type { ImportIssue, NoteInput, NoteStatus, ParsedImport } from '../domain/types'
+import {
+  buildImportPreflight,
+  contentLengthViolation,
+  DEFAULT_IMPORT_LIMITS,
+  ImportLimitError,
+  importLimits,
+  type ImportLimits,
+  type ImportTaxonomyContext,
+  validateImportSelection,
+} from './import-limits'
 import { parseObsidianCognitiveFields } from './obsidian-frontmatter'
 
-export async function parseImportFile(file: File): Promise<ParsedImport> {
+export async function parseImportFile(
+  file: File,
+  options: { signal?: AbortSignal; limits?: ImportLimits } = {},
+): Promise<ParsedImport> {
+  throwIfAborted(options.signal)
+  const limits = options.limits ?? DEFAULT_IMPORT_LIMITS
+  if (file.size > limits.maxFileBytes) {
+    throw new ImportLimitError([{
+      code: 'file-bytes',
+      file: file.name,
+      actual: file.size,
+      allowed: limits.maxFileBytes,
+      message: `${file.name} 超出单文件大小上限：实际 ${formatBytes(file.size)}，允许 ${formatBytes(limits.maxFileBytes)}`,
+    }])
+  }
   const extension = file.name.split('.').at(-1)?.toLowerCase() ?? ''
   const text = await file.text()
+  throwIfAborted(options.signal)
   if (extension === 'csv' || extension === 'tsv') {
-    return parseDelimited(text, file.name, extension === 'tsv' ? '\t' : undefined)
+    return parseDelimited(text, file.name, extension === 'tsv' ? '\t' : undefined, limits)
   }
-  if (extension === 'json') return parseStructured(text, file.name, 'json')
-  if (extension === 'yaml' || extension === 'yml') return parseStructured(text, file.name, 'yaml')
-  return parseTextDocument(text, file.name, file.lastModified || Date.now(), vaultLocation(file))
+  if (extension === 'json') return parseStructured(text, file.name, 'json', limits)
+  if (extension === 'yaml' || extension === 'yml') return parseStructured(text, file.name, 'yaml', limits)
+  return parseTextDocument(text, file.name, file.lastModified || Date.now(), vaultLocation(file), undefined, limits)
 }
 
 /**
@@ -25,32 +50,80 @@ export function vaultLocation(file: Pick<File, 'name'> & { webkitRelativePath?: 
   return { vault: segments[0], path: segments.slice(1).join('/') }
 }
 
-export async function parseImportFiles(files: File[]): Promise<ParsedImport> {
-  const results = await Promise.all(files.map((file) => parseImportFile(file)))
+export async function parseImportFiles(
+  files: File[],
+  options: {
+    signal?: AbortSignal
+    limits?: Partial<ImportLimits>
+    taxonomy?: ImportTaxonomyContext
+    now?: number
+  } = {},
+): Promise<ParsedImport> {
+  const limits = importLimits(options.limits)
+  validateImportSelection(files, limits)
+  const results: ParsedImport[] = []
+  let nextIndex = 0
+  const worker = async () => {
+    while (true) {
+      throwIfAborted(options.signal)
+      const index = nextIndex
+      nextIndex += 1
+      const file = files[index]
+      if (!file) return
+      results[index] = await parseImportFile(file, { signal: options.signal, limits })
+      await yieldToBrowser()
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limits.parseConcurrency, files.length) }, () => worker()))
+  throwIfAborted(options.signal)
   const notes = results.flatMap((result) => result.notes)
   const issues = results.flatMap((result) => result.issues)
   const name = files.length === 1 ? results[0]?.name ?? '未命名项目' : `${files.length} 个文件导入`
-  return { notes, issues, name }
+  const contentViolations = results.flatMap((result) => result.limitViolations ?? [])
+  const recordCount = results.reduce((sum, result) => sum + (result.recordCount ?? result.notes.length), 0)
+  const preflight = buildImportPreflight({
+    files,
+    notes,
+    issues,
+    recordCount,
+    contentViolations,
+    limits,
+    taxonomy: options.taxonomy,
+    now: options.now,
+  })
+  return { notes, issues, name, recordCount, limitViolations: contentViolations, preflight }
 }
 
-export function normalizeNoteInputs(values: unknown[], fileName = 'import'): { notes: NoteInput[]; issues: ImportIssue[] } {
+export function normalizeNoteInputs(
+  values: unknown[],
+  fileName = 'import',
+  limits = DEFAULT_IMPORT_LIMITS,
+): { notes: NoteInput[]; issues: ImportIssue[]; limitViolations: ReturnType<typeof contentLengthViolation>[] } {
   const notes: NoteInput[] = []
   const issues: ImportIssue[] = []
+  const limitViolations: ReturnType<typeof contentLengthViolation>[] = []
   for (const [index, value] of values.entries()) {
     const result = normalizeNote(value)
-    if (result.note) notes.push(result.note)
+    if (result.note) {
+      notes.push(result.note)
+      if (result.note.content.length > limits.maxContentChars) {
+        const violation = contentLengthViolation(fileName, index + 1, result.note.content.length, limits.maxContentChars)
+        limitViolations.push(violation)
+        issues.push(violation)
+      }
+    }
     if (result.issue) issues.push({ ...result.issue, file: fileName, row: index + 1 })
   }
-  return { notes, issues }
+  return { notes, issues, limitViolations }
 }
 
-function parseDelimited(text: string, fileName: string, delimiter?: string): ParsedImport {
+function parseDelimited(text: string, fileName: string, delimiter?: string, limits = DEFAULT_IMPORT_LIMITS): ParsedImport {
   const result = Papa.parse<Record<string, unknown>>(text, {
     header: true,
     skipEmptyLines: 'greedy',
     delimiter,
   })
-  const normalized = normalizeNoteInputs(result.data, fileName)
+  const normalized = normalizeNoteInputs(result.data.slice(0, limits.maxRecords + 1), fileName, limits)
   for (const error of result.errors) {
     normalized.issues.push({
       file: fileName,
@@ -58,14 +131,14 @@ function parseDelimited(text: string, fileName: string, delimiter?: string): Par
       message: error.message,
     })
   }
-  return { ...normalized, name: fileName.replace(/\.[^.]+$/, '') }
+  return { ...normalized, name: fileName.replace(/\.[^.]+$/, ''), recordCount: result.data.length }
 }
 
-function parseStructured(text: string, fileName: string, format: 'json' | 'yaml'): ParsedImport {
+function parseStructured(text: string, fileName: string, format: 'json' | 'yaml', limits = DEFAULT_IMPORT_LIMITS): ParsedImport {
   try {
     const parsed: unknown = format === 'json' ? JSON.parse(text) : parseYaml(text)
     const values = extractRecords(parsed)
-    const normalized = normalizeNoteInputs(values, fileName)
+    const normalized = normalizeNoteInputs(values.slice(0, limits.maxRecords + 1), fileName, limits)
     const embeddedName =
       parsed && typeof parsed === 'object' && !Array.isArray(parsed)
         ? stringValue((parsed as Record<string, unknown>).name)
@@ -73,12 +146,14 @@ function parseStructured(text: string, fileName: string, format: 'json' | 'yaml'
     return {
       ...normalized,
       name: embeddedName ?? fileName.replace(/\.[^.]+$/, ''),
+      recordCount: values.length,
     }
   } catch (error) {
     return {
       notes: [],
       issues: [{ file: fileName, message: `无法解析${format.toUpperCase()}：${errorMessage(error)}` }],
       name: fileName,
+      recordCount: 0,
     }
   }
 }
@@ -89,18 +164,26 @@ export function parseTextDocument(
   modifiedAt: number,
   location: { vault?: string; path: string } = { path: fileName },
   fallbackCreatedAt?: string,
+  limits = DEFAULT_IMPORT_LIMITS,
 ): ParsedImport {
   const { frontmatter, body, issue: frontmatterIssue } = splitFrontmatter(text)
   const cognitive = parseObsidianCognitiveFields(frontmatter)
   const title = stringValue(frontmatter.title) ?? fileName.replace(/\.[^.]+$/, '')
-  const createdAt = stringValue(frontmatter.createdAt)
-    ?? fallbackCreatedAt
-    ?? new Date(modifiedAt).toISOString()
+  const requestedCreatedAt = stringValue(frontmatter.createdAt) ?? fallbackCreatedAt
+  const createdAtMs = requestedCreatedAt ? Date.parse(requestedCreatedAt) : modifiedAt
+  const createdAt = Number.isFinite(createdAtMs) ? new Date(createdAtMs).toISOString() : new Date(modifiedAt).toISOString()
   const tags = normalizeTags(frontmatter.tags)
   const content = body.trim() || text.trim()
+  const limitViolations = content.length > limits.maxContentChars
+    ? [contentLengthViolation(fileName, 1, content.length, limits.maxContentChars)]
+    : []
   const issues: ImportIssue[] = [
     ...(frontmatterIssue ? [{ file: fileName, message: frontmatterIssue }] : []),
     ...cognitive.issues.map((item) => ({ file: fileName, field: item.field, message: item.message })),
+    ...(requestedCreatedAt && !Number.isFinite(createdAtMs)
+      ? [{ file: fileName, field: 'createdAt', message: `日期无效：${requestedCreatedAt}` }]
+      : []),
+    ...limitViolations,
   ]
   if (!content) issues.push({ file: fileName, message: '文件内容为空' })
   return {
@@ -127,6 +210,8 @@ export function parseTextDocument(
     }],
     issues,
     name: title,
+    recordCount: 1,
+    limitViolations,
   }
 }
 
@@ -273,4 +358,19 @@ function statusValue(value: unknown): NoteStatus | undefined {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  throw new DOMException('导入已取消', 'AbortError')
+}
+
+async function yieldToBrowser(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
