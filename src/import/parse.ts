@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
 import { parse as parseYaml } from 'yaml'
-import type { ImportIssue, NoteInput, NoteStatus, ParsedImport } from '../domain/types'
+import type { ImportIssue, ImportLimitViolation, NoteInput, NoteStatus, ParsedImport } from '../domain/types'
 import {
   buildImportPreflight,
   contentLengthViolation,
@@ -61,26 +61,46 @@ export async function parseImportFiles(
 ): Promise<ParsedImport> {
   const limits = importLimits(options.limits)
   validateImportSelection(files, limits)
-  const results: ParsedImport[] = []
-  let nextIndex = 0
-  const worker = async () => {
-    while (true) {
-      throwIfAborted(options.signal)
-      const index = nextIndex
-      nextIndex += 1
-      const file = files[index]
-      if (!file) return
-      results[index] = await parseImportFile(file, { signal: options.signal, limits })
-      await yieldToBrowser()
+  const notes: NoteInput[] = []
+  const issues: ImportIssue[] = []
+  const contentViolations: ImportLimitViolation[] = []
+  const sampleLimit = limits.maxRecords + 1
+  const issueDetailLimit = limits.maxRecords + limits.maxFiles
+  let issueCount = 0
+  let recordCount = 0
+  let singleFileName = '未命名项目'
+
+  // Parse one bounded batch at a time. Results inside each batch run in
+  // parallel, then merge in picker order so the retained pre-flight sample is
+  // deterministic. Crucially, later files contribute only counts after the
+  // global sample is full instead of each retaining maxRecords + 1 objects.
+  for (let offset = 0; offset < files.length; offset += limits.parseConcurrency) {
+    throwIfAborted(options.signal)
+    const batch = await Promise.all(
+      files.slice(offset, offset + limits.parseConcurrency).map(async (file) => {
+        const result = await parseImportFile(file, { signal: options.signal, limits })
+        await yieldToBrowser()
+        return result
+      }),
+    )
+    throwIfAborted(options.signal)
+    for (const result of batch) {
+      if (offset === 0 && result === batch[0]) singleFileName = result.name
+      recordCount += result.recordCount ?? result.notes.length
+      issueCount += result.issueCount ?? result.issues.length
+
+      const remainingNotes = Math.max(0, sampleLimit - notes.length)
+      if (remainingNotes > 0) {
+        notes.push(...result.notes.slice(0, remainingNotes))
+      }
+      const remainingViolations = Math.max(0, issueDetailLimit - contentViolations.length)
+      if (remainingViolations > 0) contentViolations.push(...(result.limitViolations ?? []).slice(0, remainingViolations))
+
+      const remainingIssues = Math.max(0, issueDetailLimit - issues.length)
+      if (remainingIssues > 0) issues.push(...result.issues.slice(0, remainingIssues))
     }
   }
-  await Promise.all(Array.from({ length: Math.min(limits.parseConcurrency, files.length) }, () => worker()))
-  throwIfAborted(options.signal)
-  const notes = results.flatMap((result) => result.notes)
-  const issues = results.flatMap((result) => result.issues)
-  const name = files.length === 1 ? results[0]?.name ?? '未命名项目' : `${files.length} 个文件导入`
-  const contentViolations = results.flatMap((result) => result.limitViolations ?? [])
-  const recordCount = results.reduce((sum, result) => sum + (result.recordCount ?? result.notes.length), 0)
+  const name = files.length === 1 ? singleFileName : `${files.length} 个文件导入`
   const preflight = buildImportPreflight({
     files,
     notes,
@@ -91,7 +111,7 @@ export async function parseImportFiles(
     taxonomy: options.taxonomy,
     now: options.now,
   })
-  return { notes, issues, name, recordCount, limitViolations: contentViolations, preflight }
+  return { notes, issues, issueCount, name, recordCount, limitViolations: contentViolations, preflight }
 }
 
 export function normalizeNoteInputs(

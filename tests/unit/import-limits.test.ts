@@ -137,6 +137,22 @@ describe('import limits and pre-flight', () => {
     expect(trimmed.preflight?.trimmed?.records).toBe(6)
   })
 
+  it('retains one global pre-flight sample instead of one maximum-sized sample per file', async () => {
+    const files = Array.from({ length: 4 }, (_, fileIndex) => new File([
+      JSON.stringify(Array.from({ length: 4 }, (_, recordIndex) => ({
+        id: `${fileIndex}-${recordIndex}`,
+        content: `content-${fileIndex}-${recordIndex}`,
+        createdAt: '2026-01-01',
+      }))),
+    ], `batch-${fileIndex}.json`))
+    const limits = importLimits({ maxRecords: 2, parseConcurrency: 2 })
+
+    const parsed = await parseImportFiles(files, { limits })
+
+    expect(parsed.recordCount).toBe(16)
+    expect(parsed.notes.map((note) => note.id)).toEqual(['0-0', '0-1', '0-2'])
+  })
+
   it('exposes stable duplicate detection for the merge stage to reuse', () => {
     expect(duplicateNoteInputIds([
       { id: 'b', content: 'b', createdAt: '2026-01-01' },

@@ -522,6 +522,7 @@ export interface ImportPreflightReport {
 export interface ParsedImport {
   notes: NoteInput[]
   issues: ImportIssue[]
+  issueCount?: number
   name: string
   recordCount?: number
   limitViolations?: ImportLimitViolation[]

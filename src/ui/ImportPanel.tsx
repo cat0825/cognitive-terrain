@@ -192,10 +192,10 @@ export function ImportPanel() {
                 <strong>{parsed.notes.length}</strong> 条可分析笔记
               </span>
             </div>
-            {parsed.issues.length > 0 && (
+            {(parsed.issueCount ?? parsed.issues.length) > 0 && (
               <div className="import-issues">
                 <AlertTriangle size={15} />
-                <span>{parsed.issues.length} 条导入问题</span>
+                <span>{parsed.issueCount ?? parsed.issues.length} 条导入问题</span>
               </div>
             )}
             <button

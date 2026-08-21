@@ -164,7 +164,7 @@ export function trimImportToLimits(parsed: ParsedImport, limits = DEFAULT_IMPORT
     : undefined
   const blockedKeys = new Set((parsed.limitViolations ?? []).map((issue) => `${issue.file}\n${issue.row ?? ''}\n${issue.message}`))
   const issues = parsed.issues.filter((issue) => !blockedKeys.has(`${issue.file}\n${issue.row ?? ''}\n${issue.message}`))
-  return { ...parsed, notes, issues, recordCount: notes.length, limitViolations: [], preflight }
+  return { ...parsed, notes, issues, issueCount: issues.length, recordCount: notes.length, limitViolations: [], preflight }
 }
 
 function declaredAreas(note: NoteInput): string[] {
