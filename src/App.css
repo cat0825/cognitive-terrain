@@ -3086,6 +3086,32 @@
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4);
 }
 
+.persistence-status {
+  position: absolute;
+  z-index: 121;
+  bottom: 52px;
+  right: 16px;
+  min-width: 180px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 11px;
+  border: 1px solid #3c4155;
+  border-radius: 4px;
+  color: #c9ccd8;
+  background: #1d2027;
+  font-size: 10px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4);
+}
+
+.persistence-status[data-save-status='failed'] {
+  border-color: #7a4046;
+  color: #f0c2c2;
+}
+
+.persistence-status-detail {
+  color: #b78f92;
+}
+
 .embedding-choice {
   display: flex;
   align-items: center;

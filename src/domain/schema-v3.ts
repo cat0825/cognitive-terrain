@@ -13,6 +13,7 @@ import {
   validateTaxonomy,
 } from './taxonomy'
 import type { ActivityHistoryState } from './activity-history'
+import { refreshDerivedRecord, type ProjectDerivedRecord } from './derived-data'
 import { STABLE_LAYOUT_FORMULA_VERSION } from './layout-version'
 import type {
   CognitiveState,
@@ -42,6 +43,8 @@ export interface WorkspaceV3 {
   activeReferenceAtlasId?: string
   learningProgressionProfileVersion?: TerrainProject['learningProgressionProfileVersion']
   prerequisiteTopology?: PrerequisiteTopology
+  /** Derived-data provenance, so the materialized bundle records it too. */
+  derived?: ProjectDerivedRecord
 }
 
 export interface KnowledgeItemV3 {
@@ -472,6 +475,7 @@ export function migrateTerrainProjectToV3(
       learningProgressionProfileVersion: project.learningProgressionProfileVersion
         ?? DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION,
       prerequisiteTopology,
+      derived: refreshDerivedRecord(project),
     },
     items,
     sources: uniqueSources,

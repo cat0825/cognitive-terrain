@@ -85,6 +85,15 @@ interface AppState {
   projects: ProjectSummary[]
   backups: ProjectBackupSummary[]
   isAnalyzing: boolean
+  /**
+   * Save state, tracked separately from `isAnalyzing`.
+   *
+   * Analysis succeeding and the write reaching IndexedDB are two different
+   * facts; collapsing them into one flag is what let the app claim success for a
+   * project that was never persisted (audit finding H2). The UI reads this to
+   * report save progress and failures without touching analysis progress.
+   */
+  persistence: PersistenceState
   progress: ProcessingProgress | null
   error: string | null
   cameraRevision: number
@@ -126,6 +135,7 @@ interface AppState {
   setCompareRef: (bucketIndex: number | null) => void
   reportError: (message: string) => void
   dismissError: () => void
+  acknowledgePersistence: () => void
   startAnalysis: (
     name: string,
     notes: NoteInput[],
@@ -165,6 +175,22 @@ interface AppState {
   renameTaxonomy: (nodeId: string, label: string) => Promise<void>
   reparentTaxonomy: (nodeId: string, parentId?: string) => Promise<void>
   mergeTaxonomy: (sourceNodeId: string, targetNodeId: string) => Promise<void>
+}
+
+export type PersistenceScope =
+  | 'project'
+  | 'vault-sync'
+  | 'vault-writeback'
+  | 'taxonomy'
+  | 'review'
+  | 'exploration'
+
+export interface PersistenceState {
+  status: 'idle' | 'saving' | 'saved' | 'failed'
+  scope?: PersistenceScope
+  message?: string
+  /** When the current status was reached, for ordering UI feedback. */
+  updatedAt?: string
 }
 
 interface AnalysisCommitContext {
@@ -217,6 +243,7 @@ export const useAppStore = create<AppState>((set, get) => {
   projects: [],
   backups: [],
   isAnalyzing: false,
+  persistence: { status: 'idle' },
   progress: null,
   error: null,
   cameraRevision: 0,
@@ -398,6 +425,11 @@ export const useAppStore = create<AppState>((set, get) => {
   setCompareRef: (compareRef) => set({ compareRef }),
   reportError: (error) => set({ error }),
   dismissError: () => set({ error: null }),
+  // Only a settled state can be acknowledged: dropping a `saving` badge would
+  // hide an in-flight write.
+  acknowledgePersistence: () => set(
+    get().persistence.status === 'saving' ? {} : { persistence: { status: 'idle' } },
+  ),
   startAnalysis: async (name, notes, options = {}, commit) => {
     if (!notes.length) {
       set({ error: '没有可分析的笔记' })
@@ -440,7 +472,7 @@ export const useAppStore = create<AppState>((set, get) => {
         // before the in-memory project moves, or a failed save would leave the UI
         // showing a synced terrain that was never written.
         try {
-          await saveVaultSyncProject(commit.baseProject, normalizedProject)
+          await withPersistence(set, 'vault-sync', () => saveVaultSyncProject(commit.baseProject, normalizedProject))
         } catch (error) {
           const message = `Vault 同步保存失败，当前项目未切换：${error instanceof Error ? error.message : String(error)}`
           throw new Error(message, { cause: error })
@@ -458,7 +490,7 @@ export const useAppStore = create<AppState>((set, get) => {
           }
         }
       } else {
-        const normalizedProject = await persistProject(committedProject)
+        const normalizedProject = await persistProject(committedProject, set)
         if (!analyses.isCurrent(generation)) return
         localStorage.setItem('cognitive-terrain:last-project', normalizedProject.id)
         setProjectState(set, normalizedProject)
@@ -576,7 +608,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
         const normalized = migrateProject(next)
         const { saveVaultSyncProject } = await import('../storage/vault-sync-repository')
-        await saveVaultSyncProject(current, normalized)
+        await withPersistence(set, 'vault-sync', () => saveVaultSyncProject(current, normalized))
         // Only after the transaction commits, so a rejected save cannot leave the
         // terrain claiming sources it does not have.
         setProjectState(set, normalized)
@@ -610,7 +642,7 @@ export const useAppStore = create<AppState>((set, get) => {
     }
     try {
       const { saveVaultWritebackProject } = await import('../storage/vault-sync-repository')
-      await saveVaultWritebackProject(previous, next)
+      await withPersistence(set, 'vault-writeback', () => saveVaultWritebackProject(previous, next))
       const latest = get().project
       if (latest.id !== previous.id || latest.updatedAt !== previous.updatedAt) {
         throw new Error('项目在写回提交期间发生变化，请重新打开项目核对已保存状态')
@@ -746,7 +778,7 @@ export const useAppStore = create<AppState>((set, get) => {
       interactionEvents: [...current.interactionEvents, event],
     }
     try {
-      await saveProject(project)
+      await withPersistence(set, 'review', () => saveProject(project))
       if (get().project.id !== current.id) return
       set({ project })
       await Promise.all([get().reloadProjects(), get().reloadBackups()])
@@ -758,7 +790,11 @@ export const useAppStore = create<AppState>((set, get) => {
     const current = get().project
     try {
       const { transitionExplorationProject } = await import('./exploration-actions')
-      const project = await transitionExplorationProject(current, suggestion, command)
+      const project = await withPersistence(
+        set,
+        'exploration',
+        () => transitionExplorationProject(current, suggestion, command),
+      )
       if (get().project.id === current.id) set({ project })
       await get().reloadProjects()
     } catch (error) {
@@ -769,7 +805,11 @@ export const useAppStore = create<AppState>((set, get) => {
     const current = get().project
     try {
       const { editExplorationProject } = await import('./exploration-actions')
-      const project = await editExplorationProject(current, suggestion, patch)
+      const project = await withPersistence(
+        set,
+        'exploration',
+        () => editExplorationProject(current, suggestion, patch),
+      )
       if (get().project.id === current.id) set({ project })
       await get().reloadProjects()
     } catch (error) {
@@ -783,7 +823,7 @@ export const useAppStore = create<AppState>((set, get) => {
   replaceProject: async (project) => {
     let normalized: TerrainProject
     try {
-      normalized = await persistProject(project)
+      normalized = await persistProject(project, set)
     } catch (error) {
       const message = `项目保存失败，当前项目未切换：${error instanceof Error ? error.message : String(error)}`
       set({ error: message })
@@ -1082,11 +1122,46 @@ function cognitiveObservationsForUpdate(
  * commit failure. Collapsing the two would tell the user their sync failed when
  * their data is safely on disk.
  */
-async function persistProject(project: TerrainProject): Promise<TerrainProject> {
-  const normalized = migrateProject(project)
-  await saveProject(normalized)
-  return normalized
+async function persistProject(
+  project: TerrainProject,
+  set: (partial: Partial<AppState>) => void,
+): Promise<TerrainProject> {
+  return withPersistence(set, 'project', async () => {
+    const normalized = migrateProject(project)
+    await saveProject(normalized)
+    return normalized
+  })
 }
+
+/**
+ * Runs one commit and reports its save state, independently of analysis state.
+ *
+ * The returned promise rejects with the original error so callers keep their own
+ * error handling; this wrapper only records whether the write reached storage.
+ */
+async function withPersistence<T>(
+  set: (partial: Partial<AppState>) => void,
+  scope: PersistenceScope,
+  run: () => Promise<T>,
+): Promise<T> {
+  set({ persistence: { status: 'saving', scope, updatedAt: new Date().toISOString() } })
+  try {
+    const result = await run()
+    set({ persistence: { status: 'saved', scope, updatedAt: new Date().toISOString() } })
+    return result
+  } catch (error) {
+    set({
+      persistence: {
+        status: 'failed',
+        scope,
+        message: error instanceof Error ? error.message : String(error),
+        updatedAt: new Date().toISOString(),
+      },
+    })
+    throw error
+  }
+}
+
 
 async function persistTaxonomyProject(
   project: TerrainProject,
@@ -1094,8 +1169,10 @@ async function persistTaxonomyProject(
   get: () => AppState,
 ): Promise<void> {
   try {
-    await createProjectBackup(get().project)
-    await saveProject(project, { createBackup: false })
+    await withPersistence(set, 'taxonomy', async () => {
+      await createProjectBackup(get().project)
+      await saveProject(project, { createBackup: false })
+    })
     set({ project, activeAreas: [] })
     await Promise.all([get().reloadProjects(), get().reloadBackups()])
   } catch (error) {

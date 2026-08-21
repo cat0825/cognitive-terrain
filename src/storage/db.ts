@@ -17,6 +17,7 @@ import {
 import { areasForNote, plateIdForArea } from '../domain/knowledge-plates'
 import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
 import { legacyTaxonomyNodesForProject, validateTaxonomy } from '../domain/taxonomy'
+import { refreshDerivedRecord } from '../domain/derived-data'
 import {
   migrateTerrainProjectToV3,
   normalizeExplorationItems,
@@ -423,7 +424,7 @@ export function migrateProject(
     project.explorationItems ?? [],
     new Set(migratedNotes.map((note) => note.id)),
   )
-  return {
+  const migrated: TerrainProject = {
     ...project,
     schemaVersion: 3,
     embeddingMode: legacyV1 ? 'fallback' : project.embeddingMode ?? 'fallback',
@@ -448,6 +449,10 @@ export function migrateProject(
     explorationItems,
     prerequisiteTopology: buildPrerequisiteTopology(migratedNotes),
   }
+  // The tuple is recomputed from the migrated core data, so a taxonomy bump or an
+  // atlas rebind is reflected the moment the project is read back, while the
+  // terrain parameters stay as they were recorded.
+  return { ...migrated, derived: refreshDerivedRecord(migrated) }
 }
 
 export async function replaceProjectMaterialization<Mode extends DatabaseWriteMode>(

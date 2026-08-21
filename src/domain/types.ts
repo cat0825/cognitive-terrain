@@ -1,4 +1,5 @@
 import type { ActivityHistoryState } from './activity-history'
+import type { ProjectDerivedRecord } from './derived-data'
 
 export type NoteStatus = 'seed' | 'growing' | 'stable' | 'gap' | 'archived'
 
@@ -385,6 +386,13 @@ export interface TerrainProject {
   explorationItems?: ExplorationLifecycleItem[]
   vaultSync?: VaultSyncState
   prerequisiteTopology?: PrerequisiteTopology
+  /**
+   * Provenance for every rebuildable field on this project: the version tuple it
+   * was produced under, plus the terrain parameters needed to reproduce it.
+   * Optional because projects written before this record exists keep their
+   * derived values as an opaque cache. See `docs/adr/005-core-derived-split.md`.
+   */
+  derived?: ProjectDerivedRecord
 }
 
 export type VaultSyncField =
