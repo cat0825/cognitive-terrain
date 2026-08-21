@@ -1,5 +1,6 @@
 import { Check, RotateCcw, X } from 'lucide-react'
 import { lazy, Suspense, useMemo } from 'react'
+import { evaluationTimeForProject } from '../domain/evaluation-time'
 import { buildPlateCollisions, normalizeArea, summarizeKnowledgePlates } from '../domain/knowledge-plates'
 import { buildActivitySummaries, TEMPERATURE_COLORS } from '../domain/activity-temperature'
 import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
@@ -37,8 +38,12 @@ export function FilterPanel() {
   const bridgeCount = collisions.reduce((sum, collision) => sum + collision.relationCount, 0)
   const bandCount = collisions.filter((collision) => collision.mode === 'band').length
   const unassignedCount = useMemo(() => project.notes.filter((note) => !note.area && !note.areas?.length).length, [project.notes])
+  // Same evaluation time as the map and the note detail panel: a wall-clock
+  // `Date.now()` here would disagree with them whenever `updatedAt` is ahead of
+  // the local clock, and the counts would drift from the rendered terrain.
+  const activityEvaluatedAt = useMemo(() => evaluationTimeForProject(project.updatedAt), [project.updatedAt])
   const activitySummary = useMemo(() => {
-    const summaries = [...buildActivitySummaries(project.notes, project.interactionEvents, Date.now(), project.activityHistory?.aggregates).values()]
+    const summaries = [...buildActivitySummaries(project.notes, project.interactionEvents, activityEvaluatedAt, project.activityHistory?.aggregates).values()]
     return summaries.reduce((result, summary) => ({
       activeNotes: result.activeNotes + (summary.totalCount > 0 ? 1 : 0),
       eventCount: result.eventCount + summary.totalCount,
@@ -46,7 +51,7 @@ export function FilterPanel() {
       editedCount: result.editedCount + summary.editedCount,
       reviewedCount: result.reviewedCount + summary.reviewedCount,
     }), { activeNotes: 0, eventCount: 0, openedCount: 0, editedCount: 0, reviewedCount: 0 })
-  }, [project.activityHistory?.aggregates, project.interactionEvents, project.notes])
+  }, [activityEvaluatedAt, project.activityHistory?.aggregates, project.interactionEvents, project.notes])
   const prerequisiteTopology = useMemo(
     () => project.prerequisiteTopology ?? buildPrerequisiteTopology(project.notes),
     [project.notes, project.prerequisiteTopology],
