@@ -54,6 +54,7 @@ page.on('console', (message) => {
 })
 page.on('pageerror', (error) => errors.push(error.message))
 
+let gateError
 try {
   await page.goto(targetUrl.href, {
     waitUntil: 'networkidle',
@@ -247,9 +248,33 @@ try {
   // Without these assertions the gate only printed numbers and could never fail
   // on a regression, which is what made it a report rather than a gate.
   assertWithinBudget({ idle, playback, orbit, syntheticScrub, directStoreScrub, pointerScrub })
-} finally {
-  await browser.close()
-  if (previewServer) await previewServer.close()
+} catch (error) {
+  gateError = error
+}
+
+const cleanupErrors = []
+await cleanupStep('browser', () => browser.close(), cleanupErrors)
+if (previewServer) await cleanupStep('preview server', () => previewServer.close(), cleanupErrors)
+if (gateError && cleanupErrors.length) throw new AggregateError([gateError, ...cleanupErrors], 'perf gate and cleanup failed')
+if (gateError) throw gateError
+if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'perf cleanup failed')
+
+async function cleanupStep(label, action, errors) {
+  console.log(`perf cleanup: closing ${label}`)
+  let timer
+  try {
+    await Promise.race([
+      action(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} cleanup exceeded 10000ms`)), 10_000)
+      }),
+    ])
+    console.log(`perf cleanup: ${label} closed`)
+  } catch (error) {
+    errors.push(error)
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function measure(page, scenario, expectedDuration, timeoutMs, action) {
