@@ -40,7 +40,7 @@
 | --- | --- | --- | --- |
 | 桌面端恢复点 a11y 用例失败 | accepted | — | 见下方 A3 |
 | exploration E2E 超时 | accepted | — | 见下方 A3 |
-| 视觉基线漂移导致 visual 门禁不可判读 | fixed | [#46](https://github.com/cat0825/cognitive-terrain/issues/46) | [#53](https://github.com/cat0825/cognitive-terrain/pull/53) `acb08ad6` |
+| 视觉基线漂移导致 visual 门禁不可判读 | fixed | [#46](https://github.com/cat0825/cognitive-terrain/issues/46) | [#53](https://github.com/cat0825/cognitive-terrain/pull/53) `acb08ad6`；该门禁已于 2026-08-22 从 CI 移除，见下方 A5 |
 | CI 拆成独立可重复 job | fixed | — | [#60](https://github.com/cat0825/cognitive-terrain/pull/60) `ffaebb04`，成本取舍见 [`docs/ci-cost.md`](../ci-cost.md) |
 | vault sync / write-back 事务边界 | fixed | [#47](https://github.com/cat0825/cognitive-terrain/issues/47) | [#59](https://github.com/cat0825/cognitive-terrain/pull/59) `93773823` |
 | 拆分 core / derived 数据并定义显式版本组合 | fixed | [#49](https://github.com/cat0825/cognitive-terrain/issues/49) | [#66](https://github.com/cat0825/cognitive-terrain/pull/66) `fa0e60c5`，见 [ADR-005](../adr/005-core-derived-split.md) |
@@ -84,7 +84,7 @@
 
 ### A5 CI 不再运行视觉回归门禁
 
-- 状态：accepted，2026-08-22 在 `fix/reported-ui-regressions` 移除 `visual` job 与 6 张 `*-linux.png`
+- 状态：accepted，2026-08-22 在 [#69](https://github.com/cat0825/cognitive-terrain/pull/69) `1bd4e9d` 移除 `visual` job 与 6 张 `*-linux.png`
 - 事实核对：门禁按 `process.platform` 分平台存基线，CI 跑 `ubuntu-latest`，所以需要一套**任何真实用户都看不到**的 Linux 基线（产物经 Cloudflare Workers 交付给浏览器）。字体光栅化跨 OS 不同，这套基线无法本地录制，只能从故意跑红的 CI 下载 `visual-failure-artifacts`。
 - 接受理由：命中率为零而维护成本真实存在。本仓库至今所有 UI 缺陷都是人打开页面发现的 —— 用户实测报告的 5 个布局问题该门禁全绿放过，其中 `desktop-note-details` 用例本身就点了峰值标签并截图，但修复前的基线上标签一个不少，因为 bug 触发条件是点**散点**与切换视觉维度，4 个用例都没覆盖；同分支我自己引入的 2 个遮挡回归也是靠截图发现的。反过来它自己产出的是维护活：[#46](https://github.com/cat0825/cognitive-terrain/issues/46) 整个存在只因 darwin 基线漂移，且一次有意的布局改动会让 6 个用例同时变红，与真实破坏不可区分。
 - 残余风险：某次改动静默挪动布局、而该次会话没人打开页面时，不再有自动拦截。补偿控制是项目既有规矩「前端改动必须打开并截图确认受影响页面」——该规矩的战绩优于此门禁。

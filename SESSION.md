@@ -1,4 +1,4 @@
-# Handoff 2026-08-22 17:55 +08:00
+# Handoff 2026-08-23 00:36 +08:00
 
 > **这是快照，不是状态源。** 本文件对应远端 `origin/main` commit `c946d79f0d6f1e5dc45aa7d607f2f6f7e2842c0a`。
 > 任何"当前状态"判断都必须重新执行 `git fetch --prune origin`、`git status`、`gh pr list`、`gh issue list`；
@@ -27,7 +27,8 @@ H1-H3、M1-M4、L1-L2 逐条状态见 [`docs/review/findings-ledger.md`](docs/re
 | core/derived 拆分与版本元组 | #49 | PR #66 `fa0e60c`（ADR-005） |
 | 视觉维度契约与准入门禁 | #50 | PR #67 `dc0ecd1`（ADR-006） |
 | 审查台账与依赖决策 | #48 | PR #68 `c946d79` |
-| 用户实测的五个界面问题 | — | 本次工作，分支 `fix/reported-ui-regressions` |
+| 用户实测的五个界面问题 | — | PR [#69](https://github.com/cat0825/cognitive-terrain/pull/69) `1bd4e9d`（待验收） |
+| CI 视觉门禁零命中率，移除 | — | 同 PR #69，理由见台账 A5 |
 
 ## 门禁
 
@@ -41,7 +42,14 @@ H1-H3、M1-M4、L1-L2 逐条状态见 [`docs/review/findings-ledger.md`](docs/re
 [`tests/visual/baselines/README.md`](tests/visual/baselines/README.md)。
 CI 现在跑 5 个 job：quality、e2e desktop、e2e mobile、a11y、perf。
 
-CI 最后一次全绿是 PR #67。本分支尚未推送，CI 未跑过。
+PR #69 上 CI **10/10 全绿**（run `32584702071`：changes、quality、e2e desktop 1-4、
+e2e mobile 1-2、a11y、perf；perf 因改了 `ci.yml` 被触发而非 skip）。等用户验收。
+
+人工验收截图走真实复现路径拍了 9 张，落在 `output/playwright/verification-2026-08-23/`（该目录已 ignore，
+不进仓库，需要时重跑）。实测数字：峰值标签 初始 18 → 选中笔记后 18（修复前塌到 1）→ 二维往返回 3D 后 18；
+8 个维度 密度/熟练度/探索度/活跃/基础层级/温度/领域 各 18、学习进程 12；海洋卡片开箱显示
+`缺失 1 · 稀疏 1 · 过期 0`；底部按钮 1024px 时 dock 右边缘 155 → timeline 左边缘 338，1280px 时 155 → 422。
+gap 详情栏另做过一次重叠量测（`p/small/span/strong/h2/h3/code` 两两求交，双向重叠过半且非父子即报）＝ **0 对**。
 
 ## 已知边界
 
