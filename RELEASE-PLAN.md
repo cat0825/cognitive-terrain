@@ -54,7 +54,7 @@
 
 ## 阶段 6：测试与质量门 ✅
 - playwright.config.ts + e2e/visual/a11y（pixelmatch + axe，依赖已装）
-- GitHub Actions 独立 visual job 执行 `npm run test:visual`
+- GitHub Actions 跑 e2e / a11y / perf；`npm run test:visual` 改为本地工具，2026-08-22 移除 CI 的 visual job，理由见台账 A5
 - perf 脚本绑定 scripts/perf-check.mjs；unit 补强
 - 已知限制：暗色 UI 8px mono 小字 color-contrast 未达标（设计语言系统性问题），a11y 规则排除该项，发布前酌情复核
 

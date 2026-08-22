@@ -35,13 +35,13 @@ H1-H3、M1-M4、L1-L2 逐条状态见 [`docs/review/findings-ledger.md`](docs/re
 `size:check` 主包 352.7 KiB / JS 总量 2375.0 KiB / CSS 49.0 KiB、`test:e2e` 48 passed / 4 skipped、
 `test:a11y` 16 passed、`test:visual` 4 passed（darwin 基线已重录）、`test:perf` ok。
 
-**visual 门禁在本分支会红**：6 个 darwin 基线因布局改动全部重录，linux 那份只能从
-CI 自己的渲染结果取，步骤见 [`tests/visual/baselines/README.md`](tests/visual/baselines/README.md)
-的"Refreshing the platform you are not on"。不要用 Playwright 容器补录 —— CI 跑的是裸
-`ubuntu-latest`，字体集不同，`ci.yml` 里已记录仅字体差异就能把 ratio 推到 0.0055。
+**CI 的 visual job 已移除**，改为纯本地工具。它按平台存基线，CI 跑 `ubuntu-latest`，
+需要一套没有真实用户会看到的 Linux 基线；而它对用户报的 5 个布局问题全绿放过，
+维护成本却真实存在。完整理由、残余风险与复核条件见台账 A5，恢复方式见
+[`tests/visual/baselines/README.md`](tests/visual/baselines/README.md)。
+CI 现在跑 5 个 job：quality、e2e desktop、e2e mobile、a11y、perf。
 
-CI 最后一次全绿是 PR #67（changes / quality / e2e desktop 1-4 / e2e mobile 1-2 / a11y / visual，
-perf 因纯语义层改动被 skip）。本分支尚未推送，CI 未跑过。
+CI 最后一次全绿是 PR #67。本分支尚未推送，CI 未跑过。
 
 ## 已知边界
 

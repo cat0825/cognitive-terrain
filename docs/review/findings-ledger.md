@@ -82,6 +82,15 @@
 - 接受理由：与其宣称未经证明的规模，不如给出有明确资源边界的上限。README「已知缺口」已声明该边界。
 - 复核条件：若要提高上限，先建立 10k/50k 基准脚本与降级策略，再改限额。
 
+### A5 CI 不再运行视觉回归门禁
+
+- 状态：accepted，2026-08-22 在 `fix/reported-ui-regressions` 移除 `visual` job 与 6 张 `*-linux.png`
+- 事实核对：门禁按 `process.platform` 分平台存基线，CI 跑 `ubuntu-latest`，所以需要一套**任何真实用户都看不到**的 Linux 基线（产物经 Cloudflare Workers 交付给浏览器）。字体光栅化跨 OS 不同，这套基线无法本地录制，只能从故意跑红的 CI 下载 `visual-failure-artifacts`。
+- 接受理由：命中率为零而维护成本真实存在。本仓库至今所有 UI 缺陷都是人打开页面发现的 —— 用户实测报告的 5 个布局问题该门禁全绿放过，其中 `desktop-note-details` 用例本身就点了峰值标签并截图，但修复前的基线上标签一个不少，因为 bug 触发条件是点**散点**与切换视觉维度，4 个用例都没覆盖；同分支我自己引入的 2 个遮挡回归也是靠截图发现的。反过来它自己产出的是维护活：[#46](https://github.com/cat0825/cognitive-terrain/issues/46) 整个存在只因 darwin 基线漂移，且一次有意的布局改动会让 6 个用例同时变红，与真实破坏不可区分。
+- 残余风险：某次改动静默挪动布局、而该次会话没人打开页面时，不再有自动拦截。补偿控制是项目既有规矩「前端改动必须打开并截图确认受影响页面」——该规矩的战绩优于此门禁。
+- 复核条件：若出现一次**由静默布局漂移造成、且人工截图流程没抓到**的线上缺陷，重新评估。恢复方式与不可用捷径（不要用 `mcr.microsoft.com/playwright` 容器补录，仅字体差异就能把 ratio 推到 0.0055）记在 [`tests/visual/baselines/README.md`](../../tests/visual/baselines/README.md)。
+- 保留部分：`npm run test:visual` 与 darwin 基线留在仓库，作为本地随手可用的工具，PR 模板仍提示运行。
+
 ## `output/` 目录决策
 
 审查要求单独决定 `output/imagegen/` 等视觉探索产物的归属。

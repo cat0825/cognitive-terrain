@@ -168,7 +168,7 @@ npm run lint
 npm test
 npm run build && npm run size:check
 npm run test:e2e
-npm run test:visual
+npm run test:visual  # 仅本地，CI 不跑，理由见台账 A5
 npm run test:a11y
 npm run test:perf
 ```

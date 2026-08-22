@@ -28,6 +28,11 @@ This contradicted the obvious assumption. Setup is cheap: `npm ci` is 8-31s and
 the browser install 33-60s. **The test run dominates**, at 109-359s. Optimising
 installs would have saved almost nothing.
 
+> The `visual` job was removed on 2026-08-22 (ledger A5), so the pipeline now runs
+> five jobs, not six, and this table's 3m34s row is history. Everything below about
+> concurrency, the `changes` filter, and `install-deps` still applies to the
+> remaining browser jobs.
+
 ## Changes and their reasoning
 
 **Shard e2e more widely (desktop 2 -> 4, mobile 1 -> 2).** The critical path was
