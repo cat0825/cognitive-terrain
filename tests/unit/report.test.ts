@@ -32,10 +32,19 @@ describe('project review report', () => {
   })
 
   it('disables gap claims without an active reference atlas', async () => {
-    const report = await buildProjectReport(createDemoProject())
+    // The demo ships with its atlas selected, so the disabled path has to be set up
+    // the way an imported project arrives: atlases available, none chosen.
+    const report = await buildProjectReport({ ...createDemoProject(), activeReferenceAtlasId: undefined })
 
     expect(report).toContain('海洋/缺口（reference-gap-v1）：disabled')
     expect(report).toContain('不生成知识或技能缺口声明；低活动不等于缺口')
+  })
+
+  it('enables gap claims for the demo project without a manual pick', async () => {
+    const report = await buildProjectReport(createDemoProject())
+
+    expect(report).toContain('海洋/缺口（reference-gap-v1）：enabled')
+    expect(report).toContain('Active reference atlas：AI Infra 核心能力参考图谱（taxonomy v1）')
   })
 
   it('describes gaps relative to the active reference atlas', async () => {

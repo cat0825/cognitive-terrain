@@ -3,6 +3,7 @@ import { lazy, Suspense, useMemo } from 'react'
 import { evaluationTimeForProject } from '../domain/evaluation-time'
 import { buildPlateCollisions, normalizeArea, summarizeKnowledgePlates } from '../domain/knowledge-plates'
 import { buildActivitySummaries, TEMPERATURE_COLORS } from '../domain/activity-temperature'
+import { DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION } from '../domain/learning-progression'
 import { buildPrerequisiteTopology } from '../domain/prerequisite-topology'
 import { projectTagCounts } from '../domain/project-view'
 import type { QualityLevel, VisualDimension } from '../domain/types'
@@ -56,6 +57,21 @@ export function FilterPanel() {
     () => project.prerequisiteTopology ?? buildPrerequisiteTopology(project.notes),
     [project.notes, project.prerequisiteTopology],
   )
+  // Without a coverage count the progression terrain is indistinguishable from a
+  // broken one: every note lacking an explicit observation renders at the neutral
+  // elevation, so a mostly-unobserved project looks like a flat plane with no
+  // explanation. One pass over the observations is enough — per-note history states
+  // are not counted here because the help text above already states the uncertainty
+  // rule, and evaluating 1800 notes on every project change is not worth a restatement.
+  const progressionCoverage = useMemo(() => {
+    const observedIds = new Set(
+      (project.cognitiveObservations ?? [])
+        .filter((observation) => observation.field === 'mastery')
+        .map((observation) => observation.itemId),
+    )
+    const observedNotes = project.notes.reduce((total, note) => total + (observedIds.has(note.id) ? 1 : 0), 0)
+    return { observedNotes, neutralNotes: project.notes.length - observedNotes }
+  }, [project.cognitiveObservations, project.notes])
   const selectedPrerequisiteAssignment = prerequisiteTopology.assignments.find((assignment) => assignment.itemId === selectedNoteId)
   const selectedNote = project.notes.find((note) => note.id === selectedNoteId)
   const prerequisiteMaxDepth = Math.max(0, ...prerequisiteTopology.assignments.map((assignment) => assignment.depth ?? 0))
@@ -162,6 +178,17 @@ export function FilterPanel() {
               {plates.length} 个板块 · {bridgeCount} 条跨域 WikiLink · {bandCount} 个碰撞带
               {unassignedCount > 0 ? ` · ${unassignedCount} 条未分类` : ''}
             </p>
+          </div>
+        )}
+        {visualDimension === 'progression' && (
+          <div
+            className="progression-legend"
+            role="group"
+            aria-label="学习进程图例"
+            data-formula-version={project.learningProgressionProfileVersion ?? DEFAULT_LEARNING_PROGRESSION_PROFILE_VERSION}
+          >
+            <p>{progressionCoverage.observedNotes} 条有显式观测 · {progressionCoverage.neutralNotes} 条回落中性海拔</p>
+            <small>平坦不代表没有学习，只代表没有记录证据；中性海拔的笔记不从活动事件补造历史。</small>
           </div>
         )}
         {visualDimension === 'structure' && (

@@ -121,6 +121,14 @@ test('replays learning progression evidence and checkpoint comparison', async ({
   await progression.click()
   await expect(progression).toHaveAttribute('aria-pressed', 'true')
   await expect(panel.locator('.dimension-help')).toContainText('显式认知观测')
+  // A mostly-unobserved project renders as a near-flat plane, which reads as a broken
+  // dimension unless the legend says how few notes actually carry evidence.
+  const progressionLegend = panel.getByRole('group', { name: '学习进程图例' })
+  await expect(progressionLegend).toBeVisible()
+  await expect(progressionLegend).toHaveAttribute('data-formula-version', 'learning-progression-v1')
+  await expect(progressionLegend).toContainText(/[1-9]\d* 条有显式观测/)
+  await expect(progressionLegend).toContainText(/[1-9]\d* 条回落中性海拔/)
+  await expect(progressionLegend).toContainText('不从活动事件补造历史')
   await page.getByRole('button', { name: '关闭筛选' }).click()
   await page.getByRole('button', { name: '切换二维等高线' }).click()
 
@@ -147,9 +155,22 @@ test('disables knowledge-gap claims until a reference atlas is selected', async 
 
   const gaps = page.getByRole('region', { name: '参考图谱知识缺口' })
   await expect(gaps).toBeVisible()
+  // The demo ships with its atlas selected, so the disabled state is reached the way
+  // a user reaches it: by explicitly deselecting.
+  await gaps.getByRole('combobox', { name: '选择参考图谱' }).selectOption('')
   await expect(gaps).toContainText('未选择参考图谱')
   await expect(gaps).toContainText('活动低不等于知识缺口')
   await expect(gaps.locator('.reference-gap-item')).toHaveCount(0)
+  await expect(page.getByRole('complementary', { name: '参考图谱海洋图层' })).toBeHidden()
+
+  // An explicit deselect has to survive a reload rather than falling back to the
+  // project's own selection.
+  await page.reload()
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '打开知识概览' }).click()
+  await expect(page.getByRole('region', { name: '参考图谱知识缺口' })
+    .getByRole('combobox', { name: '选择参考图谱' })).toHaveValue('')
+  await expect(page.getByRole('complementary', { name: '参考图谱海洋图层' })).toBeHidden()
   expect(errors).toEqual([])
 })
 

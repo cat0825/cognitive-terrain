@@ -186,56 +186,13 @@ jobs:
           npx playwright install chromium
       - run: npm run test:a11y
 
-  visual:
-    runs-on: ubuntu-latest
-    needs: [quality, changes]
-    if: needs.changes.outputs.app == 'true'
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.12
-          cache: npm
-      - run: node scripts/npm-ci-retry.mjs
-      - name: Resolve Playwright version
-        id: playwright
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      # System libraries are installed unconditionally and must succeed. An earlier
-      # revision skipped this on a browser-cache hit and made it continue-on-error,
-      # which turned the visual gate red: the cache holds browser binaries, not the
-      # host's font and rendering libraries, so a hit says nothing about whether
-      # they are present. Missing fonts changed text rasterisation enough to push
-      # the diff ratio to 0.0055 against a 0.002 threshold.
-      - name: Install Playwright system dependencies
-        timeout-minutes: 10
-        run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=300 --idle-timeout=120 --
-          npx playwright install-deps chromium
-      # Browsers separately, without --with-deps, so the download does not run apt
-      # again and cannot be blocked by a package lock.
-      - name: Install Playwright browsers
-        timeout-minutes: 10
-        run: >-
-          node scripts/run-with-retry.mjs --attempts=3 --timeout=240 --idle-timeout=90 --
-          npx playwright install chromium
-      - run: npm run test:visual
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: visual-failure-artifacts
-          path: |
-            tests/visual/diffs/
-            test-results/
-            playwright-report/
-          if-no-files-found: ignore
-
+  # There is deliberately no `visual` job. The pixel-diff gate compares against a
+  # per-platform baseline, so running it here required a `-linux.png` set that no
+  # user ever sees, and it never caught a real regression: every UI bug found in
+  # this repo so far was found by a human opening the page, while the gate's own
+  # output was baseline re-records and the drift tracked by #46. `npm run test:visual`
+  # stays available locally against the darwin baselines — see
+  # tests/visual/baselines/README.md for the tradeoff this accepts.
   perf:
     runs-on: ubuntu-latest
     needs: [quality, changes]

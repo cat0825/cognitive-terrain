@@ -10,7 +10,8 @@
 - [ ] `npm run lint`
 - [ ] `npm test`
 - [ ] `npm run build` 与 `npm run size:check`
-- [ ] 受影响的 `npm run test:e2e` / `test:a11y` / `test:visual` / `test:perf`
+- [ ] 受影响的 `npm run test:e2e` / `test:a11y` / `test:perf`
+- [ ] 改了布局或样式时的 `npm run test:visual`（**仅本地有**，CI 不跑，理由见台账 A5）
 
 ## 视觉维度准入
 

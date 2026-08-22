@@ -21,6 +21,7 @@ const articlesPerTopic = 60
 const articlesPerMonth = 36
 const demoStart = new Date('2021-11-26T20:54:10+08:00')
 const DEMO_TAXONOMY_VERSION = 1
+export const DEMO_REFERENCE_ATLAS_ID = 'demo-ai-infra-reference-atlas'
 const demoReferenceAtlasLabels = [
   ['demo-taxonomy-platform', '平台工程'],
   ['demo-taxonomy-hardware', '硬件与互联'],
@@ -384,7 +385,7 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
     taxonomyNodes,
     taxonomyVersion: DEMO_TAXONOMY_VERSION,
     referenceAtlases: [{
-      id: 'demo-ai-infra-reference-atlas',
+      id: DEMO_REFERENCE_ATLAS_ID,
       workspaceId: 'demo-ai-infra-terrain',
       label: 'AI Infra 核心能力参考图谱',
       taxonomyVersion: DEMO_TAXONOMY_VERSION,
@@ -395,6 +396,10 @@ export function createDemoProject(options: { includeProgressionEvidence?: boolea
       createdAt: timestamp,
       updatedAt: timestamp,
     }],
+    // The demo ships with its own atlas selected so the ocean / gap layer is visible
+    // without a manual pick. A real project still starts unselected: gap claims need
+    // an explicit reference atlas, and the demo is the one project that declares one.
+    activeReferenceAtlasId: DEMO_REFERENCE_ATLAS_ID,
   }
   return { ...project, derived: { versionTuple: projectVersionTuple(project), terrain } }
 }
