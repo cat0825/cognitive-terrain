@@ -147,9 +147,22 @@ test('disables knowledge-gap claims until a reference atlas is selected', async 
 
   const gaps = page.getByRole('region', { name: '参考图谱知识缺口' })
   await expect(gaps).toBeVisible()
+  // The demo ships with its atlas selected, so the disabled state is reached the way
+  // a user reaches it: by explicitly deselecting.
+  await gaps.getByRole('combobox', { name: '选择参考图谱' }).selectOption('')
   await expect(gaps).toContainText('未选择参考图谱')
   await expect(gaps).toContainText('活动低不等于知识缺口')
   await expect(gaps.locator('.reference-gap-item')).toHaveCount(0)
+  await expect(page.getByRole('complementary', { name: '参考图谱海洋图层' })).toBeHidden()
+
+  // An explicit deselect has to survive a reload rather than falling back to the
+  // project's own selection.
+  await page.reload()
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: '打开知识概览' }).click()
+  await expect(page.getByRole('region', { name: '参考图谱知识缺口' })
+    .getByRole('combobox', { name: '选择参考图谱' })).toHaveValue('')
+  await expect(page.getByRole('complementary', { name: '参考图谱海洋图层' })).toBeHidden()
   expect(errors).toEqual([])
 })
 

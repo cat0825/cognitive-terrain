@@ -25,7 +25,10 @@ describe('AI Infra demo project', () => {
     })])
     expect(first.taxonomyNodes).toHaveLength(8)
     expect(first.referenceAtlases?.[0]?.taxonomyNodeIds).toHaveLength(7)
-    expect(first.activeReferenceAtlasId).toBeUndefined()
+    // The demo is the one project that declares its own atlas as selected, so the
+    // ocean / gap layer is demonstrable without a manual pick. Imported projects
+    // still start unselected — a gap claim needs an explicit reference atlas.
+    expect(first.activeReferenceAtlasId).toBe('demo-ai-infra-reference-atlas')
     expect(second.notes.map(({ x, y }) => [x, y])).toEqual(first.notes.map(({ x, y }) => [x, y]))
     expect(second.notes.map((note) => note.weight)).toEqual(first.notes.map((note) => note.weight))
   }, 15_000)

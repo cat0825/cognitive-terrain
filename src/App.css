@@ -39,7 +39,9 @@
   position: absolute;
   z-index: 32;
   bottom: 19px;
-  left: 22%;
+  /* Anchored to the stage edge, not to a percentage: a percentage left edge plus a
+     fixed dock width collided with .timeline-control (left: 33%) below ~1280px. */
+  left: 18px;
   height: 31px;
   display: flex;
   align-items: center;
@@ -587,15 +589,21 @@
   background: rgba(20, 20, 20, 0.72);
 }
 
+/* Docked to the right gutter instead of floating over the middle of the terrain:
+   the panel is a reading surface, so it should not cover the map it describes.
+   right: 48px leaves the 34px .camera-rail (right: 8px) reachable, matching the
+   gutter .filter-panel already uses; top: 84px clears the 地形语义 toggle, which
+   TerrainSemanticsLegend pins to top: 50px in the same gutter. */
 .note-detail {
   position: absolute;
   z-index: 31;
-  top: 51%;
-  left: 35.4%;
-  width: 220px;
+  top: 84px;
+  right: 48px;
+  bottom: 60px;
+  width: 296px;
   min-height: 118px;
-  max-height: 176px;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 13px 14px 12px;
   border: 1px solid #2d2d2d;
   border-radius: 3px;
@@ -604,8 +612,17 @@
 }
 
 .note-detail--overview {
-  width: min(320px, calc(100vw - 28px));
-  max-height: min(72vh, 640px);
+  width: 320px;
+}
+
+/* Both panels want the right gutter. The detail sidebar owns it while open, so the
+   filter panel steps aside instead of stacking on top of it. */
+.note-detail ~ .filter-panel {
+  right: 352px;
+}
+
+.note-detail--overview ~ .filter-panel {
+  right: 376px;
 }
 
 .note-detail > header,
@@ -617,10 +634,16 @@
   gap: 12px;
 }
 
+/* Sticky rather than absolute: the sidebar is tall enough to scroll, and the close
+   button has to stay reachable at the top of it. */
 .note-detail > header {
-  position: absolute;
-  top: 6px;
-  right: 6px;
+  position: sticky;
+  top: -13px;
+  z-index: 2;
+  justify-content: flex-end;
+  margin: -13px -14px 4px;
+  padding: 7px 6px 5px;
+  background: rgba(28, 28, 28, 0.97);
 }
 
 .detail-header-actions {
@@ -3628,7 +3651,9 @@
     background: #444;
   }
 
-  .filter-panel {
+  .filter-panel,
+  .note-detail ~ .filter-panel,
+  .note-detail--overview ~ .filter-panel {
     top: auto;
     right: 10px;
     bottom: 10px;

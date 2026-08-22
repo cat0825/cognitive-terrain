@@ -61,7 +61,10 @@ export function TerrainSemanticsLegend({
 }
 
 const styles: Record<string, CSSProperties> = {
-  open: { zIndex: 29, top: 188, right: 48, bottom: 'auto', left: 'auto', width: 'min(268px, calc(100vw - 80px))', maxHeight: 'calc(100dvh - 250px)', overflow: 'auto', pointerEvents: 'auto', font: '8px/1.4 var(--mono)' },
+  // zIndex 32 keeps the expanded legend above the .note-detail sidebar (31), which
+  // occupies the same right gutter: a popover the user just opened has to be
+  // readable and closable rather than buried under the panel it explains.
+  open: { zIndex: 32, top: 188, right: 48, bottom: 'auto', left: 'auto', width: 'min(268px, calc(100vw - 80px))', maxHeight: 'calc(100dvh - 250px)', overflow: 'auto', pointerEvents: 'auto', font: '8px/1.4 var(--mono)' },
   closed: { zIndex: 29, top: 50, right: 48, bottom: 'auto', left: 'auto', width: 'auto', display: 'flex', padding: 0, border: 0, background: 'none', boxShadow: 'none', backdropFilter: 'none', pointerEvents: 'auto', font: '8px/1.4 var(--mono)' },
   toggle: { height: 27, display: 'flex', alignItems: 'center', gap: 5, padding: '0 7px', border: '1px solid #343432', borderRadius: 3, color: '#aaa9a4', background: '#181817', font: 'inherit', cursor: 'pointer' },
   openToggle: { width: 26, height: 27, marginLeft: 'auto', padding: 0, border: 0, color: '#aaa9a4', background: 'transparent', cursor: 'pointer' },

@@ -948,6 +948,7 @@ function PeakField({
     [geometry],
   )
   const lastTimeline = useRef(Number.NaN)
+  const lastGeometry = useRef<BufferGeometry | null>(null)
   const nextLabelUpdate = useRef(0)
   const zoomTier = useRef<PeakLabelZoomTier>('medium')
   const projectedView = useRef({
@@ -967,7 +968,14 @@ function PeakField({
   })
   useFrame(({ camera, clock, gl, size }) => {
     const timeline = getLiveTimeline()
-    if (timeline !== lastTimeline.current) {
+    // buildPeakGeometry fills strength and seed only, so a rebuilt geometry arrives
+    // with a zero-filled position buffer and the block below is the only writer.
+    // Selecting a note or switching the visual dimension replaces `notes`/`peaks`,
+    // so without this check the timeline guard skips the refill, every peak stays at
+    // the world origin, and the label layout collapses every label onto one point.
+    const geometryChanged = lastGeometry.current !== geometry
+    if (geometryChanged) lastGeometry.current = geometry
+    if (geometryChanged || timeline !== lastTimeline.current) {
       const frame = resolveSnapshotFrame(snapshots, timeline)
       for (let index = 0; index < peaks.length; index += 1) {
         const peak = peaks[index]
@@ -1012,7 +1020,10 @@ function PeakField({
     const hasUnpositionedLabel = labels.current.some(
       (label) => label !== null && label.style.transform.length === 0,
     )
-    if ((!projectionChanged && !hasUnpositionedLabel) || clock.elapsedTime < nextLabelUpdate.current) return
+    // Positions that were just refilled have to be re-laid out on the same frame,
+    // so a geometry rebuild bypasses the projection guard and the label throttle.
+    const needsRelayout = projectionChanged || hasUnpositionedLabel
+    if (!geometryChanged && (!needsRelayout || clock.elapsedTime < nextLabelUpdate.current)) return
 
     const candidates: PeakLabelCandidate[] = []
     for (let index = 0; index < peaks.length; index += 1) {

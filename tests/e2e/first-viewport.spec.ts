@@ -50,16 +50,28 @@ test('opens a bounded detail sheet and restores focus on dismiss', async ({ page
   await page.keyboard.press('Enter')
 
   const detail = page.locator('.note-detail')
+  const stage = page.locator('.terrain-stage')
   const closeDetail = page.getByRole('button', { name: '关闭详情' })
   await expect(detail).toBeVisible()
   await expect(closeDetail).toBeFocused()
   await expect(page.getByRole('region', { name: '邻居证据' })).toContainText('2D UMAP approximate distance')
   await expect(page.getByLabel('领域归属').locator('span')).toHaveCount(2)
   const detailBox = await detail.boundingBox()
+  const stageBox = await stage.boundingBox()
   const viewport = page.viewportSize()
   expect(detailBox).not.toBeNull()
+  expect(stageBox).not.toBeNull()
   expect(viewport).not.toBeNull()
-  expect(detailBox!.height).toBeLessThanOrEqual(viewport!.height * 0.55)
+  if (testInfo.project.name === 'mobile') {
+    // Mobile keeps the bottom sheet: it has to leave most of the terrain visible.
+    expect(detailBox!.height).toBeLessThanOrEqual(viewport!.height * 0.55)
+  } else {
+    // Desktop docks the panel as a right sidebar, so "bounded" means it stays inside
+    // the stage and scrolls internally rather than that it stays short.
+    expect(detailBox!.y).toBeGreaterThanOrEqual(stageBox!.y - 0.5)
+    expect(detailBox!.y + detailBox!.height).toBeLessThanOrEqual(stageBox!.y + stageBox!.height + 0.5)
+    expect(detailBox!.x + detailBox!.width).toBeLessThanOrEqual(stageBox!.x + stageBox!.width + 0.5)
+  }
   await expectNoHorizontalOverflow(page)
   await captureState(page, testInfo.project.name, 'detail-open')
 

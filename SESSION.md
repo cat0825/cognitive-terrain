@@ -1,6 +1,6 @@
-# Handoff 2026-08-21 18:05 +08:00
+# Handoff 2026-08-22 17:55 +08:00
 
-> **这是快照，不是状态源。** 本文件对应远端 `origin/main` commit `dc0ecd1eccdd59e66cfe1ed4b72c56856466620c`。
+> **这是快照，不是状态源。** 本文件对应远端 `origin/main` commit `c946d79f0d6f1e5dc45aa7d607f2f6f7e2842c0a`。
 > 任何"当前状态"判断都必须重新执行 `git fetch --prune origin`、`git status`、`gh pr list`、`gh issue list`；
 > 与现场冲突时以现场为准。禁止在 PR、Issue 或 review 中把本文件当作现状依据。
 > 约定来源见 [`docs/review/findings-ledger.md`](docs/review/findings-ledger.md) 的"交接文档约定"。
@@ -26,16 +26,22 @@ H1-H3、M1-M4、L1-L2 逐条状态见 [`docs/review/findings-ledger.md`](docs/re
 | perf 门禁自启动并进 CI | #45 | PR #61/#62/#63 |
 | core/derived 拆分与版本元组 | #49 | PR #66 `fa0e60c`（ADR-005） |
 | 视觉维度契约与准入门禁 | #50 | PR #67 `dc0ecd1`（ADR-006） |
-| 审查台账与依赖决策 | #48 | 本次工作 |
+| 审查台账与依赖决策 | #48 | PR #68 `c946d79` |
+| 用户实测的五个界面问题 | — | 本次工作，分支 `fix/reported-ui-regressions` |
 
 ## 门禁
 
-本地在 `dc0ecd1` 实测：typecheck、lint、`npm test` 45 files / 336 tests、build、
-`size:check` 主包 352.0 KiB、`test:e2e --project=desktop` 21 passed / 1 skipped、
-`test:a11y` 16 passed、`test:visual` 4 passed、`test:perf` ok。
+本地在 `fix/reported-ui-regressions` 实测：typecheck、lint、`npm test` 47 files / 348 tests、build、
+`size:check` 主包 352.0 KiB / CSS 48.9 KiB、`test:e2e` 48 passed / 4 skipped、
+`test:a11y` 16 passed、`test:visual` 4 passed（darwin 基线已重录）、`test:perf` ok。
 
-CI 在 PR #67 上 changes / quality / e2e desktop 1-4 / e2e mobile 1-2 / a11y / visual 全绿，
-perf 因纯语义层改动被 skip。
+**visual 门禁在本分支会红**：6 个 darwin 基线因布局改动全部重录，linux 那份只能从
+CI 自己的渲染结果取，步骤见 [`tests/visual/baselines/README.md`](tests/visual/baselines/README.md)
+的"Refreshing the platform you are not on"。不要用 Playwright 容器补录 —— CI 跑的是裸
+`ubuntu-latest`，字体集不同，`ci.yml` 里已记录仅字体差异就能把 ratio 推到 0.0055。
+
+CI 最后一次全绿是 PR #67（changes / quality / e2e desktop 1-4 / e2e mobile 1-2 / a11y / visual，
+perf 因纯语义层改动被 skip）。本分支尚未推送，CI 未跑过。
 
 ## 已知边界
 
@@ -44,6 +50,9 @@ perf 因纯语义层改动被 skip。
 - 导入上限 2,000 条；10k/50k 规模未验证，见台账 A4。
 - a11y 本地并行满跑偶发单用例 flake，单独重跑与 CI 均通过，见台账 A3。
 - `output/` 与 `*.tmp.mjs` 已全部 ignore，决策见台账"`output/` 目录决策"。
+- demo 数据里 `interactionEvents` 为空、`cognitiveObservations` 只覆盖前 2 条笔记，
+  所以「温度」和「学习进程」两个维度在 demo 里偏平。这是 fixture 数据空缺，不是维度实现缺陷：
+  8 个维度都已验证留在 3D 画布且标签不塌陷（`tests/e2e/reported-ui-regressions.spec.ts`）。
 
 ## 风险/红线
 

@@ -338,8 +338,9 @@ export const useAppStore = create<AppState>((set, get) => {
     const project = { ...current, activeReferenceAtlasId: nextId, updatedAt: new Date().toISOString() }
     const preferenceKey = `${REFERENCE_ATLAS_PREFERENCE_PREFIX}${project.id}`
     const previousPreference = localStorage.getItem(preferenceKey)
-    if (nextId) localStorage.setItem(preferenceKey, nextId)
-    else localStorage.removeItem(preferenceKey)
+    // '' records an explicit "no atlas" so a reload does not fall back to the
+    // project's own selection. See applyStoredReferenceAtlasPreference.
+    localStorage.setItem(preferenceKey, nextId ?? '')
     // Atlas selection is a view preference. Update the in-memory project first so
     // the map and detail report respond immediately; persistence can finish in the
     // background without making the user wait for a full materialization rewrite.
@@ -1030,8 +1031,16 @@ function setProjectState(set: (partial: Partial<AppState>) => void, project: Ter
 }
 
 function applyStoredReferenceAtlasPreference(project: TerrainProject): TerrainProject {
-  const stored = localStorage.getItem(`${REFERENCE_ATLAS_PREFERENCE_PREFIX}${project.id}`) ?? undefined
-  const activeReferenceAtlasId = normalizeActiveReferenceAtlasId(project.referenceAtlases, stored)
+  // A missing key means "never chose", which leaves the project's own selection
+  // standing — the demo project ships with its reference atlas selected. An empty
+  // string is an explicit "no atlas" and has to survive a reload, so deselecting
+  // writes the sentinel instead of dropping the key.
+  const stored = localStorage.getItem(`${REFERENCE_ATLAS_PREFERENCE_PREFIX}${project.id}`)
+  const requested = stored === null ? project.activeReferenceAtlasId : stored
+  const activeReferenceAtlasId = normalizeActiveReferenceAtlasId(
+    project.referenceAtlases,
+    requested || undefined,
+  )
   return activeReferenceAtlasId === project.activeReferenceAtlasId
     ? project
     : { ...project, activeReferenceAtlasId }
