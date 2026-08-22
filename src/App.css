@@ -2387,7 +2387,10 @@
   margin: 7px 0 0;
 }
 
-.prerequisite-legend {
+/* Both legends are coverage summaries under the dimension help text, so they share
+   one separator and typography rather than each inventing a legend look. */
+.prerequisite-legend,
+.progression-legend {
   display: grid;
   gap: 6px;
   margin-top: 10px;
@@ -2401,17 +2404,12 @@
   gap: 5px;
 }
 
-.prerequisite-scale span,
-.prerequisite-legend p,
-.prerequisite-legend small {
-  color: #8b8b87;
-  font: 8px/1.45 var(--mono);
-}
-
 .prerequisite-scale span {
   display: flex;
   align-items: center;
   gap: 5px;
+  color: #8b8b87;
+  font: 8px/1.45 var(--mono);
 }
 
 .prerequisite-scale i {
@@ -2426,9 +2424,12 @@
 .prerequisite-scale .is-peak { background: #e5a84b; }
 
 .prerequisite-legend p,
-.prerequisite-legend small {
+.prerequisite-legend small,
+.progression-legend p,
+.progression-legend small {
   margin: 0;
   color: #696966;
+  font: 8px/1.45 var(--mono);
 }
 
 .prerequisite-evidence {

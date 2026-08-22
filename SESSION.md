@@ -32,7 +32,7 @@ H1-H3、M1-M4、L1-L2 逐条状态见 [`docs/review/findings-ledger.md`](docs/re
 ## 门禁
 
 本地在 `fix/reported-ui-regressions` 实测：typecheck、lint、`npm test` 47 files / 348 tests、build、
-`size:check` 主包 352.0 KiB / CSS 48.9 KiB、`test:e2e` 48 passed / 4 skipped、
+`size:check` 主包 352.7 KiB / JS 总量 2375.0 KiB / CSS 49.0 KiB、`test:e2e` 48 passed / 4 skipped、
 `test:a11y` 16 passed、`test:visual` 4 passed（darwin 基线已重录）、`test:perf` ok。
 
 **visual 门禁在本分支会红**：6 个 darwin 基线因布局改动全部重录，linux 那份只能从
@@ -53,6 +53,12 @@ perf 因纯语义层改动被 skip）。本分支尚未推送，CI 未跑过。
 - demo 数据里 `interactionEvents` 为空、`cognitiveObservations` 只覆盖前 2 条笔记，
   所以「温度」和「学习进程」两个维度在 demo 里偏平。这是 fixture 数据空缺，不是维度实现缺陷：
   8 个维度都已验证留在 3D 画布且标签不塌陷（`tests/e2e/reported-ui-regressions.spec.ts`）。
+  「学习进程」现在带覆盖度图例（`2 条有显式观测 · 1798 条回落中性海拔`），把"平"说成数据事实而不是留给用户猜。
+  补 demo 事件解决不了「温度」：fixture 时间戳钉在 `2025-12-31`，隔 235 天后 `opened` 热度衰减到
+  `0.5^33.6 ≈ 7e-11`，照样是平的；要让它有起伏就得用 `Date.now()` 相对时间，
+  那会破坏 `src/domain/activity-elevation.ts:17` 要求的确定性和视觉基线，因此没做。
+- `size:check` 目前**三项都顶在预算线上**（JS 2375.0/2375、CSS 49.0/49）。下一个改动只要增体积就会红；
+  届时请在 `scripts/size-budget.mjs` 里连同"是什么吃掉的"一起抬，不要静默放宽。
 
 ## 风险/红线
 
